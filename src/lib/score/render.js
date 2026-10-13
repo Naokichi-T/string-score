@@ -1,7 +1,7 @@
 // ==========================================================
 // render.js
 // 楽譜データを VexFlow で五線譜に描くファイル
-// （ステップ2-3：複数パート・1段。音部記号・調号・拍子の途中変更まで。改行は後で追加）
+// （ステップ2-4：複数パート・自動の改行・タイトルと作曲者まで）
 // ==========================================================
 
 import { DURATIONS, CLEFS, pitchToVexKey } from "./model.js";
@@ -10,14 +10,18 @@ import { computeAccidentals } from "./accidentals.js";
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
 // ----------------------------------------------------------
-const LEFT = 10; // 左の余白
-const NAME_WIDTH = 80; // パート名を書くための幅
-const TOP = 40; // 上の余白（五線の上に飛び出す音符のぶん）
+const LEFT = 10; // 左右の余白
+const NAME_WIDTH_FIRST = 80; // 1段目のパート名（フルネーム）を書くための幅
+const NAME_WIDTH_OTHER = 70; // 2段目以降のパート名（短い名前）を書くための幅
+const TITLE_AREA = 80; // タイトルと作曲者を書く場所の高さ
+const TOP = 30; // 段の上の余白（五線の上に飛び出す音符のぶん）
 const PART_SPACING = 110; // パートとパートの五線の間隔（上の五線の上端から下の五線の上端まで）
-const BOTTOM = 70; // 下の余白（一番下の五線の下に飛び出す音符のぶん）
+const SYSTEM_GAP = 150; // 段と段の間隔（上の段の一番下の五線の上端から、下の段の一番上の五線の上端まで）
+const BOTTOM = 130; // 一番下の余白（五線の下に飛び出す音符のぶん）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
+const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
 
 // ----------------------------------------------------------
 // 関数：timeToString
@@ -135,31 +139,105 @@ function buildStates(score) {
 // ----------------------------------------------------------
 // 関数：addModifiers
 // 小節の頭に付ける記号（音部記号・調号・拍子記号）を五線に付ける
-//   VF     … VexFlow の部品一式
-//   stave  … 記号を付ける五線
-//   state  … その小節の状態（buildStates で作ったもの）
-//   p      … パートの番号（0 が一番上）
-//   isFirst … 楽譜の最初の小節なら true
+//   VF          … VexFlow の部品一式
+//   stave       … 記号を付ける五線
+//   state       … その小節の状態（buildStates で作ったもの）
+//   p           … パートの番号（0 が一番上）
+//   isLineStart … 段の最初の小節なら true
+//   isFirst     … 楽譜の最初の小節なら true
 // ----------------------------------------------------------
-function addModifiers(VF, stave, state, p, isFirst) {
-  // 音部記号：最初の小節はふつうの大きさ、途中で変わるときは少し小さめ
-  if (state.clefChanged[p]) {
-    stave.addClef(CLEFS[state.clefs[p]].vf, isFirst ? "default" : "small");
+function addModifiers(VF, stave, state, p, isLineStart, isFirst) {
+  // 音部記号
+  //   段の頭 → いつもふつうの大きさで付ける
+  //   段の途中で変わる → 少し小さめで付ける
+  if (isLineStart) {
+    stave.addClef(CLEFS[state.clefs[p]].vf, "default");
+  } else if (state.clefChanged[p]) {
+    stave.addClef(CLEFS[state.clefs[p]].vf, "small");
   }
 
-  // 調号：途中で変わるときは、前の調号の記号を♮で消す
-  if (state.keyChanged) {
-    if (isFirst) {
-      stave.addKeySignature(keyToVexKey(state.key));
-    } else {
-      stave.addKeySignature(keyToVexKey(state.key), keyToVexKey(state.prevKey));
-    }
+  // 調号
+  //   途中で変わる → 前の調号の記号を♮で消してから新しい調号
+  //   段の頭（変わらない）→ 今の調号をそのまま付ける
+  if (state.keyChanged && !isFirst) {
+    stave.addKeySignature(keyToVexKey(state.key), keyToVexKey(state.prevKey));
+  } else if (isLineStart) {
+    stave.addKeySignature(keyToVexKey(state.key));
   }
 
-  // 拍子記号
+  // 拍子記号（変わる小節だけ。最初の小節は変わる扱い）
   if (state.timeChanged) {
     stave.addTimeSignature(timeToString(state.time));
   }
+}
+
+// ----------------------------------------------------------
+// 関数：measureModifierWidth
+// 小節の頭の記号（音部記号・調号・拍子記号）の幅を、全パートの中で一番広いもので測る
+// （試しの五線を作って、記号を付けたときに音符がどこから始まるかを見る）
+// ----------------------------------------------------------
+function measureModifierWidth(VF, state, partCount, isLineStart, isFirst) {
+  let maxWidth = 0;
+  for (let p = 0; p < partCount; p++) {
+    const testStave = new VF.Stave(0, 0, 500);
+    addModifiers(VF, testStave, state, p, isLineStart, isFirst);
+    const width = testStave.getNoteStartX() - testStave.getX();
+    if (width > maxWidth) maxWidth = width;
+  }
+  return maxWidth;
+}
+
+// ----------------------------------------------------------
+// 関数：layoutLines
+// 小節をどの段に置くかを決める（改行の位置を決める）
+//   noteWidths     … 小節ごとの「音符のための幅」の配列
+//   startWidths    … 小節ごとの「段の頭に来たときの記号の幅」の配列
+//   middleWidths   … 小節ごとの「段の途中に来たときの記号の幅」の配列
+//   firstLineWidth … 1段目で小節に使える幅
+//   otherLineWidth … 2段目以降で小節に使える幅
+// 戻り値：段ごとの配列。それぞれ { measures: [小節の番号...], widths: [幅...] }
+// ----------------------------------------------------------
+function layoutLines(noteWidths, startWidths, middleWidths, firstLineWidth, otherLineWidth) {
+  const lines = [];
+  let current = { measures: [], widths: [] }; // 今詰めている段
+  let used = 0; // 今の段で使った幅
+
+  for (let i = 0; i < noteWidths.length; i++) {
+    // 今の段に使える幅（1段目かどうかで変わる）
+    const available = lines.length === 0 ? firstLineWidth : otherLineWidth;
+
+    // この小節を今の段の続きに置いたときの幅
+    const isLineStart = current.measures.length === 0;
+    const width = noteWidths[i] + (isLineStart ? startWidths[i] : middleWidths[i]);
+
+    if (!isLineStart && used + width > available) {
+      // 入らないので改行する：今の段を確定して、新しい段の頭に置く
+      lines.push(current);
+      current = { measures: [], widths: [] };
+      const startWidth = noteWidths[i] + startWidths[i];
+      current.measures.push(i);
+      current.widths.push(startWidth);
+      used = startWidth;
+    } else {
+      // 入るので今の段に置く（段の頭なら、入らなくても1小節は置く）
+      current.measures.push(i);
+      current.widths.push(width);
+      used = used + width;
+    }
+  }
+  // 最後の段を確定する
+  if (current.measures.length > 0) lines.push(current);
+
+  // 最後の段以外は、段の幅ぴったりになるよう小節の幅を同じ割合で広げる
+  lines.forEach((line, l) => {
+    if (l === lines.length - 1) return; // 最後の段は広げない
+    const available = l === 0 ? firstLineWidth : otherLineWidth;
+    const total = line.widths.reduce((sum, w) => sum + w, 0);
+    const ratio = available / total;
+    line.widths = line.widths.map((w) => w * ratio);
+  });
+
+  return lines;
 }
 
 // ----------------------------------------------------------
@@ -168,10 +246,14 @@ function addModifiers(VF, stave, state, p, isFirst) {
 //   VF        … VexFlow の部品一式（import したもの）
 //   container … 描く先の HTML の要素（div）
 //   score     … 楽譜データ
+//   width     … 楽譜全体の幅（画面の幅に合わせる）
 // ----------------------------------------------------------
-export function renderScore(VF, container, score) {
+export function renderScore(VF, container, score, width) {
   // 前に描いたものを消す
   container.innerHTML = "";
+
+  // 狭すぎるときは最低限の幅にする
+  const totalWidth = Math.max(width, MIN_WIDTH);
 
   const partCount = score.parts.length; // パートの数
   const measureCount = score.measures.length; // 小節の数
@@ -192,150 +274,178 @@ export function renderScore(VF, container, score) {
     });
   });
 
-  // ----- 3. 小節の幅を決める（全パートの中で一番広く必要なパートに合わせる） -----
-  const widths = [];
+  // ----- 3. 小節ごとに必要な幅を計算する -----
+  const noteWidths = []; // 音符のための幅（全パートの中で一番広いもの）
+  const startWidths = []; // 段の頭に来たときの記号の幅
+  const middleWidths = []; // 段の途中に来たときの記号の幅
   for (let i = 0; i < measureCount; i++) {
-    let maxWidth = 0;
+    // 音符と臨時記号の幅
+    let maxNotes = 0;
     for (let p = 0; p < partCount; p++) {
-      // 記号（音部記号・調号・拍子記号）の幅を、試しの五線を作って測る
-      const testStave = new VF.Stave(0, 0, 500);
-      addModifiers(VF, testStave, states[i], p, i === 0);
-      const modifierWidth = testStave.getNoteStartX() - testStave.getX();
-
-      // 音符と臨時記号の幅
       const notes = score.parts[p].measures[i].notes;
       const accCount = accidentalsList[p][i].filter((a) => a !== null).length;
-      const notesWidth = notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH;
-
-      const width = modifierWidth + MEASURE_BASE_WIDTH + notesWidth;
-      if (width > maxWidth) maxWidth = width;
+      const w = MEASURE_BASE_WIDTH + notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH;
+      if (w > maxNotes) maxNotes = w;
     }
-    widths.push(maxWidth);
+    noteWidths.push(maxNotes);
+
+    // 記号の幅（段の頭のときと、途中のときの2通り）
+    startWidths.push(measureModifierWidth(VF, states[i], partCount, true, i === 0));
+    middleWidths.push(measureModifierWidth(VF, states[i], partCount, false, i === 0));
   }
 
-  // 全体の大きさ
-  const scoreLeft = LEFT + NAME_WIDTH; // 五線が始まる横の位置
-  const totalWidth = scoreLeft + widths.reduce((sum, w) => sum + w, 0) + LEFT;
-  const totalHeight = TOP + PART_SPACING * (partCount - 1) + BOTTOM + 40;
+  // ----- 4. 改行の位置を決める -----
+  const firstLeft = LEFT + NAME_WIDTH_FIRST; // 1段目の五線が始まる横の位置
+  const otherLeft = LEFT + NAME_WIDTH_OTHER; // 2段目以降の五線が始まる横の位置
+  const lines = layoutLines(noteWidths, startWidths, middleWidths, totalWidth - firstLeft - LEFT, totalWidth - otherLeft - LEFT);
+
+  // 1つの段の高さ（一番上の五線の上端から、次の段の一番上の五線の上端まで）
+  const systemHeight = PART_SPACING * (partCount - 1) + SYSTEM_GAP;
+  // タイトルか作曲者があるときだけ、上に場所を空ける
+  const hasHeader = !!(score.title || score.composer);
+  const headerHeight = hasHeader ? TITLE_AREA : 0;
+  // 全体の高さ
+  const totalHeight = headerHeight + TOP + systemHeight * (lines.length - 1) + PART_SPACING * (partCount - 1) + BOTTOM;
 
   // SVG で描く準備
   const renderer = new VF.Renderer(container, VF.Renderer.Backends.SVG);
   renderer.resize(totalWidth, totalHeight);
   const context = renderer.getContext();
 
-  // ----- 4. 小節ごとに描く -----
-  // 次の小節を描き始める横の位置
-  let x = scoreLeft;
-
-  // タイを描くために、作った音符をパートごとに全部ためておく（小節をまたぐタイのため）
-  // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ }
-  const allNotes = score.parts.map(() => []);
-
-  // 最初の小節の五線（括弧とパート名を描くのに使う）
-  let firstStaves = [];
-
-  for (let i = 0; i < measureCount; i++) {
-    const state = states[i];
-    const isFirst = i === 0;
-    const isLast = i === measureCount - 1;
-
-    // 次の小節で調が変わるなら、この小節の終わりを複縦線にする
-    const nextKeyChanges = !isLast && states[i + 1].keyChanged;
-
-    // --- 4-1. パートごとに五線を作り、記号を付ける ---
-    const staves = score.parts.map((part, p) => {
-      const y = TOP + PART_SPACING * p;
-      const stave = new VF.Stave(x, y, widths[i]);
-      addModifiers(VF, stave, state, p, isFirst);
-
-      // 小節の終わりの線の種類
-      if (isLast) {
-        stave.setEndBarType(VF.Barline.type.END); // 曲の終わり（細い線＋太い線）
-      } else if (nextKeyChanges) {
-        stave.setEndBarType(VF.Barline.type.DOUBLE); // 複縦線
-      }
-      return stave;
-    });
-
-    // 全パートで、音符が始まる位置をそろえる
-    // （音部記号が変わるパートだけ記号の幅が広い、などのずれをなくす）
-    VF.Stave.formatBegModifiers(staves);
-
-    // 五線を描く
-    staves.forEach((stave) => stave.setContext(context).draw());
-
-    // --- 4-2. パートごとに音符を作る ---
-    const voices = [];
-    const beamsList = [];
-    score.parts.forEach((part, p) => {
-      const measure = part.measures[i];
-      const notes = measure.notes.map((note, j) => {
-        const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
-        allNotes[p].push({ staveNote: staveNote, data: note });
-        return staveNote;
-      });
-
-      // 音符を1小節分まとめる「声部（Voice）」を作る
-      const voice = new VF.Voice({ numBeats: state.time.beats, beatValue: state.time.beatType });
-      voice.addTickables(notes);
-      voices.push(voice);
-
-      // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて自動で作る
-      const beams = VF.Beam.generateBeams(notes, {
-        groups: VF.Beam.getDefaultBeamGroups(timeToString(state.time)),
-      });
-      beamsList.push(beams);
-    });
-
-    // --- 4-3. 全パートの音符の横の位置をそろえて並べる ---
-    const formatter = new VF.Formatter();
-    voices.forEach((voice) => formatter.joinVoices([voice]));
-    const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - 10;
-    formatter.format(voices, noteAreaWidth);
-
-    // 音符と連桁を描く
-    voices.forEach((voice, p) => voice.draw(context, staves[p]));
-    beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
-
-    // --- 4-4. 小節線を全パートつなげる ---
-    const topStave = staves[0];
-    const bottomStave = staves[partCount - 1];
-    let connectorType = VF.StaveConnector.type.SINGLE_RIGHT; // ふつうの小節線
-    if (isLast) {
-      connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり
-    } else if (nextKeyChanges) {
-      connectorType = VF.StaveConnector.type.THIN_DOUBLE; // 複縦線
-    }
-    new VF.StaveConnector(topStave, bottomStave).setType(connectorType).setContext(context).draw();
-
-    if (isFirst) firstStaves = staves;
-
-    // 次の小節の位置へ進む
-    x = x + widths[i];
-  }
-
-  // ----- 5. 左端の線・括弧・パート名を描く -----
-  const firstTop = firstStaves[0];
-  const firstBottom = firstStaves[partCount - 1];
-  // 左端の縦線（全パートをつなぐ）
-  new VF.StaveConnector(firstTop, firstBottom).setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(context).draw();
-  // 角ばった括弧（ブラケット）。パートが2つ以上のときだけ
-  if (partCount > 1) {
-    new VF.StaveConnector(firstTop, firstBottom).setType(VF.StaveConnector.type.BRACKET).setContext(context).draw();
-  }
-  // パート名（五線のまん中の高さに、右寄せで書く）
+  // ----- 5. タイトルと作曲者を描く -----
   context.save();
-  context.setFont("Academico", 14);
-  score.parts.forEach((part, p) => {
-    const stave = firstStaves[p];
-    const textWidth = context.measureText(part.name).width;
-    const textX = scoreLeft - 14 - textWidth; // 括弧とぶつからないように少し離す
-    const textY = stave.getYForLine(2) + 5; // 第3線（まん中の線）の高さ
-    context.fillText(part.name, textX, textY);
-  });
+  if (score.title) {
+    context.setFont("Academico", 24, "bold");
+    const titleWidth = context.measureText(score.title).width;
+    context.fillText(score.title, (totalWidth - titleWidth) / 2, 40); // 中央
+  }
+  if (score.composer) {
+    context.setFont("Academico", 14);
+    const composerWidth = context.measureText(score.composer).width;
+    context.fillText(score.composer, totalWidth - LEFT - composerWidth, 68); // 右寄せ
+  }
   context.restore();
 
-  // ----- 6. タイを描く（パートごと） -----
+  // タイを描くために、作った音符をパートごとに全部ためておく（小節・段をまたぐタイのため）
+  // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ, line: 何段目か }
+  const allNotes = score.parts.map(() => []);
+
+  // ----- 6. 段ごとに描く -----
+  lines.forEach((line, l) => {
+    const isFirstLine = l === 0;
+    const lineTop = headerHeight + TOP + systemHeight * l; // この段の一番上の五線の上端
+    let x = isFirstLine ? firstLeft : otherLeft; // 次の小節を描き始める横の位置
+
+    // この段の最初の小節の五線（括弧とパート名を描くのに使う）
+    let lineStartStaves = [];
+
+    line.measures.forEach((i, m) => {
+      const state = states[i];
+      const isFirst = i === 0; // 楽譜の最初の小節か
+      const isLast = i === measureCount - 1; // 楽譜の最後の小節か
+      const isLineStart = m === 0; // 段の最初の小節か
+      const measureWidth = line.widths[m];
+
+      // 次の小節で調が変わるなら、この小節の終わりを複縦線にする
+      const nextKeyChanges = !isLast && states[i + 1].keyChanged;
+
+      // --- 6-1. パートごとに五線を作り、記号を付ける ---
+      const staves = score.parts.map((part, p) => {
+        const y = lineTop + PART_SPACING * p;
+        const stave = new VF.Stave(x, y, measureWidth);
+        addModifiers(VF, stave, state, p, isLineStart, isFirst);
+
+        // 小節の終わりの線の種類
+        if (isLast) {
+          stave.setEndBarType(VF.Barline.type.END); // 曲の終わり（細い線＋太い線）
+        } else if (nextKeyChanges) {
+          stave.setEndBarType(VF.Barline.type.DOUBLE); // 複縦線
+        }
+        return stave;
+      });
+
+      // 全パートで、音符が始まる位置をそろえる
+      // （音部記号が変わるパートだけ記号の幅が広い、などのずれをなくす）
+      VF.Stave.formatBegModifiers(staves);
+
+      // 五線を描く
+      staves.forEach((stave) => stave.setContext(context).draw());
+
+      // --- 6-2. パートごとに音符を作る ---
+      const voices = [];
+      const beamsList = [];
+      score.parts.forEach((part, p) => {
+        const measure = part.measures[i];
+        const notes = measure.notes.map((note, j) => {
+          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
+          allNotes[p].push({ staveNote: staveNote, data: note, line: l });
+          return staveNote;
+        });
+
+        // 音符を1小節分まとめる「声部（Voice）」を作る
+        const voice = new VF.Voice({ numBeats: state.time.beats, beatValue: state.time.beatType });
+        voice.addTickables(notes);
+        voices.push(voice);
+
+        // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて自動で作る
+        const beams = VF.Beam.generateBeams(notes, {
+          groups: VF.Beam.getDefaultBeamGroups(timeToString(state.time)),
+        });
+        beamsList.push(beams);
+      });
+
+      // --- 6-3. 全パートの音符の横の位置をそろえて並べる ---
+      const formatter = new VF.Formatter();
+      voices.forEach((voice) => formatter.joinVoices([voice]));
+      const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - 10;
+      formatter.format(voices, noteAreaWidth);
+
+      // 音符と連桁を描く
+      voices.forEach((voice, p) => voice.draw(context, staves[p]));
+      beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
+
+      // --- 6-4. 小節線を全パートつなげる ---
+      const topStave = staves[0];
+      const bottomStave = staves[partCount - 1];
+      let connectorType = VF.StaveConnector.type.SINGLE_RIGHT; // ふつうの小節線
+      if (isLast) {
+        connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり
+      } else if (nextKeyChanges) {
+        connectorType = VF.StaveConnector.type.THIN_DOUBLE; // 複縦線
+      }
+      new VF.StaveConnector(topStave, bottomStave).setType(connectorType).setContext(context).draw();
+
+      if (isLineStart) lineStartStaves = staves;
+
+      // 次の小節の位置へ進む
+      x = x + measureWidth;
+    });
+
+    // --- 6-5. この段の左端の線・括弧・パート名を描く ---
+    const lineTopStave = lineStartStaves[0];
+    const lineBottomStave = lineStartStaves[partCount - 1];
+    // 左端の縦線（全パートをつなぐ）
+    new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(context).draw();
+    // 角ばった括弧（ブラケット）。パートが2つ以上のときだけ
+    if (partCount > 1) {
+      new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.BRACKET).setContext(context).draw();
+    }
+    // パート名（1段目はフルネーム、2段目以降は短い名前。五線のまん中の高さに右寄せ）
+    const staveLeft = isFirstLine ? firstLeft : otherLeft;
+    context.save();
+    context.setFont("Academico", 14);
+    score.parts.forEach((part, p) => {
+      const name = isFirstLine ? part.name : (part.abbreviation ?? part.name);
+      const stave = lineStartStaves[p];
+      const textWidth = context.measureText(name).width;
+      const textX = staveLeft - 14 - textWidth; // 括弧とぶつからないように少し離す
+      const textY = stave.getYForLine(2) + 5; // 第3線（まん中の線）の高さ
+      context.fillText(name, textX, textY);
+    });
+    context.restore();
+  });
+
+  // ----- 7. タイを描く（パートごと） -----
   allNotes.forEach((notesOfPart) => {
     for (let k = 0; k < notesOfPart.length - 1; k++) {
       const current = notesOfPart[k];
@@ -344,14 +454,31 @@ export function renderScore(VF, container, score) {
       if (current.data.rest || next.data.rest) continue;
       if (!current.data.tie) continue;
 
-      new VF.StaveTie({
-        firstNote: current.staveNote, // タイの始まりの音
-        lastNote: next.staveNote, // タイの終わりの音
-        firstIndexes: [0], // 始まりの音の1つ目の音（重音なしなので常に 0）
-        lastIndexes: [0], // 終わりの音の1つ目の音
-      })
-        .setContext(context)
-        .draw();
+      if (current.line === next.line) {
+        // 同じ段の中：1本の弧でつなぐ
+        drawTie(VF, context, current.staveNote, next.staveNote);
+      } else {
+        // 段をまたぐ：段の終わりまでの弧と、次の段の頭からの弧に分ける
+        drawTie(VF, context, current.staveNote, null);
+        drawTie(VF, context, null, next.staveNote);
+      }
     }
   });
+}
+
+// ----------------------------------------------------------
+// 関数：drawTie
+// タイの弧を1本描く
+//   firstNote … タイの始まりの音（null なら段の頭から始まる弧）
+//   lastNote  … タイの終わりの音（null なら段の終わりまでの弧）
+// ----------------------------------------------------------
+function drawTie(VF, context, firstNote, lastNote) {
+  new VF.StaveTie({
+    firstNote: firstNote,
+    lastNote: lastNote,
+    firstIndexes: [0], // 始まりの音の1つ目の音（重音なしなので常に 0）
+    lastIndexes: [0], // 終わりの音の1つ目の音
+  })
+    .setContext(context)
+    .draw();
 }

@@ -32,14 +32,16 @@ function r(duration, dots = 0) {
   return { rest: true, duration, dots };
 }
 
-// お試しの楽譜（弦楽四重奏・6小節）
+// お試しの楽譜（弦楽四重奏・16小節）
 // ・1〜2小節目：ニ長調（♯2つ）・4分の4拍子
 // ・3小節目から：4分の3拍子
 // ・4小節目から：ヘ長調（♭1つ）
 // ・5小節目から：ビオラはト音記号、チェロはテノール記号
+// ・9小節目から：ビオラはアルト記号、チェロはヘ音記号に戻る
+// ・7〜16小節目：Violin II はずっとタイでつながる（どこで改行しても段をまたぐタイができる）
 export const sampleScore = {
   title: "お試しの楽譜",
-  composer: "",
+  composer: "string-score",
   tempo: 80,
   // 楽譜全体の小節の情報（全パート共通）
   measures: [
@@ -49,10 +51,21 @@ export const sampleScore = {
     { key: -1 }, // 4小節目：ここからヘ長調
     {}, // 5小節目
     {}, // 6小節目
+    {}, // 7小節目
+    {}, // 8小節目
+    {}, // 9小節目
+    {}, // 10小節目
+    {}, // 11小節目
+    {}, // 12小節目
+    {}, // 13小節目
+    {}, // 14小節目
+    {}, // 15小節目
+    {}, // 16小節目
   ],
   parts: [
     {
       name: "Violin I",
+      abbreviation: "Vln. I",
       instrument: "violin",
       measures: [
         { clef: "treble", notes: [n("F", 5, "quarter", 0, 1), n("E", 5, "quarter"), n("D", 5, "half")] },
@@ -64,10 +77,26 @@ export const sampleScore = {
         // シ4（♮が付く：ヘ長調ではシは♭なので）
         { notes: [n("C", 5, "half"), n("B", 4, "quarter")] },
         { notes: [n("A", 4, "half", 1)] },
+        // 7〜16小節目
+        { notes: [n("A", 4, "quarter"), n("C", 5, "quarter"), n("F", 5, "quarter")] },
+        {
+          notes: [n("G", 5, "eighth"), n("F", 5, "eighth"), n("E", 5, "eighth"), n("D", 5, "eighth"), n("C", 5, "eighth"), n("B", 4, "eighth", 0, -1)],
+        },
+        { notes: [n("A", 4, "half"), r("quarter")] },
+        { notes: [n("C", 5, "quarter"), n("D", 5, "quarter"), n("E", 5, "quarter")] },
+        {
+          notes: [n("F", 5, "16th"), n("G", 5, "16th"), n("A", 5, "16th"), n("G", 5, "16th"), n("F", 5, "half")],
+        },
+        { notes: [n("E", 5, "quarter"), n("D", 5, "quarter"), n("C", 5, "quarter", 0, 1)] },
+        { notes: [n("D", 5, "half", 1)] },
+        { notes: [n("A", 4, "quarter"), n("B", 4, "quarter", 0, -1), n("C", 5, "quarter")] },
+        { notes: [n("D", 5, "quarter", 1), n("E", 5, "eighth"), n("C", 5, "quarter")] },
+        { notes: [n("F", 5, "half", 1)] },
       ],
     },
     {
       name: "Violin II",
+      abbreviation: "Vln. II",
       instrument: "violin",
       measures: [
         { clef: "treble", notes: [n("D", 5, "whole")] },
@@ -76,10 +105,22 @@ export const sampleScore = {
         { notes: [n("A", 4, "half"), n("B", 4, "quarter", 0, -1)] },
         { notes: [n("A", 4, "half", 1)] },
         { notes: [n("F", 4, "half", 1)] },
+        // 7〜16小節目：ずっと同じ音をタイでつなぐ（最後の小節以外）
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [tied(n("C", 5, "half", 1))] },
+        { notes: [n("C", 5, "half", 1)] },
       ],
     },
     {
       name: "Viola",
+      abbreviation: "Vla.",
       instrument: "viola",
       measures: [
         { clef: "alto", notes: [n("A", 3, "half"), n("F", 4, "half", 0, 1)] },
@@ -90,10 +131,22 @@ export const sampleScore = {
         // ここからト音記号
         { clef: "treble", notes: [n("A", 4, "quarter"), n("G", 4, "quarter"), n("F", 4, "quarter")] },
         { notes: [n("F", 4, "half", 1)] },
+        { notes: [n("F", 4, "quarter"), n("A", 4, "quarter"), n("C", 5, "quarter")] },
+        { notes: [n("B", 4, "half", 0, -1), n("A", 4, "quarter")] },
+        // ここからアルト記号に戻る
+        { clef: "alto", notes: [n("F", 4, "half", 1)] },
+        { notes: [n("E", 4, "quarter"), n("F", 4, "quarter"), n("G", 4, "quarter")] },
+        { notes: [n("A", 4, "half", 1)] },
+        { notes: [n("G", 4, "half"), n("E", 4, "quarter")] },
+        { notes: [n("F", 4, "half", 1)] },
+        { notes: [n("F", 4, "quarter"), n("G", 4, "quarter"), n("A", 4, "quarter")] },
+        { notes: [n("B", 4, "half", 0, -1), n("G", 4, "quarter")] },
+        { notes: [n("A", 4, "half", 1)] },
       ],
     },
     {
       name: "Cello",
+      abbreviation: "Vc.",
       instrument: "cello",
       measures: [
         { clef: "bass", notes: [n("D", 3, "whole")] },
@@ -103,6 +156,17 @@ export const sampleScore = {
         // ここからテノール記号
         { clef: "tenor", notes: [n("E", 4, "quarter"), n("D", 4, "quarter"), n("C", 4, "quarter")] },
         { notes: [n("F", 3, "half", 1)] },
+        { notes: [n("F", 3, "half"), n("A", 3, "quarter")] },
+        { notes: [n("C", 4, "half", 1)] },
+        // ここからヘ音記号に戻る
+        { clef: "bass", notes: [n("F", 2, "half", 1)] },
+        { notes: [n("C", 3, "half", 1)] },
+        { notes: [n("F", 3, "half"), n("E", 3, "quarter")] },
+        { notes: [n("A", 2, "half", 1)] },
+        { notes: [n("D", 3, "half", 1)] },
+        { notes: [n("F", 3, "half", 1)] },
+        { notes: [n("C", 3, "half", 1)] },
+        { notes: [n("F", 2, "half", 1)] },
       ],
     },
   ],
