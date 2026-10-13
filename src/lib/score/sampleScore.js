@@ -7,10 +7,20 @@
 // ----------------------------------------------------------
 // 関数：n
 // 音符1つ分のデータを短く書くための関数
-// 例：n('C', 4, 'quarter') → ド4の4分音符
+// 例：n('C', 4, 'quarter')       → ド4の4分音符
+//     n('F', 4, 'quarter', 0, 1) → ファ♯4の4分音符
 // ----------------------------------------------------------
 function n(step, octave, duration, dots = 0, alter = 0) {
   return { pitch: { step, alter, octave }, duration, dots, tie: false };
+}
+
+// ----------------------------------------------------------
+// 関数：tied
+// 音符を「次の音とタイでつなぐ」ようにする関数
+// 例：tied(n('D', 5, 'quarter')) → 次の音とタイでつながるレ5
+// ----------------------------------------------------------
+function tied(note) {
+  return { ...note, tie: true };
 }
 
 // ----------------------------------------------------------
@@ -22,34 +32,35 @@ function r(duration, dots = 0) {
   return { rest: true, duration, dots };
 }
 
-// お試しの楽譜（バイオリン1パート・4小節・ハ長調・4分の4拍子）
+// お試しの楽譜（バイオリン1パート・4小節・ニ長調（♯2つ）・4分の4拍子）
+// 臨時記号のルール①〜⑥とタイを確かめるための楽譜
 export const sampleScore = {
   title: "お試しの楽譜",
   composer: "",
   tempo: 80,
   // 楽譜全体の小節の情報（1小節目に最初の拍子と調）
-  measures: [{ time: { beats: 4, beatType: 4 }, key: 0 }, {}, {}, {}],
+  measures: [{ time: { beats: 4, beatType: 4 }, key: 2 }, {}, {}, {}],
   parts: [
     {
       name: "Violin",
       instrument: "violin",
       measures: [
-        // 1小節目：4分音符・4分音符・2分音符
+        // 1小節目：ファ♯4（なし①）・ファ4（♮②）・ファ4（なし③）・ファ♯5（なし⑤）
         {
           clef: "treble",
-          notes: [n("C", 4, "quarter"), n("D", 4, "quarter"), n("E", 4, "half")],
+          notes: [n("F", 4, "quarter", 0, 1), n("F", 4, "quarter"), n("F", 4, "quarter"), n("F", 5, "quarter", 0, 1)],
         },
-        // 2小節目：8分音符4つ（連桁）・付点4分音符・8分音符
+        // 2小節目：ファ♯4（なし④）・シ♭4（♭②）・シ4（♮②）・ド♯5（なし①）
         {
-          notes: [n("F", 4, "eighth"), n("G", 4, "eighth"), n("A", 4, "eighth"), n("B", 4, "eighth"), n("C", 5, "quarter", 1), n("B", 4, "eighth")],
+          notes: [n("F", 4, "quarter", 0, 1), n("B", 4, "quarter", 0, -1), n("B", 4, "quarter"), n("C", 5, "quarter", 0, 1)],
         },
-        // 3小節目：16分音符4つ（連桁）・4分休符・2分音符
+        // 3小節目：ラ4・シ4（どちらもなし）・ソ♯4の2分音符（♯②、次の小節へタイ）
         {
-          notes: [n("C", 5, "16th"), n("B", 4, "16th"), n("A", 4, "16th"), n("G", 4, "16th"), r("quarter"), n("G", 4, "half")],
+          notes: [n("A", 4, "quarter"), n("B", 4, "quarter"), tied(n("G", 4, "half", 0, 1))],
         },
-        // 4小節目：付点2分音符・4分休符
+        // 4小節目：ソ♯4（タイの続きなのでなし⑥）・ソ♯4（♯が付く）・レ5とレ5をタイでつなぐ
         {
-          notes: [n("E", 4, "half", 1), r("quarter")],
+          notes: [n("G", 4, "quarter", 0, 1), n("G", 4, "quarter", 0, 1), tied(n("D", 5, "quarter")), n("D", 5, "quarter")],
         },
       ],
     },

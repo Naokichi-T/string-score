@@ -1,10 +1,11 @@
 // ==========================================================
 // render.js
 // 楽譜データを VexFlow で五線譜に描くファイル
-// （ステップ2-1：1パート・1段だけ。改行や複数パートは後で追加）
+// （ステップ2-2：1パート・1段。臨時記号とタイまで。改行や複数パートは後で追加）
 // ==========================================================
 
 import { DURATIONS, CLEFS, pitchToVexKey } from "./model.js";
+import { computeAccidentals } from "./accidentals.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -14,6 +15,7 @@ const TOP = 40; // 上の余白（五線の上に飛び出す音符のぶん）
 const STAVE_HEIGHT = 120; // 1つの五線が使う高さ（下に飛び出す音符のぶんも含む）
 const MEASURE_BASE_WIDTH = 50; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
+const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
 const HEADER_WIDTH = 90; // 音部記号・調号・拍子記号のために足す幅
 
 // ----------------------------------------------------------
@@ -39,11 +41,12 @@ function keyToVexKey(key) {
 // ----------------------------------------------------------
 // 関数：createNote
 // 音符・休符1つ分のデータから VexFlow の音符を作る
-//   VF   … VexFlow の部品一式
-//   note … 音符1つ分のデータ
-//   clef … 今の音部記号（'treble' など）
+//   VF         … VexFlow の部品一式
+//   note       … 音符1つ分のデータ
+//   clef       … 今の音部記号（'treble' など）
+//   accidental … 付ける臨時記号（'#'・'b'・'n' など。付けないときは null）
 // ----------------------------------------------------------
-function createNote(VF, note, clef) {
+function createNote(VF, note, clef, accidental) {
   // VexFlow での長さの書き方（例：'q'）
   let duration = DURATIONS[note.duration].vf;
   // 付点の数だけ 'd' を付ける（例：'qd' は付点4分音符）
@@ -65,6 +68,11 @@ function createNote(VF, note, clef) {
     autoStem: true, // 符尾（棒）の向きを自動で決める
   });
 
+  // 臨時記号を付ける（0 は「1つ目の音」という意味。重音なしなので常に 0）
+  if (accidental) {
+    staveNote.addModifier(new VF.Accidental(accidental), 0);
+  }
+
   // 付点の「点」を描くための部品を付ける（長さの計算は上の 'd' で済んでいる）
   for (let i = 0; i < (note.dots ?? 0); i++) {
     VF.Dot.buildAndAttach([staveNote], { all: true });
@@ -76,11 +84,12 @@ function createNote(VF, note, clef) {
 // ----------------------------------------------------------
 // 関数：measureWidth
 // 小節の幅を音符の数から決める
-//   notesCount … 小節の中の音符・休符の数
-//   hasHeader  … 音部記号などを描く小節なら true
+//   notesCount       … 小節の中の音符・休符の数
+//   accidentalsCount … 小節の中の臨時記号の数
+//   hasHeader        … 音部記号などを描く小節なら true
 // ----------------------------------------------------------
-function measureWidth(notesCount, hasHeader) {
-  let width = MEASURE_BASE_WIDTH + notesCount * NOTE_WIDTH;
+function measureWidth(notesCount, accidentalsCount, hasHeader) {
+  let width = MEASURE_BASE_WIDTH + notesCount * NOTE_WIDTH + accidentalsCount * ACCIDENTAL_WIDTH;
   if (hasHeader) {
     width = width + HEADER_WIDTH;
   }
@@ -98,11 +107,33 @@ export function renderScore(VF, container, score) {
   // 前に描いたものを消す
   container.innerHTML = "";
 
-  // ステップ2-1では最初のパートだけ描く
+  // ステップ2-2では最初のパートだけ描く
   const part = score.parts[0];
 
-  // それぞれの小節の幅を先に計算して、全体の幅を決める
-  const widths = part.measures.map((measure, i) => measureWidth(measure.notes.length, i === 0));
+  // ----- 1. 小節ごとの臨時記号を先に決める -----
+  // （小節の幅を決めるのに臨時記号の数が必要なので、描く前に計算する）
+  let key = 0; // 今の調号
+  let tiedIn = false; // 前の小節の最後の音がタイでつながっているか
+  const accidentalsList = part.measures.map((measure, i) => {
+    const info = score.measures[i] ?? {};
+    if (info.key !== undefined) key = info.key;
+
+    // この小節の臨時記号を決める
+    const accidentals = computeAccidentals(measure.notes, key, tiedIn);
+
+    // 次の小節のために、この小節の最後の音がタイかどうかを覚えておく
+    const last = measure.notes[measure.notes.length - 1];
+    tiedIn = !!(last && !last.rest && last.tie);
+
+    return accidentals;
+  });
+
+  // ----- 2. 小節の幅と全体の幅を決める -----
+  const widths = part.measures.map((measure, i) => {
+    // 臨時記号の数（null 以外の数）
+    const accCount = accidentalsList[i].filter((a) => a !== null).length;
+    return measureWidth(measure.notes.length, accCount, i === 0);
+  });
   const totalWidth = LEFT * 2 + widths.reduce((sum, w) => sum + w, 0);
 
   // SVG で描く準備
@@ -110,15 +141,19 @@ export function renderScore(VF, container, score) {
   renderer.resize(totalWidth, TOP + STAVE_HEIGHT);
   const context = renderer.getContext();
 
+  // ----- 3. 小節ごとに描く -----
   // 今の拍子・調・音部記号（小節を進みながら、変わったら更新する）
   let time = null;
-  let key = 0;
+  key = 0;
   let clef = "treble";
 
   // 次の小節を描き始める横の位置
   let x = LEFT;
 
-  // 小節ごとに描く
+  // タイを描くために、作った音符を全部ためておく（小節をまたぐタイのため）
+  // 中身：{ staveNote: VexFlow の音符, data: 音符のデータ }
+  const allNotes = [];
+
   part.measures.forEach((measure, i) => {
     // 楽譜全体の小節の情報（拍子・調）
     const info = score.measures[i] ?? {};
@@ -141,8 +176,12 @@ export function renderScore(VF, container, score) {
     // 五線を描く
     stave.setContext(context).draw();
 
-    // 音符・休符を作る
-    const notes = measure.notes.map((note) => createNote(VF, note, clef));
+    // 音符・休符を作る（1. で決めた臨時記号を付ける）
+    const notes = measure.notes.map((note, j) => {
+      const staveNote = createNote(VF, note, clef, accidentalsList[i][j]);
+      allNotes.push({ staveNote: staveNote, data: note });
+      return staveNote;
+    });
 
     // 音符を1小節分まとめる「声部（Voice）」を作る
     const voice = new VF.Voice({ numBeats: time.beats, beatValue: time.beatType });
@@ -163,4 +202,23 @@ export function renderScore(VF, container, score) {
     // 次の小節の位置へ進む
     x = x + widths[i];
   });
+
+  // ----- 4. タイを描く -----
+  // tie: true の音と、そのすぐ次の音をタイの線でつなぐ
+  for (let k = 0; k < allNotes.length - 1; k++) {
+    const current = allNotes[k];
+    const next = allNotes[k + 1];
+    // 休符にはタイを付けない
+    if (current.data.rest || next.data.rest) continue;
+    if (!current.data.tie) continue;
+
+    new VF.StaveTie({
+      firstNote: current.staveNote, // タイの始まりの音
+      lastNote: next.staveNote, // タイの終わりの音
+      firstIndexes: [0], // 始まりの音の1つ目の音（重音なしなので常に 0）
+      lastIndexes: [0], // 終わりの音の1つ目の音
+    })
+      .setContext(context)
+      .draw();
+  }
 }
