@@ -6,6 +6,7 @@
 //   ・読み込みが終わる前は、今までの電子音（のこぎり波）で鳴らす
 //   ・楽譜の再生は playEvents で全部の音をまとめて予約し、stopPlayback でまとめて止める
 // （ステップ6-1 追加：setSoundType で「楽器の音」と「電子音」を切り替えられるようにした）
+// （ステップ6-3c：pizz. の音は、ピチカートの録音（電子音のときは、はじいたような音）で鳴らす）
 // ==========================================================
 
 import { pitchToMidi } from "../score/playback.js";
@@ -15,7 +16,8 @@ import { pitchToMidi } from "../score/playback.js";
 // 作ること・音のデータを読み込むことは先にできる（そのときは一時停止の状態で作られる）
 let audioContext = null;
 
-// 読み込んだ楽器の音 { violin: …, viola: …, cello: … }（読み込みが終わるまでは null）
+// 読み込んだ楽器の音 { violin: …, viola: …, cello: …, pizz: … }（読み込みが終わるまでは null）
+// pizz はピチカートの音（弦楽合奏のピチカート。3つの楽器で共通に使う）
 let instruments = null;
 
 // 読み込みの途中の Promise（2回呼ばれても、読み込みは1回だけにするため）
@@ -93,9 +95,15 @@ function resumeAudio() {
   return ctx;
 }
 
+// ピチカートの録音の名前（サウンドフォントの楽器の名前）（ステップ6-3c）
+const PIZZ_SOUNDFONT_NAME = "pizzicato_strings";
+
+// 電子音のピチカートで、はじいた音が消えるまでの時間（秒）
+const PIZZ_SYNTH_DECAY = 0.6;
+
 // ----------------------------------------------------------
 // 関数：loadInstruments
-// バイオリン・ビオラ・チェロの録音した音を、インターネットから読み込む
+// バイオリン・ビオラ・チェロと、ピチカートの録音した音を、インターネットから読み込む
 // （編集ページを開いたときに1回呼ぶ。2回目からは同じ Promise を返す）
 // 戻り値：読み込みが終わったら完了する Promise
 // ----------------------------------------------------------
@@ -121,6 +129,17 @@ export function loadInstruments() {
       loaded[key] = instrument;
       return instrument.ready; // 読み込みが終わるのを待つ
     });
+
+    // ピチカートの音も読み込む（ステップ6-3c）
+    // はじいた音は自然に消えていく音なので、くり返しの情報は読み込まない（読み込むと、ずっと鳴り続けてしまう）
+    const pizzInstrument = Soundfont(ctx, {
+      instrument: PIZZ_SOUNDFONT_NAME,
+      kit: "FluidR3_GM",
+      loadLoopData: false,
+    });
+    loaded.pizz = pizzInstrument;
+    waits.push(pizzInstrument.ready);
+
     await Promise.all(waits);
 
     // 全部終わってから使えるようにする（途中の楽器で鳴らさないため）
@@ -161,12 +180,14 @@ export function pitchToFrequency(pitch) {
 //   duration  … 鳴らす長さ（秒）
 //   startTime … 鳴らし始める時刻（AudioContext の時計で。省略したら今すぐ）
 //   velocity  … 音の強さ（0〜127。省略したら 100）
+//   pluck     … true なら、はじいたような音（ピチカート）にする（ステップ6-3c）
 // 戻り値：途中で止めるための関数
 // ----------------------------------------------------------
-function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100) {
+function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluck = false) {
   const ctx = resumeAudio();
   const start = startTime ?? ctx.currentTime;
-  const end = start + duration;
+  // ピチカートは、楽譜の長さより早く自然に消える（長くても PIZZ_SYNTH_DECAY 秒まで）
+  const end = pluck ? start + Math.min(duration, PIZZ_SYNTH_DECAY) : start + duration;
 
   // 音の大きさ（強さ 100 のときに 0.15。強さに合わせて大きく・小さくする）
   const volume = 0.15 * (velocity / 100);
@@ -187,10 +208,17 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100) {
 
   // 音量（急に鳴り始めたり止まったりすると「プチッ」となるので、少しずつ変える）
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(volume, start + attack); // 少しずつ大きくする
-  gain.gain.setValueAtTime(volume, end - release);
-  gain.gain.linearRampToValueAtTime(0, end); // 最後に少しずつ小さくする
+  if (pluck) {
+    // ピチカート：一瞬で大きくなって、すぐに小さくなっていく
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(volume, start + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end); // 0 にはできないので、とても小さい数まで下げる
+  } else {
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(volume, start + attack); // 少しずつ大きくする
+    gain.gain.setValueAtTime(volume, end - release);
+    gain.gain.linearRampToValueAtTime(0, end); // 最後に少しずつ小さくする
+  }
 
   // つなぐ：音のもと → フィルター → 音量 → スピーカー
   oscillator.connect(filter);
@@ -216,16 +244,19 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100) {
 //   pitch      … 音の高さ { step, alter, octave }
 //   instrument … 楽器（"violin"・"viola"・"cello"。省略したらバイオリン）
 //   duration   … 鳴らす長さ（秒）
+//   pizz       … true ならピチカートで鳴らす（ステップ6-3c）
 // 録音した音の読み込みが終わっていなければ、電子音で鳴らす
 // ----------------------------------------------------------
-export function playPitch(pitch, instrument = "violin", duration = 0.5) {
+export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = false) {
   // 電子音を選んでいるとき・読み込みが終わっていないときは、電子音で鳴らす
   if (soundType === "synth" || !instruments) {
-    playSynth(pitch, duration);
+    playSynth(pitch, duration, null, 100, pizz);
     return;
   }
   const ctx = resumeAudio();
-  instruments[instrument].start({
+  // ピチカートなら、ピチカートの録音で鳴らす
+  const sampler = pizz ? instruments.pizz : instruments[instrument];
+  sampler.start({
     note: pitchToMidi(pitch),
     velocity: KEY_VELOCITY,
     detune: DETUNE_CENTS,
@@ -261,7 +292,7 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
 
     // 電子音を選んでいるときは、電子音で予約する
     if (soundType === "synth") {
-      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity));
+      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz));
       return;
     }
 
@@ -275,7 +306,9 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
       release = SHORT_RELEASE;
     }
 
-    const stop = instruments[event.instrument].start({
+    // ピチカートなら、ピチカートの録音で鳴らす（ステップ6-3c）
+    const sampler = event.pizz ? instruments.pizz : instruments[event.instrument];
+    const stop = sampler.start({
       note: pitchToMidi(event.pitch),
       velocity: event.velocity,
       detune: DETUNE_CENTS,

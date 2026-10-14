@@ -57,7 +57,7 @@
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
-  import { buildEvents, secondsPerTick } from "#lib/score/playback.js";
+  import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
 
   // 楽譜データ（空の弦楽四重奏で始める）
   let score = $state(createEmptyScore());
@@ -497,9 +497,11 @@
   // ----------------------------------------------------------
   function inputPitch(pitch) {
     const dots = dotted ? 1 : 0;
+    // 入れる場所がピチカートの範囲かどうか（入れる前に調べる。入れると選択が次の音に進むため）
+    const pizz = selection ? isPizzAt(score, selection) : false;
     const ok = putNote({ pitch: pitch, duration: duration, dots: dots, tie: false });
     // 入れたあとは選択が次の音に進むが、同じパートなので楽器は変わらない
-    if (ok) playPitch(pitch, currentInstrument);
+    if (ok) playPitch(pitch, currentInstrument, 0.5, pizz);
   }
 
   // ----------------------------------------------------------
@@ -516,7 +518,8 @@
   // ----------------------------------------------------------
   function playSelected() {
     const note = getSelectedNote(score, selection);
-    if (note && !note.rest) playPitch(note.pitch, currentInstrument);
+    // ピチカートの範囲なら、ピチカートで鳴らす
+    if (note && !note.rest) playPitch(note.pitch, currentInstrument, 0.5, isPizzAt(score, selection));
   }
 
   // ----------------------------------------------------------

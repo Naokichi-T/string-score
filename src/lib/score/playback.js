@@ -4,6 +4,7 @@
 // 音を実際に鳴らすのは audio/sound.js の仕事。ここでは計算だけをする
 // （ステップ6-3a：スタッカート・テヌート・アクセント・スラーを、音の長さと強さに反映する）
 // （ステップ6-3b：フェルマータ。その音を2倍にのばし、ほかのパートもその間は待つ）
+// （ステップ6-3c：pizz.／arco。pizz. から arco までの音に印を付ける（ピチカートの音で鳴らすため））
 //
 // 【鳴らす音の一覧の1つ分】
 // {
@@ -16,6 +17,7 @@
 //   ticks: 4,                 // 楽譜の上の長さ（ティック。タイでつながった音は合計した長さ）
 //   soundTicks: 3.8,          // 実際に音を出す長さ（ティック。スタッカートなら短く、スラーならいっぱい）
 //   connected: false,         // 次の音となめらかにつなげるか（スラーの中・テヌートなら true）
+//   pizz: false,              // ピチカートで鳴らすか（pizz. から arco までの音なら true）
 //   velocity: 80              // 音の強さ（0〜127。強弱記号とアクセントから決める）
 // }
 // ==========================================================
@@ -112,6 +114,40 @@ function noteGate(note, legato) {
 }
 
 // ----------------------------------------------------------
+// 関数：nextPizz
+// 音符に付いている奏法（pizz.・arco）から、この音符からピチカートかどうかを決める（ステップ6-3c）
+//   note    … 音符のデータ
+//   current … 前の音符までピチカートだったか
+// 戻り値：この音符（と、このあと arco が出てくるまで）がピチカートなら true
+// ----------------------------------------------------------
+function nextPizz(note, current) {
+  const techniques = note.techniques ?? [];
+  if (techniques.includes("pizz.")) return true;
+  if (techniques.includes("arco")) return false;
+  return current;
+}
+
+// ----------------------------------------------------------
+// 関数：isPizzAt
+// 楽譜のある場所の音が、ピチカートの範囲かどうかを調べる（鍵盤を押したときの音を決めるのに使う）（ステップ6-3c）
+//   score    … 楽譜データ
+//   position … 場所 { part, measure, note }
+// 1小節目からその場所の音まで（その音に付いている pizz.・arco も含めて）数える
+// ----------------------------------------------------------
+export function isPizzAt(score, position) {
+  const part = score.parts[position.part];
+  let pizz = false;
+  for (let i = 0; i <= position.measure; i++) {
+    const notes = part.measures[i].notes;
+    const last = i === position.measure ? position.note : notes.length - 1; // その小節で、どこまで数えるか
+    for (let j = 0; j <= last && j < notes.length; j++) {
+      if (!notes[j].rest) pizz = nextPizz(notes[j], pizz);
+    }
+  }
+  return pizz;
+}
+
+// ----------------------------------------------------------
 // 関数：buildEvents
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
@@ -122,7 +158,7 @@ function noteGate(note, legato) {
 //   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
-// ・強弱とスラーは1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
+// ・強弱・スラー・pizz. は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, partIndex) {
   const events = [];
@@ -143,6 +179,7 @@ export function buildEvents(score, startMeasure, partIndex) {
     let tick = 0; // 再生を始めた所から何ティック目か（始める小節より前は数えない）
     let tiedEvent = null; // 前の音からタイでつながっているときの、その音（まとめる先）
     let inSlur = false; // 今スラーの中か（スラーの始まりの音から、終わりの音の1つ前まで true）
+    let pizz = false; // 今ピチカートか（pizz. の付いた音から、arco の付いた音の1つ前まで true）
 
     part.measures.forEach((measure, i) => {
       const playing = i >= startMeasure; // この小節は鳴らすか
@@ -171,10 +208,14 @@ export function buildEvents(score, startMeasure, partIndex) {
         const legato = inSlur && note.slur !== "stop";
         if (note.slur === "stop") inSlur = false;
 
+        // ピチカートかどうかを進める（鳴らさない小節でも数えておく）
+        pizz = nextPizz(note, pizz);
+
         if (!playing) return;
 
         // 音を出す長さ（ティック）：楽譜の長さ × 割合
-        const gate = noteGate(note, legato);
+        // ピチカートは、はじいた音が自然に消えていくので、長さの記号（スタッカート・スラーなど）は効かせない
+        const gate = pizz ? GATE_NORMAL : noteGate(note, legato);
         const soundLength = length * gate;
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
         const connected = gate >= 1;
@@ -202,6 +243,7 @@ export function buildEvents(score, startMeasure, partIndex) {
             ticks: length,
             soundTicks: soundLength,
             connected: connected,
+            pizz: pizz, // ピチカートで鳴らすか（ステップ6-3c）
             velocity: velocity,
             fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
           };
