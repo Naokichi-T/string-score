@@ -24,6 +24,16 @@ function tied(note) {
 }
 
 // ----------------------------------------------------------
+// 関数：sym
+// 音符に記号を付ける関数
+// 例：sym(n('D', 5, 'quarter'), { bowing: 'down', fingering: 3 })
+//     → ダウンボウと指番号3が付いたレ5
+// ----------------------------------------------------------
+function sym(note, symbols) {
+  return { ...note, ...symbols };
+}
+
+// ----------------------------------------------------------
 // 関数：r
 // 休符1つ分のデータを短く書くための関数
 // 例：r('quarter') → 4分休符
@@ -39,6 +49,7 @@ function r(duration, dots = 0) {
 // ・5小節目から：ビオラはト音記号、チェロはテノール記号
 // ・9小節目から：ビオラはアルト記号、チェロはヘ音記号に戻る
 // ・7〜16小節目：Violin II はずっとタイでつながる（どこで改行しても段をまたぐタイができる）
+// ・1〜3小節目と最後の小節：記号の表示の確認用に、いろいろな記号を付けている
 export const sampleScore = {
   title: "お試しの楽譜",
   composer: "string-score",
@@ -68,9 +79,24 @@ export const sampleScore = {
       abbreviation: "Vln. I",
       instrument: "violin",
       measures: [
-        { clef: "treble", notes: [n("F", 5, "quarter", 0, 1), n("E", 5, "quarter"), n("D", 5, "half")] },
+        // 1小節目：強弱 mf・ダウンボウ・指番号2 → アップボウ・スタッカート → テヌート・アクセント
         {
-          notes: [n("C", 5, "eighth", 0, 1), n("D", 5, "eighth"), n("E", 5, "eighth"), n("F", 5, "eighth", 0, 1), n("G", 5, "half")],
+          clef: "treble",
+          notes: [
+            sym(n("F", 5, "quarter", 0, 1), { dynamic: "mf", bowing: "down", fingering: 2 }),
+            sym(n("E", 5, "quarter"), { bowing: "up", articulations: ["staccato"] }),
+            sym(n("D", 5, "half"), { articulations: ["tenuto", "accent"] }),
+          ],
+        },
+        {
+          // 2小節目：8分音符にスタッカート、2分音符に強弱 f
+          notes: [
+            sym(n("C", 5, "eighth", 0, 1), { articulations: ["staccato"] }),
+            sym(n("D", 5, "eighth"), { articulations: ["staccato"] }),
+            sym(n("E", 5, "eighth"), { articulations: ["staccato"] }),
+            sym(n("F", 5, "eighth", 0, 1), { articulations: ["staccato"] }),
+            sym(n("G", 5, "half"), { dynamic: "f" }),
+          ],
         },
         { notes: [n("A", 5, "quarter", 1), n("G", 5, "eighth"), n("F", 5, "quarter", 0, 1)] },
         { notes: [n("F", 5, "quarter"), n("E", 5, "quarter"), n("D", 5, "quarter")] },
@@ -91,7 +117,8 @@ export const sampleScore = {
         { notes: [n("D", 5, "half", 1)] },
         { notes: [n("A", 4, "quarter"), n("B", 4, "quarter", 0, -1), n("C", 5, "quarter")] },
         { notes: [n("D", 5, "quarter", 1), n("E", 5, "eighth"), n("C", 5, "quarter")] },
-        { notes: [n("F", 5, "half", 1)] },
+        // 最後の小節：フェルマータ・強弱 pp
+        { notes: [sym(n("F", 5, "half", 1), { fermata: true, dynamic: "pp" })] },
       ],
     },
     {
@@ -100,8 +127,12 @@ export const sampleScore = {
       instrument: "violin",
       measures: [
         { clef: "treble", notes: [n("D", 5, "whole")] },
-        { notes: [n("A", 4, "half"), n("B", 4, "quarter"), n("C", 5, "quarter", 0, 1)] },
-        { notes: [n("D", 5, "half", 1)] },
+        // 2小節目：pizz.（ピチカート）、強弱 p
+        {
+          notes: [sym(n("A", 4, "half"), { technique: "pizz.", dynamic: "p" }), n("B", 4, "quarter"), n("C", 5, "quarter", 0, 1)],
+        },
+        // 3小節目：arco（弓で弾くのに戻る）、ダウンボウ・指番号0
+        { notes: [sym(n("D", 5, "half", 1), { technique: "arco", bowing: "down", fingering: 0 })] },
         { notes: [n("A", 4, "half"), n("B", 4, "quarter", 0, -1)] },
         { notes: [n("A", 4, "half", 1)] },
         { notes: [n("F", 4, "half", 1)] },
@@ -149,8 +180,10 @@ export const sampleScore = {
       abbreviation: "Vc.",
       instrument: "cello",
       measures: [
-        { clef: "bass", notes: [n("D", 3, "whole")] },
-        { notes: [n("A", 2, "half"), n("A", 3, "half")] },
+        // 1小節目：強弱 sf
+        { clef: "bass", notes: [sym(n("D", 3, "whole"), { dynamic: "sf" })] },
+        // 2小節目：五線より低い音の強弱 fp（音符にぶつからないよう下にずれる）、アクセント
+        { notes: [sym(n("A", 2, "half"), { dynamic: "fp", articulations: ["accent"] }), n("A", 3, "half")] },
         { notes: [n("D", 3, "half"), r("quarter")] },
         { notes: [n("F", 2, "half", 1)] },
         // ここからテノール記号
