@@ -51,8 +51,11 @@ const SOUNDFONT_NAMES = { violin: "violin", viola: "viola", cello: "cello" };
 // 鍵盤を押したときの音の強さ（0〜127）
 const KEY_VELOCITY = 90;
 
-// 音の長さを、楽譜どおりより少しだけ短くする割合（音と音の間に、ほんの少し切れ目を作る）
-const NOTE_LENGTH_RATE = 0.95;
+// 楽器の音で、次の音とつなげない音（ふつうの音・スタッカート）の鳴らし方（ステップ6-3a）
+// 楽器の音は、止めたあと少しずつ小さくなる「余韻」があり、そのままだと次の音まで残ってつながって聞こえる
+// （smplr の余韻は、何も指定しないと 0.3 秒）
+const SHORT_RELEASE = 0.05; // つなげない音の余韻（秒）
+const NOTE_GAP = 0.04; // つなげない音で、余韻が消えてから次の音までに空ける時間（秒）
 
 // 音の種類（"instrument"：録音した楽器の音、"synth"：電子音（のこぎり波））
 // 最初は楽器の音。上のバーの欄で切り替える（setSoundType）
@@ -252,7 +255,7 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
 
   events.forEach((event) => {
     const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
-    const duration = event.ticks * tickSeconds * NOTE_LENGTH_RATE; // 鳴らす長さ
+    const duration = event.soundTicks * tickSeconds; // 鳴らす長さ（スタッカートなどは playback.js で決めてある）
 
     // 電子音を選んでいるときは、電子音で予約する
     if (soundType === "synth") {
@@ -260,12 +263,23 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
       return;
     }
 
+    // 楽器の音：つなげる音（スラーの中・テヌート）は、いつもの余韻のまま次の音に重ねて、なめらかにする
+    // つなげない音は、余韻を短くして、余韻と「すき間」のぶんだけ早く止める
+    // （ただし、短くしすぎないように、もとの長さの半分は鳴らす）
+    let soundDuration = duration;
+    let release = undefined; // undefined なら smplr のいつもの余韻（0.3 秒）
+    if (!event.connected) {
+      soundDuration = Math.max(duration * 0.5, duration - SHORT_RELEASE - NOTE_GAP);
+      release = SHORT_RELEASE;
+    }
+
     const stop = instruments[event.instrument].start({
       note: pitchToMidi(event.pitch),
       velocity: event.velocity,
       detune: DETUNE_CENTS,
       time: time,
-      duration: duration,
+      duration: soundDuration,
+      ampRelease: release,
     });
     stopFunctions.push(stop);
   });

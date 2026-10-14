@@ -2,6 +2,7 @@
 // playback.js
 // 楽譜データを「鳴らす音の一覧」に直すファイル（ステップ6-1）
 // 音を実際に鳴らすのは audio/sound.js の仕事。ここでは計算だけをする
+// （ステップ6-3a：スタッカート・テヌート・アクセント・スラーを、音の長さと強さに反映する）
 //
 // 【鳴らす音の一覧の1つ分】
 // {
@@ -11,8 +12,10 @@
 //   instrument: "violin",     // 楽器（音を選ぶのに使う）
 //   pitch: { step, alter, octave }, // 音の高さ
 //   startTick: 24,            // 再生を始めた所から何ティック目に鳴り始めるか（16分音符 = 1）
-//   ticks: 4,                 // 鳴らす長さ（ティック。タイでつながった音は合計した長さ）
-//   velocity: 80              // 音の強さ（0〜127。強弱記号から決める）
+//   ticks: 4,                 // 楽譜の上の長さ（ティック。タイでつながった音は合計した長さ）
+//   soundTicks: 3.8,          // 実際に音を出す長さ（ティック。スタッカートなら短く、スラーならいっぱい）
+//   connected: false,         // 次の音となめらかにつなげるか（スラーの中・テヌートなら true）
+//   velocity: 80              // 音の強さ（0〜127。強弱記号とアクセントから決める）
 // }
 // ==========================================================
 
@@ -40,6 +43,18 @@ const FP_AFTER = "p";
 
 // 強弱記号が出てくる前の強さ
 const DEFAULT_DYNAMIC = "mf";
+
+// ----------------------------------------------------------
+// 音を出す長さの割合（楽譜の長さに対して、どれだけ鳴らすか）（ステップ6-3a）
+// 音と音の間の時間は変えずに、鳴らす長さだけを変える
+// ----------------------------------------------------------
+const GATE_NORMAL = 0.95; // ふつう：少しだけ短くして、音と音の間に切れ目を作る
+const GATE_STACCATO = 0.5; // スタッカート：半分で切る
+const GATE_TENUTO = 1.0; // テヌート：いっぱいに鳴らす
+const GATE_SLUR = 1.0; // スラーの中：切れ目なしでつなげる
+
+// アクセントで強くする量（0〜127 の強さに足す）
+const ACCENT_BOOST = 20;
 
 // ----------------------------------------------------------
 // 関数：pitchToMidi
@@ -77,6 +92,22 @@ function applyDynamic(dynamic, current) {
 }
 
 // ----------------------------------------------------------
+// 関数：noteGate
+// 音符の記号から、音を出す長さの割合を決める（ステップ6-3a）
+//   note   … 音符のデータ
+//   legato … スラーの中で、次の音とつなげるか
+// 優先する順：スタッカート → テヌート → スラー → ふつう
+// （スラーの中でもスタッカートが付いていれば短く切る）
+// ----------------------------------------------------------
+function noteGate(note, legato) {
+  const articulations = note.articulations ?? [];
+  if (articulations.includes("staccato")) return GATE_STACCATO;
+  if (articulations.includes("tenuto")) return GATE_TENUTO;
+  if (legato) return GATE_SLUR;
+  return GATE_NORMAL;
+}
+
+// ----------------------------------------------------------
 // 関数：buildEvents
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
@@ -87,7 +118,7 @@ function applyDynamic(dynamic, current) {
 //   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
-// ・強弱は1小節目から数えておく（途中から鳴らしても、それまでの強弱を引き継ぐため）
+// ・強弱とスラーは1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, partIndex) {
   const events = [];
@@ -106,6 +137,7 @@ export function buildEvents(score, startMeasure, partIndex) {
     let dynamic = DEFAULT_DYNAMIC; // 今の強弱
     let tick = 0; // 再生を始めた所から何ティック目か（始める小節より前は数えない）
     let tiedEvent = null; // 前の音からタイでつながっているときの、その音（まとめる先）
+    let inSlur = false; // 今スラーの中か（スラーの始まりの音から、終わりの音の1つ前まで true）
 
     part.measures.forEach((measure, i) => {
       const playing = i >= startMeasure; // この小節は鳴らすか
@@ -127,11 +159,31 @@ export function buildEvents(score, startMeasure, partIndex) {
         const result = applyDynamic(note.dynamic, dynamic);
         dynamic = result.next;
 
+        // スラーの状態を進める（鳴らさない小節でも数えておく）
+        //   始まりの音 → ここから次の音とつなげる
+        //   終わりの音 → この音でスラーが終わるので、次の音とはつなげない
+        if (note.slur === "start") inSlur = true;
+        const legato = inSlur && note.slur !== "stop";
+        if (note.slur === "stop") inSlur = false;
+
         if (!playing) return;
+
+        // 音を出す長さ（ティック）：楽譜の長さ × 割合
+        const gate = noteGate(note, legato);
+        const soundLength = length * gate;
+        // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
+        const connected = gate >= 1;
+
+        // アクセントが付いていたら、少し強くする（127 をこえないようにする）
+        const accented = (note.articulations ?? []).includes("accent");
+        const velocity = accented ? Math.min(127, result.velocity + ACCENT_BOOST) : result.velocity;
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
           // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
+          // 音を出す長さは「前の音の楽譜の長さいっぱい ＋ この音の音を出す長さ」
+          tiedEvent.soundTicks = tiedEvent.ticks + soundLength;
           tiedEvent.ticks = tiedEvent.ticks + length;
+          tiedEvent.connected = connected; // つなげるかどうかは、タイの最後の音で決める
         } else {
           // 新しく鳴らす音
           const event = {
@@ -142,7 +194,9 @@ export function buildEvents(score, startMeasure, partIndex) {
             pitch: note.pitch,
             startTick: tick,
             ticks: length,
-            velocity: result.velocity,
+            soundTicks: soundLength,
+            connected: connected,
+            velocity: velocity,
           };
           events.push(event);
           tiedEvent = event;
