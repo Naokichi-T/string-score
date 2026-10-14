@@ -9,10 +9,12 @@
   // （ステップ4-5：「記号」タブの中身を SymbolTools として追加）
   // （ステップ4-7a：範囲を選んでいるときも ▲ ▼・削除を押せるようにする。説明にキーの名前を追加）
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
+  // （ステップ5-1：「楽譜の設定」タブの中身を ScoreSettings として追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
   import SymbolTools from "./SymbolTools.svelte";
+  import ScoreSettings from "./ScoreSettings.svelte";
 
   // 親から受け取るもの
   //   duration     … 今の長さ（'quarter' など）
@@ -35,7 +37,11 @@
   //   spanState    … 選んだ範囲に付いているスラー・松葉（「記号」タブで使う）
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（「記号」タブで使う）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（「記号」タブで使う）
+  //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
+  //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
   let {
+    score,
+    onsettings = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -170,7 +176,7 @@
     {:else if activeTab === "measure"}
       <span class="placeholder">（小節の追加・削除などをステップ5で作ります）</span>
     {:else if activeTab === "settings"}
-      <span class="placeholder">（タイトル・調・拍子などをステップ5で作ります）</span>
+      <ScoreSettings {score} {onsettings} />
     {/if}
   </div>
 </div>

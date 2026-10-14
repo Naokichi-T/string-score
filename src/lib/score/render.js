@@ -29,6 +29,7 @@ const LEFT = 10; // 左右の余白
 const NAME_WIDTH_FIRST = 80; // 1段目のパート名（フルネーム）を書くための幅
 const NAME_WIDTH_OTHER = 70; // 2段目以降のパート名（短い名前）を書くための幅
 const TITLE_AREA = 80; // タイトルと作曲者を書く場所の高さ
+const TEMPO_AREA = 28; // テンポ（Allegro ♩ = 120）を書く場所の高さ
 const TOP = 30; // 段の上の余白（五線の上に飛び出す音符のぶん）
 const PART_SPACING = 110; // パートとパートの五線の間隔（上の五線の上端から下の五線の上端まで）
 const SYSTEM_GAP = 150; // 段と段の間隔（上の段の一番下の五線の上端から、下の段の一番上の五線の上端まで）
@@ -107,9 +108,9 @@ export function renderScore(VF, container, score, width, selection = null, range
 
   // 1つの段の高さ（一番上の五線の上端から、次の段の一番上の五線の上端まで）
   const systemHeight = PART_SPACING * (partCount - 1) + SYSTEM_GAP;
-  // タイトルか作曲者があるときだけ、上に場所を空ける
+  // タイトルか作曲者があるときだけ、上に場所を空ける（テンポの場所はいつも空ける）
   const hasHeader = !!(score.title || score.composer);
-  const headerHeight = hasHeader ? TITLE_AREA : 0;
+  const headerHeight = (hasHeader ? TITLE_AREA : 0) + TEMPO_AREA;
   // 全体の高さ
   const totalHeight = headerHeight + TOP + systemHeight * (lines.length - 1) + PART_SPACING * (partCount - 1) + BOTTOM;
 
@@ -131,6 +132,9 @@ export function renderScore(VF, container, score, width, selection = null, range
     context.fillText(score.composer, totalWidth - LEFT - composerWidth, 68); // 右寄せ
   }
   context.restore();
+
+  // ----- 5-2. テンポを描く（1段目の五線の左端の上） -----
+  drawTempo(context, score, firstLeft, headerHeight - 8);
 
   // タイを描くために、作った音符をパートごとに全部ためておく（小節・段をまたぐタイのため）
   // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ, line: 何段目か }
@@ -320,4 +324,32 @@ export function renderScore(VF, container, score, width, selection = null, range
     });
   });
   return hitBoxes;
+}
+
+// ----------------------------------------------------------
+// 関数：drawTempo
+// テンポを「Allegro ♩ = 120」の形で描く（速度記号がなければ「♩ = 120」）
+//   x … 書き始める横の位置
+//   y … 文字の下端（ベースライン）の位置
+// ----------------------------------------------------------
+function drawTempo(context, score, x, y) {
+  context.save();
+
+  // 速度記号（太字）
+  if (score.tempoText) {
+    context.setFont("Academico", 15, "bold");
+    context.fillText(score.tempoText, x, y);
+    x = x + context.measureText(score.tempoText).width + 8;
+  }
+
+  // 4分音符の記号（楽譜用フォントの文字。U+ECA5 は「上向きの4分音符」）
+  context.setFont("Bravura", 20);
+  context.fillText("\uECA5", x, y);
+  x = x + context.measureText("\uECA5").width + 10;
+
+  // 「= 120」
+  context.setFont("Academico", 15);
+  context.fillText(`= ${score.tempo}`, x, y);
+
+  context.restore();
 }

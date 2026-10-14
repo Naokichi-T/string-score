@@ -755,3 +755,21 @@ export function pitchForLetter(score, selection, step) {
   }
   return best.pitch;
 }
+
+// ==========================================================
+// ここから下は、楽譜全体の設定を変える関数（ステップ5-1）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：setScoreInfo
+// タイトル・作曲者・速度記号・テンポのどれか1つを変える
+//   field … 項目の名前（"title"・"composer"・"tempoText"・"tempo"）
+//   value … 新しい値（チェックは呼ぶ側で済ませておく）
+// 戻り値：新しい楽譜データ（値が変わらないときは元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setScoreInfo(score, field, value) {
+  if (score[field] === value) return score;
+  const newScore = cloneScore(score);
+  newScore[field] = value;
+  return newScore;
+}

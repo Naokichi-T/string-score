@@ -7,6 +7,7 @@
 // score = {
 //   title: 'タイトル',
 //   composer: '作曲者',
+//   tempoText: 'Allegro',            // 速度記号（なければ空の文字）
 //   tempo: 80,                       // ♩＝80
 //   measures: [                      // 楽譜全体の小節の情報（全パート共通）
 //     { time: { beats: 4, beatType: 4 }, key: 0 }, // 拍子・調が変わる小節だけ書く
@@ -221,6 +222,7 @@ export function createEmptyScore() {
   return {
     title: "無題",
     composer: "",
+    tempoText: "", // 速度記号（"Allegro" など。空ならなし）
     tempo: 80,
     // 1小節目に最初の拍子と調、あとは空
     measures: Array.from({ length: measureCount }, (_, i) => (i === 0 ? { time: time, key: 0 } : {})),

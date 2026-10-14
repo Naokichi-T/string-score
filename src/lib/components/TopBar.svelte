@@ -3,15 +3,17 @@
   // TopBar.svelte
   // 編集ページの一番上のバー
   // （ステップ4-3：元に戻す・やり直しのボタンが動くようになった。ほかのボタンは後のステップで）
+  // （ステップ5-1：テンポの前に速度記号も出す）
   // ==========================================================
 
   // 親から受け取るもの
   //   tempo   … テンポ（♩＝○○ の数字）
+  //   tempoText … 速度記号（"Allegro" など。なければ空の文字）
   //   canUndo … 元に戻せるか（false ならボタンを押せない）
   //   canRedo … やり直せるか
   //   onundo  … 元に戻すボタンが押されたときに呼ぶ関数
   //   onredo  … やり直しボタンが押されたときに呼ぶ関数
-  let { tempo, canUndo = false, canRedo = false, onundo = () => {}, onredo = () => {} } = $props();
+  let { tempo, tempoText = "", canUndo = false, canRedo = false, onundo = () => {}, onredo = () => {} } = $props();
 </script>
 
 <header class="top-bar">
@@ -27,7 +29,7 @@
   <!-- 再生（ステップ6で動くようにする） -->
   <div class="group">
     <button disabled title="再生">▶ 再生</button>
-    <span class="tempo">♩ = {tempo}</span>
+    <span class="tempo">{tempoText ? `${tempoText} ` : ""}♩ = {tempo}</span>
   </div>
 
   <!-- 右に寄せるための空き -->

@@ -9,6 +9,7 @@
   // （ステップ4-6：範囲選択と、スラー・松葉）
   // （ステップ4-7a：ショートカット・範囲の音をまとめて変える・音名キーで入れる）
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
+  // （ステップ5-1：タイトル・作曲者・速度記号・テンポを変える）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -38,6 +39,7 @@
     deleteRange,
     transposeRange,
     pitchForLetter,
+    setScoreInfo,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -499,6 +501,37 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleSettings
+  // 「楽譜の設定」タブで値が確定したとき：値をチェックして楽譜データを変える
+  //   field … 項目の名前（"title"・"composer"・"tempoText"・"tempo"）
+  //   text  … 入力された文字
+  // ----------------------------------------------------------
+  function handleSettings(field, text) {
+    message = "";
+    const trimmed = text.trim(); // 前後の空白を取る
+
+    if (field === "tempo") {
+      // テンポ：20〜300 の整数だけ受け付ける
+      const tempo = Number(trimmed);
+      if (trimmed === "" || !Number.isInteger(tempo) || tempo < 20 || tempo > 300) {
+        message = "テンポは 20〜300 の数字で入れてください";
+        return;
+      }
+      commit(setScoreInfo(score, "tempo", tempo));
+      return;
+    }
+
+    if (field === "title") {
+      // タイトル：空にしたら「無題」に戻す
+      commit(setScoreInfo(score, "title", trimmed === "" ? "無題" : trimmed));
+      return;
+    }
+
+    // 作曲者・速度記号：そのまま（空でもよい）
+    commit(setScoreInfo(score, field, trimmed));
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -605,7 +638,7 @@
 
 <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
 <div class="editor">
-  <TopBar tempo={score.tempo} canUndo={history.undo.length > 0} canRedo={history.redo.length > 0} onundo={handleUndo} onredo={handleRedo} />
+  <TopBar tempo={score.tempo} tempoText={score.tempoText} canUndo={history.undo.length > 0} canRedo={history.redo.length > 0} onundo={handleUndo} onredo={handleRedo} />
   <ToolTabs
     {duration}
     {dotted}
@@ -627,6 +660,8 @@
     {spanState}
     {canSpanRange}
     onspanner={handleSpanner}
+    {score}
+    onsettings={handleSettings}
   />
   <SelectionInfo {score} {selection} {range} {message} />
 
