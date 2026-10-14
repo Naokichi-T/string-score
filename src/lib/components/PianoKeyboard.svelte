@@ -2,13 +2,17 @@
   // ==========================================================
   // PianoKeyboard.svelte
   // 画面の下に出す鍵盤
-  // （ステップ4-1では見た目だけ。押して音を入れるのはステップ4-2で作る）
+  // ・押すと、その音を親に知らせる（onpress）
+  // ・◀ ▶ ボタンで1オクターブずつずらす（onshift）
   // ==========================================================
 
   // 親から受け取るもの
   //   startOctave … 一番左のドのオクターブ（4 なら ド4 から）
   //   octaves     … 何オクターブ分を並べるか
-  let { startOctave = 3, octaves = 3 } = $props();
+  //   onpress     … 鍵盤が押されたときに呼ぶ関数（{ step, alter, octave } を渡す）
+  //                 黒鍵は「左どなりの白鍵の♯」として渡す（♭にするかは親が決める）
+  //   onshift     … ◀ ▶ が押されたときに呼ぶ関数（-1 か 1 を渡す）
+  let { startOctave = 3, octaves = 3, onpress = () => {}, onshift = () => {} } = $props();
 
   // 白鍵の音名（1オクターブ分）
   const WHITE_STEPS = ["C", "D", "E", "F", "G", "A", "B"];
@@ -60,30 +64,43 @@
 </script>
 
 <div class="keyboard-area">
+  <!-- 1オクターブ下へ -->
+  <button class="shift" onclick={() => onshift(-1)} title="1オクターブ下へ">◀</button>
+
   <div class="keyboard" style="width: {whiteKeys.length * WHITE_WIDTH}px">
     <!-- 白鍵 -->
     {#each whiteKeys as key (key.step + key.octave)}
-      <div class="white-key" style="width: {WHITE_WIDTH}px">
+      <button class="white-key" style="width: {WHITE_WIDTH}px" onclick={() => onpress({ step: key.step, alter: 0, octave: key.octave })}>
         <!-- ドの鍵盤にだけ、オクターブの数字も付ける（どこが何オクターブかわかるように） -->
         <span class="label">{STEP_NAMES[key.step]}{key.step === "C" ? key.octave : ""}</span>
-      </div>
+      </button>
     {/each}
 
     <!-- 黒鍵（白鍵の上に重ねる） -->
     {#each blackKeys as key (key.step + key.octave)}
-      <div class="black-key" style="left: {key.left}px"></div>
+      <button class="black-key" style="left: {key.left}px" aria-label="{STEP_NAMES[key.step]}♯{key.octave}" onclick={() => onpress({ step: key.step, alter: 1, octave: key.octave })}></button>
     {/each}
   </div>
+
+  <!-- 1オクターブ上へ -->
+  <button class="shift" onclick={() => onshift(1)} title="1オクターブ上へ">▶</button>
 </div>
 
 <style>
   .keyboard-area {
     display: flex;
     justify-content: center; /* 鍵盤を中央に置く */
+    align-items: center;
+    gap: 8px;
     padding: 8px 16px;
     background: #f3f4f6;
     border-top: 1px solid #ddd;
     overflow-x: auto; /* 画面が狭いときは横スクロール */
+  }
+  .shift {
+    height: 60px;
+    padding: 0 10px;
+    font-size: 16px;
   }
   .keyboard {
     position: relative; /* 黒鍵の位置の基準にする */
@@ -100,7 +117,11 @@
     display: flex;
     align-items: flex-end; /* 音名を下の方に書く */
     justify-content: center;
-    padding-bottom: 6px;
+    padding: 0 0 6px;
+    cursor: pointer;
+  }
+  .white-key:active {
+    background: #dbeafe; /* 押している間はうすい青 */
   }
   .label {
     font-size: 11px;
@@ -112,6 +133,12 @@
     width: 24px;
     height: 65%;
     background: #222;
+    border: none;
     border-radius: 0 0 3px 3px;
+    padding: 0;
+    cursor: pointer;
+  }
+  .black-key:active {
+    background: #2563eb; /* 押している間は青 */
   }
 </style>
