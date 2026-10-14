@@ -2,22 +2,26 @@
   // ==========================================================
   // TopBar.svelte
   // 編集ページの一番上のバー
-  // （ステップ4-1では見た目だけ。ボタンは後のステップで動くようにする）
+  // （ステップ4-3：元に戻す・やり直しのボタンが動くようになった。ほかのボタンは後のステップで）
   // ==========================================================
 
   // 親から受け取るもの
-  //   tempo … テンポ（♩＝○○ の数字）
-  let { tempo } = $props();
+  //   tempo   … テンポ（♩＝○○ の数字）
+  //   canUndo … 元に戻せるか（false ならボタンを押せない）
+  //   canRedo … やり直せるか
+  //   onundo  … 元に戻すボタンが押されたときに呼ぶ関数
+  //   onredo  … やり直しボタンが押されたときに呼ぶ関数
+  let { tempo, canUndo = false, canRedo = false, onundo = () => {}, onredo = () => {} } = $props();
 </script>
 
 <header class="top-bar">
   <!-- アプリの名前（押すとトップページに戻る） -->
   <a class="app-name" href="/">string-score</a>
 
-  <!-- 元に戻す・やり直し（ステップ4-3で動くようにする） -->
+  <!-- 元に戻す・やり直し -->
   <div class="group">
-    <button disabled title="元に戻す">↶ 元に戻す</button>
-    <button disabled title="やり直し">↷ やり直し</button>
+    <button disabled={!canUndo} onclick={() => onundo()} title="元に戻す（Ctrl＋Z / ⌘＋Z）">↶ 元に戻す</button>
+    <button disabled={!canRedo} onclick={() => onredo()} title="やり直し（Ctrl＋Shift＋Z / ⌘＋Shift＋Z）"> ↷ やり直し </button>
   </div>
 
   <!-- 再生（ステップ6で動くようにする） -->

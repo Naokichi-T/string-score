@@ -4,6 +4,7 @@
   // 道具のタブ（音符・記号・小節・楽譜の設定）
   // タブを押すと、その下に並ぶボタンが切り替わる
   // （ステップ4-2：「音符」タブに長さ・付点・休符のボタンを追加）
+  // （ステップ4-3：臨時記号・高さ・タイ・削除のボタンを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
@@ -15,7 +16,24 @@
   //   onduration   … 長さのボタンが押されたときに呼ぶ関数（長さの名前を渡す）
   //   ondot        … 付点のボタンが押されたときに呼ぶ関数
   //   onrest       … 休符のボタンが押されたときに呼ぶ関数
-  let { duration, dotted, canUse = () => true, onduration = () => {}, ondot = () => {}, onrest = () => {} } = $props();
+  //   noteSelected … 音符（休符ではない）を選んでいるか（false なら臨時記号などのボタンを押せない）
+  //   onaccidental … 臨時記号のボタンが押されたときに呼ぶ関数（1：♯、-1：♭、0：♮ を渡す）
+  //   onstep       … ▲ ▼ が押されたときに呼ぶ関数（1：半音上、-1：半音下 を渡す）
+  //   ontie        … タイのボタンが押されたときに呼ぶ関数
+  //   ondelete     … 削除のボタンが押されたときに呼ぶ関数
+  let {
+    duration,
+    dotted,
+    canUse = () => true,
+    onduration = () => {},
+    ondot = () => {},
+    onrest = () => {},
+    noteSelected = false,
+    onaccidental = () => {},
+    onstep = () => {},
+    ontie = () => {},
+    ondelete = () => {},
+  } = $props();
 
   // タブの一覧（id はプログラムの中で使う名前、label は画面に出す名前）
   const TABS = [
@@ -40,6 +58,13 @@
   // 付点・休符のボタンに出す記号（楽譜用フォントの文字）
   const DOT_ICON = "\uE1D5\uE1E7"; // 4分音符＋付点
   const REST_ICON = "\uE4E5"; // 4分休符
+
+  // 臨時記号のボタン（alter：音の高さをどれだけ変えるか、icon：楽譜用フォントの文字）
+  const ACCIDENTALS = [
+    { alter: 1, icon: "\uE262", name: "シャープ（♯）" },
+    { alter: -1, icon: "\uE260", name: "フラット（♭）" },
+    { alter: 0, icon: "\uE261", name: "ナチュラル（♮）" },
+  ];
 
   // 今選んでいるタブ
   let activeTab = $state("note");
@@ -86,6 +111,27 @@
         <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする" aria-label="休符にする">
           <span class="icon flat">{REST_ICON}</span>
         </button>
+      </div>
+
+      <!-- 臨時記号（音符を選んでいるときだけ押せる） -->
+      <div class="group">
+        {#each ACCIDENTALS as acc (acc.alter)}
+          <button class="tool" disabled={!noteSelected} onclick={() => onaccidental(acc.alter)} title={acc.name} aria-label={acc.name}>
+            <span class="icon accidental">{acc.icon}</span>
+          </button>
+        {/each}
+      </div>
+
+      <!-- 半音上げる・下げる -->
+      <div class="group">
+        <button class="tool text" disabled={!noteSelected} onclick={() => onstep(1)} title="半音上げる（↑）"> ▲ </button>
+        <button class="tool text" disabled={!noteSelected} onclick={() => onstep(-1)} title="半音下げる（↓）"> ▼ </button>
+      </div>
+
+      <!-- タイ・削除 -->
+      <div class="group">
+        <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ"> タイ </button>
+        <button class="tool text wide" disabled={!noteSelected} onclick={() => ondelete()} title="音符を休符にする（Delete）"> 削除 </button>
       </div>
     {:else if activeTab === "symbol"}
       <span class="placeholder">（弓・指番号・強弱などのボタンをステップ4-4で作ります）</span>
@@ -164,6 +210,15 @@
   }
   .icon.flat {
     top: -1px; /* 全音符・休符は符尾がないので、ずらす量を小さくする */
+  }
+  .icon.accidental {
+    top: 0; /* 臨時記号は文字の基準線の上下にまたがる形なので、ずらさない */
+  }
+  .tool.text {
+    font-size: 15px; /* 文字のボタン（▲ ▼ タイ 削除） */
+  }
+  .tool.wide {
+    width: 52px;
   }
   .placeholder {
     color: #999;

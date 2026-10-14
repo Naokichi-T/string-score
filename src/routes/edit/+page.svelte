@@ -3,6 +3,7 @@
   // 編集ページ（/edit）
   // 楽譜データと「選択中の場所」を持ち、画面の部品に配る
   // （ステップ4-2：長さのボタン・付点・休符・鍵盤で音を入れる（上書き））
+  // （ステップ4-3：高さ・臨時記号・タイ・削除・元に戻す・やり直し）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -11,7 +12,8 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import { createEmptyScore, keyAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote } from "#lib/score/selection.js";
-  import { canFit, replaceAt, setDuration, nextPosition } from "#lib/score/edit.js";
+  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie } from "#lib/score/edit.js";
+  import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
 
   // 楽譜データ（空の弦楽四重奏で始める）
@@ -19,6 +21,10 @@
 
   // 選択中の場所 { part, measure, note }（何も選んでいないときは null）
   let selection = $state(null);
+
+  // 元に戻す・やり直しの履歴
+  // （$state.raw：中身を細かく見張らず、入れ替えたときだけ画面を更新する）
+  let history = $state.raw(createHistory());
 
   // 次に入れる音の長さと付点
   let duration = $state("quarter");
@@ -33,6 +39,12 @@
   // 最後に選んでいたパート（パートが変わったときだけ鍵盤の音域を切り替えるため）
   let lastPart = null;
 
+  // 選んでいるのが音符（休符ではない）か（臨時記号などのボタンを押せるかどうかに使う）
+  let noteSelected = $derived.by(() => {
+    const note = getSelectedNote(score, selection);
+    return !!note && !note.rest;
+  });
+
   // ----------------------------------------------------------
   // 選んでいるパートが変わったら、鍵盤の音域をその楽器に合わせる
   // ----------------------------------------------------------
@@ -44,6 +56,47 @@
     }
     lastPart = part;
   });
+
+  // ----------------------------------------------------------
+  // 関数：commit
+  // 楽譜を変えるときは必ずこの関数を通す
+  // 変える前の状態を履歴に残してから、新しい楽譜データと選択中の場所に入れ替える
+  //   newScore     … 新しい楽譜データ
+  //   newSelection … 新しい選択中の場所（省略したら今のまま）
+  // ----------------------------------------------------------
+  function commit(newScore, newSelection = selection) {
+    // 何も変わっていなければ、履歴に残さない
+    if (newScore === score) return;
+    history = record(history, { score: score, selection: selection });
+    score = newScore;
+    selection = newSelection;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleUndo
+  // 元に戻す
+  // ----------------------------------------------------------
+  function handleUndo() {
+    const result = undo(history, { score: score, selection: selection });
+    if (!result) return;
+    history = result.history;
+    score = result.entry.score;
+    selection = result.entry.selection;
+    message = "";
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleRedo
+  // やり直す
+  // ----------------------------------------------------------
+  function handleRedo() {
+    const result = redo(history, { score: score, selection: selection });
+    if (!result) return;
+    history = result.history;
+    score = result.entry.score;
+    selection = result.entry.selection;
+    message = "";
+  }
 
   // ----------------------------------------------------------
   // 関数：canUse
@@ -82,7 +135,7 @@
     if (d === "16th") dotted = false;
 
     if (selection && canFit(score, selection, d, dotted ? 1 : 0)) {
-      score = setDuration(score, selection, d, dotted ? 1 : 0);
+      commit(setDuration(score, selection, d, dotted ? 1 : 0));
     }
   }
 
@@ -112,7 +165,7 @@
       message = newDots === 1 && note.duration === "16th" ? "16分音符には付点を付けられません" : "付点を付けると小節に入りきりません";
       return;
     }
-    score = setDuration(score, selection, note.duration, newDots);
+    commit(setDuration(score, selection, note.duration, newDots));
     // ボタンの表示も、選んでいる音に合わせる
     duration = note.duration;
     dotted = newDots === 1;
@@ -138,8 +191,7 @@
     const placed = replaceAt(score, selection, newNote);
     // 次の場所へ（最後の小節の終わりなら、小節が1つ増える）
     const next = nextPosition(placed, selection);
-    score = next.score;
-    selection = next.selection;
+    commit(next.score, next.selection);
     return true;
   }
 
@@ -172,6 +224,65 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：playSelected
+  // 選んでいる音を鳴らす（高さを変えたあとなどに、耳で確かめるため）
+  // ----------------------------------------------------------
+  function playSelected() {
+    const note = getSelectedNote(score, selection);
+    if (note && !note.rest) playPitch(note.pitch);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleTranspose
+  // 選んでいる音の高さを変える（▲ ▼ ボタン、↑ ↓ キー）
+  //   semitones … 半音の数（1・-1 で半音、12・-12 で1オクターブ）
+  // ----------------------------------------------------------
+  function handleTranspose(semitones) {
+    if (!noteSelected) return;
+    message = "";
+    const newScore = transposeNote(score, selection, semitones);
+    if (newScore === score) {
+      message = "これ以上は高さを変えられません";
+      return;
+    }
+    commit(newScore);
+    playSelected();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleAccidental
+  // 臨時記号のボタンが押されたとき
+  //   alter … 1：♯、-1：♭、0：♮
+  // ----------------------------------------------------------
+  function handleAccidental(alter) {
+    if (!noteSelected) return;
+    message = "";
+    commit(setAccidental(score, selection, alter));
+    playSelected();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleTie
+  // タイのボタンが押されたとき
+  // ----------------------------------------------------------
+  function handleTie() {
+    if (!noteSelected) return;
+    const result = toggleTie(score, selection);
+    message = result.error;
+    commit(result.score);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleDelete
+  // 削除のボタン・Delete キー：選んでいる音符を同じ長さの休符にする
+  // ----------------------------------------------------------
+  function handleDelete() {
+    if (!noteSelected) return;
+    message = "";
+    commit(deleteNote(score, selection));
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -188,7 +299,30 @@
     const tag = event.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-    if (event.key === "ArrowRight") {
+    // Ctrl キー（Mac は ⌘ キー）を押しているか
+    const command = event.ctrlKey || event.metaKey;
+
+    if (command && (event.key === "z" || event.key === "Z")) {
+      // Ctrl＋Z：元に戻す、Ctrl＋Shift＋Z：やり直し
+      if (event.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+      event.preventDefault();
+    } else if (command && (event.key === "y" || event.key === "Y")) {
+      // Ctrl＋Y：やり直し（Windows でよく使われる）
+      handleRedo();
+      event.preventDefault();
+    } else if (event.key === "ArrowUp") {
+      // ↑：半音上げる（Ctrl / ⌘ と一緒なら1オクターブ上げる）
+      handleTranspose(command ? 12 : 1);
+      event.preventDefault(); // 画面が上にスクロールしないようにする
+    } else if (event.key === "ArrowDown") {
+      // ↓：半音下げる（Ctrl / ⌘ と一緒なら1オクターブ下げる）
+      handleTranspose(command ? -12 : -1);
+      event.preventDefault();
+    } else if (event.key === "ArrowRight") {
       // → キー：次の音へ
       selection = moveSelection(score, selection, 1);
       message = "";
@@ -198,6 +332,10 @@
       selection = moveSelection(score, selection, -1);
       message = "";
       event.preventDefault();
+    } else if (event.key === "Delete" || event.key === "Backspace") {
+      // Delete / Backspace：音符を休符にする
+      handleDelete();
+      event.preventDefault(); // Backspace でブラウザが前のページに戻らないようにする
     } else if (event.key === "Escape") {
       // Esc キー：選択を外す
       selection = null;
@@ -214,8 +352,20 @@
 
 <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
 <div class="editor">
-  <TopBar tempo={score.tempo} />
-  <ToolTabs {duration} {dotted} {canUse} onduration={handleDuration} ondot={handleDot} onrest={handleRest} />
+  <TopBar tempo={score.tempo} canUndo={history.undo.length > 0} canRedo={history.redo.length > 0} onundo={handleUndo} onredo={handleRedo} />
+  <ToolTabs
+    {duration}
+    {dotted}
+    {canUse}
+    onduration={handleDuration}
+    ondot={handleDot}
+    onrest={handleRest}
+    {noteSelected}
+    onaccidental={handleAccidental}
+    onstep={handleTranspose}
+    ontie={handleTie}
+    ondelete={handleDelete}
+  />
   <SelectionInfo {score} {selection} {message} />
 
   <!-- 五線譜の部分だけスクロールする -->
