@@ -4,6 +4,7 @@
   // 楽譜データと「選択中の場所」を持ち、画面の部品に配る
   // （ステップ4-2：長さのボタン・付点・休符・鍵盤で音を入れる（上書き））
   // （ステップ4-3：高さ・臨時記号・タイ・削除・元に戻す・やり直し）
+  // （ステップ4-4：挿入モード）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -12,7 +13,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import { createEmptyScore, keyAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote } from "#lib/score/selection.js";
-  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie } from "#lib/score/edit.js";
+  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie, canInsert, canResize, insertAt, resizeAt } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
 
@@ -29,6 +30,9 @@
   // 次に入れる音の長さと付点
   let duration = $state("quarter");
   let dotted = $state(false);
+
+  // 入力のしかた（'overwrite'：上書き、'insert'：挿入）
+  let mode = $state("overwrite");
 
   // 知らせたいこと（画面の「選択中」の右に赤く出す）
   let message = $state("");
@@ -105,7 +109,50 @@
   // ----------------------------------------------------------
   function canUse(d, dots) {
     if (!selection) return true;
+    // 挿入モードでは「長さを変えて後ろをずらせるか」で調べる
+    if (mode === "insert") return canResize(score, selection, d, dots);
     return canFit(score, selection, d, dots);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：canPlace
+  // 選んでいる場所に、この長さの音を入れられるかを調べる（鍵盤・休符ボタン用）
+  //   上書きモード … 選んでいる音の頭から小節の終わりまでに入るか
+  //   挿入モード   … 小節の終わりの休符の分だけずらして入るか
+  // ----------------------------------------------------------
+  function canPlace(d, dots) {
+    if (!selection) return false;
+    if (mode === "insert") return canInsert(score, selection, d, dots);
+    return canFit(score, selection, d, dots);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：changeLength
+  // 選んでいる音の長さを変える（モードに合わせて上書きか、後ろをずらすかを選ぶ）
+  // 変えられたら true を返す
+  // ----------------------------------------------------------
+  function changeLength(d, dots) {
+    if (mode === "insert") {
+      const result = resizeAt(score, selection, d, dots);
+      if (result.error) {
+        message = result.error;
+        return false;
+      }
+      commit(result.score);
+      return true;
+    }
+    if (!canFit(score, selection, d, dots)) return false;
+    commit(setDuration(score, selection, d, dots));
+    return true;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleMode
+  // 上書き・挿入の切り替え
+  // ----------------------------------------------------------
+  function handleMode(newMode) {
+    mode = newMode;
+    message = "";
   }
 
   // ----------------------------------------------------------
@@ -127,15 +174,15 @@
     message = "";
     // 今の付点のまま入らないなら、付点を外す
     let dots = dotted ? 1 : 0;
-    if (selection && !canFit(score, selection, d, dots)) dots = 0;
+    if (selection && !canUse(d, dots)) dots = 0;
 
     duration = d;
     dotted = dots === 1;
     // 16分音符には付点を付けられない
     if (d === "16th") dotted = false;
 
-    if (selection && canFit(score, selection, d, dotted ? 1 : 0)) {
-      commit(setDuration(score, selection, d, dotted ? 1 : 0));
+    if (selection && canUse(d, dotted ? 1 : 0)) {
+      changeLength(d, dotted ? 1 : 0);
     }
   }
 
@@ -161,11 +208,11 @@
 
     // 選んでいる音の付点を切り替える
     const newDots = (note.dots ?? 0) > 0 ? 0 : 1;
-    if (!canFit(score, selection, note.duration, newDots)) {
+    if (!canUse(note.duration, newDots)) {
       message = newDots === 1 && note.duration === "16th" ? "16分音符には付点を付けられません" : "付点を付けると小節に入りきりません";
       return;
     }
-    commit(setDuration(score, selection, note.duration, newDots));
+    changeLength(note.duration, newDots);
     // ボタンの表示も、選んでいる音に合わせる
     duration = note.duration;
     dotted = newDots === 1;
@@ -182,12 +229,20 @@
       message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
       return false;
     }
-    if (!canFit(score, selection, newNote.duration, newNote.dots)) {
-      message = "その長さは小節に入りきりません。短い長さを選んでください";
+    if (!canPlace(newNote.duration, newNote.dots)) {
+      message = mode === "insert" ? "この小節には空きがありません（小節の終わりの休符の分だけ挿入できます）" : "その長さは小節に入りきりません。短い長さを選んでください";
       return false;
     }
     message = "";
-    // 置く
+
+    // 挿入モード：選んでいる音の前に入れて、後ろをずらす
+    if (mode === "insert") {
+      const result = insertAt(score, selection, newNote);
+      commit(result.score, result.selection);
+      return true;
+    }
+
+    // 上書きモード：置く
     const placed = replaceAt(score, selection, newNote);
     // 次の場所へ（最後の小節の終わりなら、小節が1つ増える）
     const next = nextPosition(placed, selection);
@@ -340,6 +395,9 @@
       // Esc キー：選択を外す
       selection = null;
       message = "";
+    } else if (!command && (event.key === "i" || event.key === "I")) {
+      // I キー：上書き・挿入を切り替える
+      handleMode(mode === "insert" ? "overwrite" : "insert");
     }
   }
 </script>
@@ -365,6 +423,8 @@
     onstep={handleTranspose}
     ontie={handleTie}
     ondelete={handleDelete}
+    {mode}
+    onmode={handleMode}
   />
   <SelectionInfo {score} {selection} {message} />
 

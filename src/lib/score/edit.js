@@ -341,3 +341,131 @@ export function toggleTie(score, selection) {
     error: "",
   };
 }
+
+// ==========================================================
+// ここから下は、挿入モードの関数（ステップ4-4）
+// 挿入モードでは、後ろの音を右にずらしたり左に詰めたりする
+// ずらせる量は「小節の終わりに続いている休符」の分だけ
+// （まん中の休符はわざと入れたものかもしれないので、詰めない）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：contentCount
+// 小節の音の並びのうち、「終わりに続く休符」より前にある音の数を返す
+// 例：[ド, 休, レ, 休, 休] → 3（ド・休・レ。最後の2つの休符は数えない）
+// ----------------------------------------------------------
+function contentCount(notes) {
+  let count = notes.length;
+  while (count > 0 && notes[count - 1].rest) {
+    count = count - 1;
+  }
+  return count;
+}
+
+// ----------------------------------------------------------
+// 関数：rebuildMeasure
+// 小節の中身を「並べたい音」で作り直し、残りを休符で埋める
+//   contents … 並べたい音の配列（頭から順に）
+//   time     … その小節の拍子
+// 戻り値：作り直した音の配列（小節に入りきらないときは null）
+// ----------------------------------------------------------
+function rebuildMeasure(contents, time) {
+  const total = measureTicks(time);
+  const used = contents.reduce((sum, note) => sum + noteTicks(note), 0);
+  if (used > total) return null; // 入りきらない
+  return [...contents, ...restsForSpan(used, total - used, time)];
+}
+
+// ----------------------------------------------------------
+// 関数：insertedContents
+// 選んでいる音の前に新しい音を入れたときの「並べたい音」を作る
+// （終わりに続く休符は取りのぞく。あとで rebuildMeasure が埋め直す）
+// ----------------------------------------------------------
+function insertedContents(notes, index, newNote) {
+  const count = contentCount(notes);
+  const before = notes.slice(0, index); // 選んでいる音より前
+  const after = index < count ? notes.slice(index, count) : []; // 選んでいる音から、終わりの休符の前まで
+  return [...before, newNote, ...after];
+}
+
+// ----------------------------------------------------------
+// 関数：resizedContents
+// 選んでいる音の長さを変えたときの「並べたい音」を作る（後ろの音はずれる）
+// ----------------------------------------------------------
+function resizedContents(notes, index, newNote) {
+  const count = contentCount(notes);
+  const before = notes.slice(0, index);
+  const after = index + 1 < count ? notes.slice(index + 1, count) : [];
+  return [...before, newNote, ...after];
+}
+
+// ----------------------------------------------------------
+// 関数：canInsert
+// 選んでいる音の前に、この長さの音を挿入できるか調べる
+// ----------------------------------------------------------
+export function canInsert(score, selection, duration, dots) {
+  if (!selection) return false;
+  if (duration === "16th" && dots > 0) return false;
+  const notes = score.parts[selection.part].measures[selection.measure].notes;
+  const newNote = { rest: true, duration: duration, dots: dots }; // 長さを調べるだけなので休符で代用
+  const contents = insertedContents(notes, selection.note, newNote);
+  return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;
+}
+
+// ----------------------------------------------------------
+// 関数：canResize
+// 選んでいる音の長さを変えて、後ろをずらせるか調べる
+// ----------------------------------------------------------
+export function canResize(score, selection, duration, dots) {
+  if (!selection) return false;
+  if (duration === "16th" && dots > 0) return false;
+  const notes = score.parts[selection.part].measures[selection.measure].notes;
+  const newNote = { ...notes[selection.note], duration: duration, dots: dots };
+  const contents = resizedContents(notes, selection.note, newNote);
+  return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;
+}
+
+// ----------------------------------------------------------
+// 関数：insertAt
+// 選んでいる音の前に新しい音（休符）を挿入する。後ろの音は右にずれる
+// 戻り値：{ score: 新しい楽譜データ, selection: 新しい選択中の場所, error: 知らせる文 }
+//   選択は「もともと選んでいた音」（右にずれた位置）のままにする
+// ----------------------------------------------------------
+export function insertAt(score, selection, newNote) {
+  const notes = score.parts[selection.part].measures[selection.measure].notes;
+  const contents = insertedContents(notes, selection.note, newNote);
+  const rebuilt = rebuildMeasure(contents, timeAt(score, selection.measure));
+  if (!rebuilt) {
+    return { score: score, selection: selection, error: "この小節には空きがありません" };
+  }
+
+  const newScore = cloneScore(score);
+  newScore.parts[selection.part].measures[selection.measure].notes = rebuilt;
+
+  // 選んでいた音は1つ右にずれる
+  const shifted = { ...selection, note: selection.note + 1 };
+  if (shifted.note < rebuilt.length) {
+    return { score: newScore, selection: shifted, error: "" };
+  }
+  // 小節の最後まで埋まったときは、次の小節へ（最後の小節なら小節を足す）
+  const next = nextPosition(newScore, selection);
+  return { score: next.score, selection: next.selection, error: "" };
+}
+
+// ----------------------------------------------------------
+// 関数：resizeAt
+// 選んでいる音の長さを変える。後ろの音は右にずれる・左に詰まる
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文 }
+// ----------------------------------------------------------
+export function resizeAt(score, selection, duration, dots) {
+  const notes = score.parts[selection.part].measures[selection.measure].notes;
+  const newNote = { ...JSON.parse(JSON.stringify(notes[selection.note])), duration: duration, dots: dots };
+  const contents = resizedContents(notes, selection.note, newNote);
+  const rebuilt = rebuildMeasure(contents, timeAt(score, selection.measure));
+  if (!rebuilt) {
+    return { score: score, error: "この小節には空きがありません" };
+  }
+  const newScore = cloneScore(score);
+  newScore.parts[selection.part].measures[selection.measure].notes = rebuilt;
+  return { score: newScore, error: "" };
+}

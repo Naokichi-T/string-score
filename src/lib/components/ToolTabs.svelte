@@ -5,6 +5,7 @@
   // タブを押すと、その下に並ぶボタンが切り替わる
   // （ステップ4-2：「音符」タブに長さ・付点・休符のボタンを追加）
   // （ステップ4-3：臨時記号・高さ・タイ・削除のボタンを追加）
+  // （ステップ4-4：上書き・挿入の切り替えを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
@@ -21,7 +22,11 @@
   //   onstep       … ▲ ▼ が押されたときに呼ぶ関数（1：半音上、-1：半音下 を渡す）
   //   ontie        … タイのボタンが押されたときに呼ぶ関数
   //   ondelete     … 削除のボタンが押されたときに呼ぶ関数
+  //   mode         … 入力のしかた（'overwrite'：上書き、'insert'：挿入）
+  //   onmode       … 切り替えのボタンが押されたときに呼ぶ関数（'overwrite' か 'insert' を渡す）
   let {
+    mode = "overwrite",
+    onmode = () => {},
     duration,
     dotted,
     canUse = () => true,
@@ -83,6 +88,12 @@
   <!-- 選んでいるタブの中身 -->
   <div class="tab-content">
     {#if activeTab === "note"}
+      <!-- 入力のしかたの切り替え（上書き・挿入） -->
+      <div class="mode-switch">
+        <button class:on={mode === "overwrite"} onclick={() => onmode("overwrite")} title="選んでいる所を新しい音に置き換える（I キーで切り替え）"> 上書き </button>
+        <button class:on={mode === "insert"} onclick={() => onmode("insert")} title="選んでいる音の前に入れて、後ろの音をずらす（I キーで切り替え）"> 挿入 </button>
+      </div>
+
       <!-- 長さのボタン（今の長さは色が付く。入らない長さは押せない） -->
       <div class="group">
         {#each DURATION_ORDER as d (d)}
@@ -223,5 +234,27 @@
   .placeholder {
     color: #999;
     font-size: 14px;
+  }
+  .mode-switch {
+    display: flex; /* 2つのボタンをくっつけて並べる */
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    overflow: hidden; /* 角の丸みからボタンがはみ出さないようにする */
+  }
+  .mode-switch button {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+    border: none;
+    background: #fff;
+    cursor: pointer;
+  }
+  .mode-switch button + button {
+    border-left: 1px solid #ccc; /* 2つのボタンの間の線 */
+  }
+  .mode-switch button.on {
+    background: #f59e0b; /* 今のモードはオレンジ（長さのボタンの青と区別する） */
+    color: #fff;
+    font-weight: bold;
   }
 </style>
