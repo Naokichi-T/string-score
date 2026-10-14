@@ -44,6 +44,7 @@
     insertMeasure,
     deleteMeasures,
     changeTime,
+    changeKey,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -617,6 +618,30 @@
     commit(result.score, newSelection);
   }
 
+  // 選んでいる小節の調（「小節」タブの調の選ぶ欄に出す。何も選んでいないときは1小節目）
+  let currentKey = $derived(keyAt(score, selection ? selection.measure : 0));
+
+  // ----------------------------------------------------------
+  // 関数：handleKeySignature
+  // 「小節」タブで調を選んだとき
+  //   key … 新しい調（♯の数がプラス、♭の数がマイナス）
+  // 効かせる小節は、拍子と同じ決め方
+  //   範囲を選んでいるとき … 範囲にかかる小節だけ
+  //   音を選んでいるとき   … その小節から、次に調が変わる所まで
+  //   何も選んでいないとき … 1小節目から、次に調が変わる所まで
+  // 音の高さは変えないので、選択はそのまま
+  // ----------------------------------------------------------
+  function handleKeySignature(key) {
+    message = "";
+    if (range) {
+      commit(changeKey(score, range.start.measure, range.end.measure, key));
+    } else if (selection) {
+      commit(changeKey(score, selection.measure, null, key));
+    } else {
+      commit(changeKey(score, 0, null, key));
+    }
+  }
+
   // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
@@ -752,7 +777,9 @@
     onmeasure={handleMeasure}
     {currentTime}
     ontime={handleTime}
-  />ｓ
+    {currentKey}
+    onkey={handleKeySignature}
+  />
   <SelectionInfo {score} {selection} {range} {message} />
 
   <!-- 五線譜の部分だけスクロールする -->

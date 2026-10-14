@@ -1015,3 +1015,58 @@ export function changeTime(score, from, to, time) {
   }
   return { score: newScore, error: "" };
 }
+
+// ==========================================================
+// ここから下は、調を変える関数（ステップ5-4）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：changeKey
+// from 小節目から to 小節目までの調を変える（全パートいっしょに。番号は 0 から）
+//   key … 新しい調（♯の数がプラス、♭の数がマイナス。例：2 → ♯2つ、-3 → ♭3つ）
+//   to  … null のときは「次に調が変わる小節の手前まで（なければ最後まで）」
+// 音のデータ（高さ）は変えない（臨時記号の表示は、描くときに自動で付け直される）
+// 戻り値：新しい楽譜データ（何も変わらないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function changeKey(score, from, to, key) {
+  const count = score.measures.length; // 小節の数
+
+  // ① 効かせる最後の小節を決める（to が null なら、次に調が変わる小節の手前まで）
+  let last = to;
+  if (last === null) {
+    last = from;
+    while (last + 1 < count && score.measures[last + 1].key === undefined) {
+      last = last + 1;
+    }
+  }
+
+  // ② 効かせる範囲のすぐ後ろの小節の調（変える前の調）を覚えておく
+  const keyAfter = keyAt(score, last);
+
+  const newScore = cloneScore(score);
+
+  // ③ 楽譜全体の小節の情報に、調を書く
+  newScore.measures[from].key = key;
+  // 範囲の中にあった、ほかの調の変化は消す
+  for (let m = from + 1; m <= last; m++) {
+    delete newScore.measures[m].key;
+  }
+  // 範囲のすぐ後ろの小節には、元の調を書いておく（後ろの小節まで変わらないように）
+  if (last + 1 < count && newScore.measures[last + 1].key === undefined) {
+    newScore.measures[last + 1].key = keyAfter;
+  }
+
+  // ④ 前の小節と同じ調になった所は、調を書かない（1小節目は必ず残す）
+  for (let m = Math.max(from, 1); m <= Math.min(last + 1, count - 1); m++) {
+    const info = newScore.measures[m];
+    if (info.key !== undefined && info.key === keyAt(newScore, m - 1)) {
+      delete info.key;
+    }
+  }
+
+  // 何も変わっていなければ、元の楽譜データを返す（「元に戻す」の履歴に残さないため）
+  if (JSON.stringify(newScore) === JSON.stringify(score)) {
+    return score;
+  }
+  return newScore;
+}

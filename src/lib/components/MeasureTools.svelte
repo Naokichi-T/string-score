@@ -1,9 +1,10 @@
 <script>
   // ==========================================================
   // MeasureTools.svelte
-  // 「小節」タブの中身（小節の追加・削除、拍子の変更のボタン）
+  // 「小節」タブの中身（小節の追加・削除、拍子・調の変更）
   // （ステップ5-2で追加）
   // （ステップ5-3：拍子の変更を追加）
+  // （ステップ5-4：調の変更を追加）
   // ==========================================================
 
   // 親から受け取るもの
@@ -12,7 +13,9 @@
   //                 "before"（前に追加）・"after"（後ろに追加）・"delete"（削除）を渡す
   //   currentTime … 選んでいる小節の拍子 { beats, beatType }（ボタンを青くするのに使う）
   //   ontime      … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子 { beats, beatType } を渡す）
-  let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {} } = $props();
+  //   currentKey  … 選んでいる小節の調（♯の数がプラス、♭の数がマイナス。選ぶ欄に出すのに使う）
+  //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
+  let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {}, currentKey = 0, onkey = () => {} } = $props();
 
   // よく使う拍子（ボタンにして並べる）
   const PRESETS = [
@@ -27,6 +30,27 @@
   // 「その他」で選べる数字
   const BEATS_CHOICES = Array.from({ length: 16 }, (_, i) => i + 1); // 上の数字：1〜16
   const BEAT_TYPE_CHOICES = [2, 4, 8]; // 下の数字：2・4・8
+
+  // 調の一覧（選ぶ欄に出す順番）
+  //   key  … データで使う数字（♯の数がプラス、♭の数がマイナス）
+  //   name … 選ぶ欄に出す名前（長調と短調は調号が同じなので、両方書く）
+  const KEYS = [
+    { key: 0, name: "なし（ハ長調・イ短調）" },
+    { key: 1, name: "♯1つ（ト長調・ホ短調）" },
+    { key: 2, name: "♯2つ（ニ長調・ロ短調）" },
+    { key: 3, name: "♯3つ（イ長調・嬰ヘ短調）" },
+    { key: 4, name: "♯4つ（ホ長調・嬰ハ短調）" },
+    { key: 5, name: "♯5つ（ロ長調・嬰ト短調）" },
+    { key: 6, name: "♯6つ（嬰ヘ長調・嬰ニ短調）" },
+    { key: 7, name: "♯7つ（嬰ハ長調・嬰イ短調）" },
+    { key: -1, name: "♭1つ（ヘ長調・ニ短調）" },
+    { key: -2, name: "♭2つ（変ロ長調・ト短調）" },
+    { key: -3, name: "♭3つ（変ホ長調・ハ短調）" },
+    { key: -4, name: "♭4つ（変イ長調・ヘ短調）" },
+    { key: -5, name: "♭5つ（変ニ長調・変ロ短調）" },
+    { key: -6, name: "♭6つ（変ト長調・変ホ短調）" },
+    { key: -7, name: "♭7つ（変ハ長調・変イ短調）" },
+  ];
 
   // 「その他」で今選んでいる数字
   let otherBeats = $state(5);
@@ -82,6 +106,21 @@
       {/each}
     </select>
     <button onclick={() => ontime({ beats: otherBeats, beatType: otherBeatType })} title="選んだ数字の拍子に変える"> 変更 </button>
+  </div>
+
+  <!-- 調：選んだらすぐ変わる（今の小節の調が選ばれた状態で出る） -->
+  <div class="group">
+    <span class="label">調</span>
+    <select
+      class="key"
+      value={currentKey}
+      onchange={(event) => onkey(Number(event.currentTarget.value))}
+      title="選んでいる小節から、次に調が変わる所までの調を変える（範囲を選んでいるときは、範囲にかかる小節だけ）"
+    >
+      {#each KEYS as item}
+        <option value={item.key}>{item.name}</option>
+      {/each}
+    </select>
   </div>
 </div>
 
