@@ -3,6 +3,7 @@
 // 楽譜データを「鳴らす音の一覧」に直すファイル（ステップ6-1）
 // 音を実際に鳴らすのは audio/sound.js の仕事。ここでは計算だけをする
 // （ステップ6-3a：スタッカート・テヌート・アクセント・スラーを、音の長さと強さに反映する）
+// （ステップ6-3b：フェルマータ。その音を2倍にのばし、ほかのパートもその間は待つ）
 //
 // 【鳴らす音の一覧の1つ分】
 // {
@@ -55,6 +56,9 @@ const GATE_SLUR = 1.0; // スラーの中：切れ目なしでつなげる
 
 // アクセントで強くする量（0〜127 の強さに足す）
 const ACCENT_BOOST = 20;
+
+// フェルマータでのばす倍率（2 なら、その音符の長さの2倍）（ステップ6-3b）
+const FERMATA_RATE = 2;
 
 // ----------------------------------------------------------
 // 関数：pitchToMidi
@@ -123,6 +127,7 @@ function noteGate(note, legato) {
 export function buildEvents(score, startMeasure, partIndex) {
   const events = [];
   const highlights = []; // 緑にする音符の一覧（ステップ6-2）
+  const fermatas = []; // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
   let totalTicks = 0;
@@ -184,6 +189,7 @@ export function buildEvents(score, startMeasure, partIndex) {
           tiedEvent.soundTicks = tiedEvent.ticks + soundLength;
           tiedEvent.ticks = tiedEvent.ticks + length;
           tiedEvent.connected = connected; // つなげるかどうかは、タイの最後の音で決める
+          tiedEvent.fermataEnd = !!note.fermata; // 最後の音にフェルマータがあるか
         } else {
           // 新しく鳴らす音
           const event = {
@@ -197,13 +203,19 @@ export function buildEvents(score, startMeasure, partIndex) {
             soundTicks: soundLength,
             connected: connected,
             velocity: velocity,
+            fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
           };
           events.push(event);
           tiedEvent = event;
         }
 
         // 緑にする音符の一覧に入れる（タイの後ろの音符も、その音符の時間だけ緑にする）
-        highlights.push({ part: p, measure: i, note: j, startTick: tick, endTick: tick + length });
+        highlights.push({ part: p, measure: i, note: j, startTick: tick, endTick: tick + length, fermataEnd: !!note.fermata });
+
+        // フェルマータ：この音符が終わる所で止まり、この音符の長さぶん（2倍になるように）のばす
+        if (note.fermata) {
+          fermatas.push({ at: tick + length, extra: length * (FERMATA_RATE - 1) });
+        }
 
         // この音にタイが付いていなければ、つながりはここで終わり
         if (!note.tie) tiedEvent = null;
@@ -213,10 +225,70 @@ export function buildEvents(score, startMeasure, partIndex) {
     });
   });
 
+  // フェルマータのぶん、時間をずらす（ステップ6-3b）
+  const points = mergeFermatas(fermatas);
+  events.forEach((event) => {
+    const start = event.startTick;
+    const end = start + event.ticks;
+    const newStart = start + shiftBefore(points, start, true);
+    const newEnd = end + shiftBefore(points, end, event.fermataEnd);
+    // のびたぶん（またいでいる音・フェルマータの音）だけ、音を出す長さも足す
+    event.soundTicks = event.soundTicks + (newEnd - newStart - event.ticks);
+    event.startTick = newStart;
+    event.ticks = newEnd - newStart;
+  });
+  highlights.forEach((h) => {
+    const newStart = h.startTick + shiftBefore(points, h.startTick, true);
+    const newEnd = h.endTick + shiftBefore(points, h.endTick, h.fermataEnd);
+    h.startTick = newStart;
+    h.endTick = newEnd;
+  });
+  points.forEach((point) => {
+    totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
+  });
+
   // 鳴り始める順に並べる（同じ時間なら上のパートから）
   events.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
 
   return { events: events, totalTicks: totalTicks, highlights: highlights };
+}
+
+// ----------------------------------------------------------
+// 関数：mergeFermatas
+// フェルマータで止まる所の一覧を、時刻の順に並べて、同じ時刻のものを1つにまとめる（ステップ6-3b）
+// 同じ時刻に複数のパートでフェルマータがあるときは、のばす量の一番大きいものにする
+// （全パートにフェルマータがあっても、待つのは1回だけにするため）
+//   fermatas … [{ at, extra }, ...]
+// 戻り値：時刻の順に並んだ [{ at, extra }, ...]
+// ----------------------------------------------------------
+function mergeFermatas(fermatas) {
+  const byTime = new Map(); // 時刻 → のばす量
+  fermatas.forEach((f) => {
+    const before = byTime.get(f.at) ?? 0;
+    byTime.set(f.at, Math.max(before, f.extra));
+  });
+  return [...byTime.entries()].map(([at, extra]) => ({ at: at, extra: extra })).sort((a, b) => a.at - b.at);
+}
+
+// ----------------------------------------------------------
+// 関数：shiftBefore
+// ある時刻より前にあるフェルマータで、どれだけ後ろにずれるかを合計する（ステップ6-3b）
+//   points    … mergeFermatas で作った一覧
+//   tick      … 調べる時刻（ティック）
+//   inclusive … ちょうど同じ時刻のフェルマータも数えるか
+//               ・音の始まり：数える（フェルマータで待ったあとに始まるので）
+//               ・音の終わり：その音自身にフェルマータがあるときだけ数える
+//                 （同じ時刻に終わるだけの、ほかの音はのばさない）
+// 戻り値：ずれる量（ティック）
+// ----------------------------------------------------------
+function shiftBefore(points, tick, inclusive) {
+  let shift = 0;
+  points.forEach((point) => {
+    if (point.at < tick || (inclusive && point.at === tick)) {
+      shift = shift + point.extra;
+    }
+  });
+  return shift;
 }
 
 // ----------------------------------------------------------

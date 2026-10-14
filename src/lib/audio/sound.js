@@ -113,8 +113,10 @@ export function loadInstruments() {
       const instrument = Soundfont(ctx, {
         instrument: name,
         kit: "FluidR3_GM", // 録音のセット（"MusyngKite" と "FluidR3_GM" の2種類がある。音の感じが違う）
-        // くり返しの情報は読み込まない（読み込むと「ラララ」と短い音がくり返されたため。読み込まなくても全音符が最後まで鳴った）
-        loadLoopData: false,
+        // くり返しの情報を読み込む（録音より長い音を、録音の一部をくり返してのばすため）
+        // ・読み込まないと、チェロの全音符（♩ = 60）が3拍目あたりで消えた（チェロの録音が3秒くらいしかないため）
+        // ・MusyngKite では「ラララ」と短い音がくり返されたが、FluidR3_GM では問題なかった
+        loadLoopData: true,
       });
       loaded[key] = instrument;
       return instrument.ready; // 読み込みが終わるのを待つ
