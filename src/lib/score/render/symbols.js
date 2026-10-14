@@ -62,6 +62,22 @@ export function addSymbols(VF, staveNote, note) {
 }
 
 // ----------------------------------------------------------
+// 関数：dynamicBaselineY
+// 強弱記号を描く高さ（文字の下端の位置）を決める
+// 松葉（クレッシェンドなど）も同じ高さにそろえるので、別の関数にしている
+//   基本：五線の一番下の線から少し下
+//   音符の玉が低いときは、その下にずらす
+//   （玉の下にアクセントなどの記号が付いているときは、そのぶんもさらに下げる）
+// ----------------------------------------------------------
+export function dynamicBaselineY(VF, staveNote, stave) {
+  let y = stave.getYForLine(4) + 32;
+  const belowCount = staveNote.getModifiersByType("Articulation").filter((a) => a.getPosition() === VF.Modifier.Position.BELOW).length;
+  const lowestNoteY = Math.max(...staveNote.getYs()) + belowCount * 12;
+  if (lowestNoteY + 26 > y) y = lowestNoteY + 26;
+  return y;
+}
+
+// ----------------------------------------------------------
 // 関数：drawDynamic
 // 強弱記号を、音符の下・五線の下にそろえて描く
 // （音符が五線より低いときは、ぶつからないようにさらに下に描く）
@@ -75,13 +91,8 @@ export function drawDynamic(VF, context, staveNote, stave, dynamic) {
   const symbol = DYNAMICS[dynamic];
   if (!symbol) return; // 表にない名前は無視する
 
-  // 基本の高さ：五線の一番下の線から少し下
-  let y = stave.getYForLine(4) + 32;
-  // 音符の玉が低いときは、その下にずらす
-  // （玉の下にアクセントなどの記号が付いているときは、そのぶんもさらに下げる）
-  const belowCount = staveNote.getModifiersByType("Articulation").filter((a) => a.getPosition() === VF.Modifier.Position.BELOW).length;
-  const lowestNoteY = Math.max(...staveNote.getYs()) + belowCount * 12;
-  if (lowestNoteY + 26 > y) y = lowestNoteY + 26;
+  // 高さ（文字の下端の位置）
+  const y = dynamicBaselineY(VF, staveNote, stave);
 
   // 横の位置：音符の玉の左端にそろえる
   const x = staveNote.getAbsoluteX();

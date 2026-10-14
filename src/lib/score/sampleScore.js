@@ -50,6 +50,7 @@ function r(duration, dots = 0) {
 // ・9小節目から：ビオラはアルト記号、チェロはヘ音記号に戻る
 // ・7〜16小節目：Violin II はずっとタイでつながる（どこで改行しても段をまたぐタイができる）
 // ・1〜3小節目と最後の小節：記号の表示の確認用に、いろいろな記号を付けている
+// ・スラーと松葉の確認用：Violin I の3・7〜8・10・14〜16小節目、Viola の3小節目、Cello の1〜2小節目
 export const sampleScore = {
   title: "お試しの楽譜",
   composer: "string-score",
@@ -98,27 +99,36 @@ export const sampleScore = {
             sym(n("G", 5, "half"), { dynamic: "f" }),
           ],
         },
-        { notes: [n("A", 5, "quarter", 1), n("G", 5, "eighth"), n("F", 5, "quarter", 0, 1)] },
+        // 3小節目：3つの音を1本のスラーでつなぐ（符尾が下向きなので上に弧）
+        {
+          notes: [sym(n("A", 5, "quarter", 1), { slur: "start" }), n("G", 5, "eighth"), sym(n("F", 5, "quarter", 0, 1), { slur: "stop" })],
+        },
         { notes: [n("F", 5, "quarter"), n("E", 5, "quarter"), n("D", 5, "quarter")] },
         // シ4（♮が付く：ヘ長調ではシは♭なので）
         { notes: [n("C", 5, "half"), n("B", 4, "quarter")] },
         { notes: [n("A", 4, "half", 1)] },
-        // 7〜16小節目
-        { notes: [n("A", 4, "quarter"), n("C", 5, "quarter"), n("F", 5, "quarter")] },
+        // 7〜8小節目：小節（画面の幅によっては段）をまたぐスラー
+        { notes: [sym(n("A", 4, "quarter"), { slur: "start" }), n("C", 5, "quarter"), n("F", 5, "quarter")] },
         {
-          notes: [n("G", 5, "eighth"), n("F", 5, "eighth"), n("E", 5, "eighth"), n("D", 5, "eighth"), n("C", 5, "eighth"), n("B", 4, "eighth", 0, -1)],
+          notes: [n("G", 5, "eighth"), n("F", 5, "eighth"), n("E", 5, "eighth"), n("D", 5, "eighth"), n("C", 5, "eighth"), sym(n("B", 4, "eighth", 0, -1), { slur: "stop" })],
         },
         { notes: [n("A", 4, "half"), r("quarter")] },
-        { notes: [n("C", 5, "quarter"), n("D", 5, "quarter"), n("E", 5, "quarter")] },
+        // 10小節目：小節の中のデクレッシェンド（＞）
+        {
+          notes: [sym(n("C", 5, "quarter"), { wedge: "diminuendo" }), n("D", 5, "quarter"), sym(n("E", 5, "quarter"), { wedge: "stop" })],
+        },
         {
           notes: [n("F", 5, "16th"), n("G", 5, "16th"), n("A", 5, "16th"), n("G", 5, "16th"), n("F", 5, "half")],
         },
         { notes: [n("E", 5, "quarter"), n("D", 5, "quarter"), n("C", 5, "quarter", 0, 1)] },
         { notes: [n("D", 5, "half", 1)] },
-        { notes: [n("A", 4, "quarter"), n("B", 4, "quarter", 0, -1), n("C", 5, "quarter")] },
+        // 14〜16小節目：最後の pp に向かうデクレッシェンド（画面の幅によっては段をまたぐ）
+        {
+          notes: [sym(n("A", 4, "quarter"), { wedge: "diminuendo" }), n("B", 4, "quarter", 0, -1), n("C", 5, "quarter")],
+        },
         { notes: [n("D", 5, "quarter", 1), n("E", 5, "eighth"), n("C", 5, "quarter")] },
-        // 最後の小節：フェルマータ・強弱 pp
-        { notes: [sym(n("F", 5, "half", 1), { fermata: true, dynamic: "pp" })] },
+        // 最後の小節：フェルマータ・強弱 pp（デクレッシェンドはこの手前で終わる）
+        { notes: [sym(n("F", 5, "half", 1), { fermata: true, dynamic: "pp", wedge: "stop" })] },
       ],
     },
     {
@@ -157,7 +167,10 @@ export const sampleScore = {
         { clef: "alto", notes: [n("A", 3, "half"), n("F", 4, "half", 0, 1)] },
         // ラ3を次の小節へタイでつなぐ
         { notes: [n("E", 4, "half"), tied(n("A", 3, "half"))] },
-        { notes: [n("A", 3, "quarter"), n("B", 3, "quarter"), n("C", 4, "quarter", 0, 1)] },
+        // 3小節目：スラー（符尾が上向きなので下に弧）
+        {
+          notes: [sym(n("A", 3, "quarter"), { slur: "start" }), n("B", 3, "quarter"), sym(n("C", 4, "quarter", 0, 1), { slur: "stop" })],
+        },
         { notes: [n("C", 4, "half", 1)] },
         // ここからト音記号
         { clef: "treble", notes: [n("A", 4, "quarter"), n("G", 4, "quarter"), n("F", 4, "quarter")] },
@@ -180,10 +193,13 @@ export const sampleScore = {
       abbreviation: "Vc.",
       instrument: "cello",
       measures: [
-        // 1小節目：強弱 sf
-        { clef: "bass", notes: [sym(n("D", 3, "whole"), { dynamic: "sf" })] },
+        // 1小節目：強弱 sf、ここからクレッシェンド（＜）。sf の右から始まる
+        { clef: "bass", notes: [sym(n("D", 3, "whole"), { dynamic: "sf", wedge: "crescendo" })] },
         // 2小節目：五線より低い音の強弱 fp（音符にぶつからないよう下にずれる）、アクセント
-        { notes: [sym(n("A", 2, "half"), { dynamic: "fp", articulations: ["accent"] }), n("A", 3, "half")] },
+        // クレッシェンドは fp の手前で終わる
+        {
+          notes: [sym(n("A", 2, "half"), { dynamic: "fp", articulations: ["accent"], wedge: "stop" }), n("A", 3, "half")],
+        },
         { notes: [n("D", 3, "half"), r("quarter")] },
         { notes: [n("F", 2, "half", 1)] },
         // ここからテノール記号

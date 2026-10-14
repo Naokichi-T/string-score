@@ -9,6 +9,7 @@
 //   render/measures.js … 小節の状態と、小節の頭の記号
 //   render/layout.js   … 改行の位置を決める
 //   render/ties.js     … タイを描く
+//   render/spanners.js … スラー・松葉を描く
 // ==========================================================
 
 import { computeAccidentals } from "./accidentals.js";
@@ -18,6 +19,7 @@ import { drawDynamic } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
+import { drawSpanners } from "./render/spanners.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -125,6 +127,10 @@ export function renderScore(VF, container, score, width) {
   // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ, line: 何段目か }
   const allNotes = score.parts.map(() => []);
 
+  // 段ごとの左右の端の位置（段をまたぐスラー・松葉を描くのに使う）
+  // lineBounds[l] = { startX: 音符が始まる位置, endX: 段の右端 }
+  const lineBounds = [];
+
   // ----- 6. 段ごとに描く -----
   lines.forEach((line, l) => {
     const isFirstLine = l === 0;
@@ -225,6 +231,9 @@ export function renderScore(VF, container, score, width) {
       x = x + measureWidth;
     });
 
+    // この段の左右の端の位置を覚えておく（x はこの段の右端まで進んでいる）
+    lineBounds.push({ startX: lineStartStaves[0].getNoteStartX(), endX: x });
+
     // --- 6-5. この段の左端の線・括弧・パート名を描く ---
     const lineTopStave = lineStartStaves[0];
     const lineBottomStave = lineStartStaves[partCount - 1];
@@ -268,4 +277,7 @@ export function renderScore(VF, container, score, width) {
       }
     }
   });
+
+  // ----- 8. スラーと松葉を描く -----
+  drawSpanners(VF, context, allNotes, lineBounds);
 }
