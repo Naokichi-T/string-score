@@ -1,17 +1,57 @@
 // ==========================================================
 // sound.js
 // 音を鳴らす
-// のこぎり波（明るくて弦楽器っぽい音）を、フィルターでやわらかくして鳴らす
-// ステップ6の再生でも、この関数を使う予定
+// （ステップ6-1：録音した楽器の音（smplr のサウンドフォント）で鳴らすようにした）
+//   ・ページを開いたら loadInstruments で、バイオリン・ビオラ・チェロの音を先に読み込む
+//   ・読み込みが終わる前は、今までの電子音（のこぎり波）で鳴らす
+//   ・楽譜の再生は playEvents で全部の音をまとめて予約し、stopPlayback でまとめて止める
+// （ステップ6-1 追加：setSoundType で「楽器の音」と「電子音」を切り替えられるようにした）
 // ==========================================================
 
+import { pitchToMidi } from "../score/playback.js";
+
 // 音を鳴らすための仕組み（AudioContext）
-// ブラウザは「ユーザーが何か操作したあと」でないと音を鳴らせないので、
-// 最初に音を鳴らすときに作る
+// ブラウザは「ユーザーが何か操作したあと」でないと音を鳴らせないが、
+// 作ること・音のデータを読み込むことは先にできる（そのときは一時停止の状態で作られる）
 let audioContext = null;
 
-// ドからの半音の数（ド=0、レ=2、ミ=4 …）
-const STEP_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+// 読み込んだ楽器の音 { violin: …, viola: …, cello: … }（読み込みが終わるまでは null）
+let instruments = null;
+
+// 読み込みの途中の Promise（2回呼ばれても、読み込みは1回だけにするため）
+let loading = null;
+
+// 再生中の音を止めるための関数の一覧（smplr の start が返してくれる）
+let stopFunctions = [];
+
+// 再生が最後まで行ったことを知らせるためのタイマー
+let endTimer = null;
+
+// 録音の音はラ4 = 440Hz なので、442Hz に合わせるために上げる量（セント。半音 = 100セント）
+// 1200 × log2(442 ÷ 440) ≒ 7.85
+const DETUNE_CENTS = 1200 * Math.log2(442 / 440);
+
+// 読み込む楽器（データの instrument の名前 → サウンドフォントの楽器の名前）
+const SOUNDFONT_NAMES = { violin: "violin", viola: "viola", cello: "cello" };
+
+// 鍵盤を押したときの音の強さ（0〜127）
+const KEY_VELOCITY = 90;
+
+// 音の長さを、楽譜どおりより少しだけ短くする割合（音と音の間に、ほんの少し切れ目を作る）
+const NOTE_LENGTH_RATE = 0.95;
+
+// 音の種類（"instrument"：録音した楽器の音、"synth"：電子音（のこぎり波））
+// 最初は楽器の音。上のバーの欄で切り替える（setSoundType）
+let soundType = "instrument";
+
+// ----------------------------------------------------------
+// 関数：setSoundType
+// 鳴らす音の種類を切り替える（鍵盤の音と、再生の音の両方が変わる）
+//   type … "instrument"（楽器の音）か "synth"（電子音）
+// ----------------------------------------------------------
+export function setSoundType(type) {
+  soundType = type;
+}
 
 // ----------------------------------------------------------
 // 関数：getAudioContext
@@ -21,34 +61,100 @@ function getAudioContext() {
   if (!audioContext) {
     audioContext = new AudioContext();
   }
-  // 一時停止の状態になっていたら再開する（ブラウザによってはそうなっていることがある）
-  if (audioContext.state === "suspended") {
-    audioContext.resume();
-  }
   return audioContext;
+}
+
+// ----------------------------------------------------------
+// 関数：resumeAudio
+// 一時停止の状態になっていたら再開する（ボタンや鍵盤を押したときに呼ぶ）
+// ----------------------------------------------------------
+function resumeAudio() {
+  const ctx = getAudioContext();
+  if (ctx.state === "suspended") {
+    ctx.resume();
+  }
+  return ctx;
+}
+
+// ----------------------------------------------------------
+// 関数：loadInstruments
+// バイオリン・ビオラ・チェロの録音した音を、インターネットから読み込む
+// （編集ページを開いたときに1回呼ぶ。2回目からは同じ Promise を返す）
+// 戻り値：読み込みが終わったら完了する Promise
+// ----------------------------------------------------------
+export function loadInstruments() {
+  if (loading) return loading;
+
+  loading = (async () => {
+    // smplr はブラウザの中でしか動かないので、ここで読み込む
+    const { Soundfont } = await import("smplr");
+    const ctx = getAudioContext();
+
+    // 3つの楽器をいっしょに読み込み始める
+    const loaded = {};
+    const waits = Object.entries(SOUNDFONT_NAMES).map(([key, name]) => {
+      const instrument = Soundfont(ctx, {
+        instrument: name,
+        kit: "FluidR3_GM", // 録音のセット（"MusyngKite" と "FluidR3_GM" の2種類がある。音の感じが違う）
+        // くり返しの情報は読み込まない（読み込むと「ラララ」と短い音がくり返されたため。読み込まなくても全音符が最後まで鳴った）
+        loadLoopData: false,
+      });
+      loaded[key] = instrument;
+      return instrument.ready; // 読み込みが終わるのを待つ
+    });
+    await Promise.all(waits);
+
+    // 全部終わってから使えるようにする（途中の楽器で鳴らさないため）
+    instruments = loaded;
+  })();
+
+  // 失敗したときは、次に呼ばれたらもう一度読み込めるようにしておく
+  loading.catch(() => {
+    loading = null;
+  });
+
+  return loading;
+}
+
+// ----------------------------------------------------------
+// 関数：isLoaded
+// 録音した音の読み込みが終わっているか
+// ----------------------------------------------------------
+export function isLoaded() {
+  return instruments !== null;
 }
 
 // ----------------------------------------------------------
 // 関数：pitchToFrequency
 // 音の高さを周波数（Hz）にする（平均律、ラ4 = 442Hz）
-// 例：{ step: 'A', alter: 0, octave: 4 } → 442
+// 例：{ step: "A", alter: 0, octave: 4 } → 442
 // ----------------------------------------------------------
 export function pitchToFrequency(pitch) {
-  // MIDI の番号に直す（ド4 = 60、ラ4 = 69）
-  const midi = (pitch.octave + 1) * 12 + STEP_SEMITONES[pitch.step] + (pitch.alter ?? 0);
   // ラ4（69番）から何半音離れているかで計算する
-  return 442 * Math.pow(2, (midi - 69) / 12);
+  return 442 * Math.pow(2, (pitchToMidi(pitch) - 69) / 12);
 }
 
 // ----------------------------------------------------------
-// 関数：playPitch
-// 音を1つ、短く鳴らす
-//   pitch    … 音の高さ { step, alter, octave }
-//   duration … 鳴らす長さ（秒）
+// 関数：playSynth
+// 電子音（のこぎり波）で音を1つ鳴らす
+// 電子音を選んでいるときと、録音した音の読み込みが終わる前の鍵盤に使う
+//   pitch     … 音の高さ { step, alter, octave }
+//   duration  … 鳴らす長さ（秒）
+//   startTime … 鳴らし始める時刻（AudioContext の時計で。省略したら今すぐ）
+//   velocity  … 音の強さ（0〜127。省略したら 100）
+// 戻り値：途中で止めるための関数
 // ----------------------------------------------------------
-export function playPitch(pitch, duration = 0.5) {
-  const ctx = getAudioContext();
-  const now = ctx.currentTime;
+function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100) {
+  const ctx = resumeAudio();
+  const start = startTime ?? ctx.currentTime;
+  const end = start + duration;
+
+  // 音の大きさ（強さ 100 のときに 0.15。強さに合わせて大きく・小さくする）
+  const volume = 0.15 * (velocity / 100);
+
+  // 鳴り始めと鳴り終わりを少しずつ変える時間（短い音でも、合わせて長さを超えないようにする）
+  const attack = Math.min(0.02, duration / 3);
+  const release = Math.min(0.08, duration / 3);
 
   // 音のもと（のこぎり波）
   const oscillator = ctx.createOscillator();
@@ -62,16 +168,113 @@ export function playPitch(pitch, duration = 0.5) {
 
   // 音量（急に鳴り始めたり止まったりすると「プチッ」となるので、少しずつ変える）
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(0.15, now + 0.02); // 0.02秒で大きくする
-  gain.gain.setValueAtTime(0.15, now + duration - 0.08);
-  gain.gain.linearRampToValueAtTime(0, now + duration); // 最後の0.08秒で小さくする
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(volume, start + attack); // 少しずつ大きくする
+  gain.gain.setValueAtTime(volume, end - release);
+  gain.gain.linearRampToValueAtTime(0, end); // 最後に少しずつ小さくする
 
   // つなぐ：音のもと → フィルター → 音量 → スピーカー
   oscillator.connect(filter);
   filter.connect(gain);
   gain.connect(ctx.destination);
 
-  oscillator.start(now);
-  oscillator.stop(now + duration);
+  oscillator.start(start);
+  oscillator.stop(end);
+
+  // 途中で止めるための関数（停止ボタン用。鳴り終わったあとに呼ばれてもエラーにしない）
+  return () => {
+    try {
+      oscillator.stop();
+    } catch (error) {
+      // すでに止まっていたら何もしない
+    }
+  };
+}
+
+// ----------------------------------------------------------
+// 関数：playPitch
+// 音を1つ、短く鳴らす（鍵盤を押したとき・高さを変えたときなど）
+//   pitch      … 音の高さ { step, alter, octave }
+//   instrument … 楽器（"violin"・"viola"・"cello"。省略したらバイオリン）
+//   duration   … 鳴らす長さ（秒）
+// 録音した音の読み込みが終わっていなければ、電子音で鳴らす
+// ----------------------------------------------------------
+export function playPitch(pitch, instrument = "violin", duration = 0.5) {
+  // 電子音を選んでいるとき・読み込みが終わっていないときは、電子音で鳴らす
+  if (soundType === "synth" || !instruments) {
+    playSynth(pitch, duration);
+    return;
+  }
+  const ctx = resumeAudio();
+  instruments[instrument].start({
+    note: pitchToMidi(pitch),
+    velocity: KEY_VELOCITY,
+    detune: DETUNE_CENTS,
+    time: ctx.currentTime,
+    duration: duration,
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：playEvents
+// 鳴らす音の一覧（score/playback.js の buildEvents で作ったもの）を、まとめて予約して鳴らす
+//   events     … 鳴らす音の一覧
+//   totalTicks … 最後までの長さ（ティック）
+//   tickSeconds … 1ティックが何秒か
+//   onend      … 最後まで鳴り終わったときに呼ぶ関数
+// 楽器の音を選んでいて、読み込みが終わっていないときは、何もせずに false を返す
+// （電子音を選んでいるときは、読み込みが終わっていなくても鳴らせる）
+// ----------------------------------------------------------
+export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
+  if (soundType === "instrument" && !instruments) return false;
+
+  // 前の再生が残っていたら止める
+  stopPlayback();
+
+  const ctx = resumeAudio();
+  // 予約が間に合うように、ほんの少し（0.1秒）あとから始める
+  const startTime = ctx.currentTime + 0.1;
+
+  events.forEach((event) => {
+    const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
+    const duration = event.ticks * tickSeconds * NOTE_LENGTH_RATE; // 鳴らす長さ
+
+    // 電子音を選んでいるときは、電子音で予約する
+    if (soundType === "synth") {
+      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity));
+      return;
+    }
+
+    const stop = instruments[event.instrument].start({
+      note: pitchToMidi(event.pitch),
+      velocity: event.velocity,
+      detune: DETUNE_CENTS,
+      time: time,
+      duration: duration,
+    });
+    stopFunctions.push(stop);
+  });
+
+  // 最後まで行ったら知らせる（音の余韻のぶん、0.3秒だけ待つ）
+  const totalSeconds = 0.1 + totalTicks * tickSeconds + 0.3;
+  endTimer = setTimeout(() => {
+    endTimer = null;
+    stopFunctions = [];
+    onend();
+  }, totalSeconds * 1000);
+
+  return true;
+}
+
+// ----------------------------------------------------------
+// 関数：stopPlayback
+// 再生中の音を全部止める（まだ鳴っていない予約も取り消す）
+// ----------------------------------------------------------
+export function stopPlayback() {
+  stopFunctions.forEach((stop) => stop());
+  stopFunctions = [];
+  if (endTimer) {
+    clearTimeout(endTimer);
+    endTimer = null;
+  }
 }

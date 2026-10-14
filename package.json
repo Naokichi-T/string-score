@@ -21,6 +21,7 @@
 		"#lib/*": "./src/lib/*"
 	},
 	"dependencies": {
+		"smplr": "^1.1.0",
 		"vexflow": "^5.0.0"
 	}
 }

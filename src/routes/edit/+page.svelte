@@ -11,7 +11,9 @@
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // （ステップ5-1：タイトル・作曲者・速度記号・テンポを変える）
   // （ステップ5-2：小節の追加・削除）
+  // （ステップ6-1：録音した楽器の音で再生する（全体・パート別）、鍵盤の音も楽器の音にする）
   // ==========================================================
+  import { onMount } from "svelte";
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
   import SelectionInfo from "#lib/components/SelectionInfo.svelte";
@@ -53,7 +55,8 @@
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
-  import { playPitch } from "#lib/audio/sound.js";
+  import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType } from "#lib/audio/sound.js";
+  import { buildEvents, secondsPerTick } from "#lib/score/playback.js";
 
   // 楽譜データ（空の弦楽四重奏で始める）
   let score = $state(createEmptyScore());
@@ -100,6 +103,54 @@
   // 最後に選んでいたパート（パートが変わったときだけ鍵盤の音域を切り替えるため）
   let lastPart = null;
 
+  // 再生中か
+  let playing = $state(false);
+
+  // 楽器の音の読み込みの状態（"loading"：読み込み中、"ready"：完了、"error"：失敗）
+  let soundState = $state("loading");
+
+  // 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
+  let playTarget = $state("all");
+
+  // 音の種類（"instrument"：録音した楽器の音、"synth"：電子音）。最初は楽器の音
+  let soundType = $state("instrument");
+
+  // 再生できるか（電子音ならいつでも、楽器の音なら読み込みが終わってから）
+  let canPlay = $derived(soundType === "synth" || soundState === "ready");
+
+  // ----------------------------------------------------------
+  // 関数：handleSoundType
+  // 上のバーで音の種類が選ばれたとき
+  //   type … "instrument"（楽器の音）か "synth"（電子音）
+  // 再生中なら止める（選び直した音で、もう一度再生してもらう）
+  // ----------------------------------------------------------
+  function handleSoundType(type) {
+    handleStop();
+    soundType = type;
+    setSoundType(type); // 鳴らす仕組み（sound.js）にも知らせる
+  }
+
+  // 鍵盤などで音を鳴らすときの楽器（選んでいるパートの楽器。何も選んでいないときはバイオリン）
+  let currentInstrument = $derived(selection ? score.parts[selection.part].instrument : "violin");
+
+  // ----------------------------------------------------------
+  // ページが開いたら、楽器の音（バイオリン・ビオラ・チェロ）を裏で読み込み始める
+  // （読み込みが終わるまでは、鍵盤は電子音で鳴る。再生ボタンは押せない）
+  // ----------------------------------------------------------
+  onMount(() => {
+    loadInstruments()
+      .then(() => {
+        soundState = "ready";
+      })
+      .catch((error) => {
+        console.error("楽器の音を読み込めませんでした", error);
+        soundState = "error";
+      });
+
+    // ページから離れるときは、鳴っている音を止める
+    return () => stopPlayback();
+  });
+
   // 選んでいるのが音符（休符ではない）か（臨時記号などのボタンを押せるかどうかに使う）
   let noteSelected = $derived.by(() => {
     const note = getSelectedNote(score, selection);
@@ -128,6 +179,8 @@
   function commit(newScore, newSelection = selection) {
     // 何も変わっていなければ、履歴に残さない
     if (newScore === score) return;
+    // 再生中に楽譜を変えたら、再生を止める（鳴っている音と楽譜がずれないようにするため）
+    handleStop();
     history = record(history, { score: score, selection: selection });
     score = newScore;
     selection = newSelection;
@@ -142,6 +195,7 @@
   function handleUndo() {
     const result = undo(history, { score: score, selection: selection });
     if (!result) return;
+    handleStop(); // 楽譜が変わるので、再生を止める
     history = result.history;
     score = result.entry.score;
     selection = result.entry.selection;
@@ -156,6 +210,7 @@
   function handleRedo() {
     const result = redo(history, { score: score, selection: selection });
     if (!result) return;
+    handleStop(); // 楽譜が変わるので、再生を止める
     history = result.history;
     score = result.entry.score;
     selection = result.entry.selection;
@@ -382,13 +437,14 @@
   // ----------------------------------------------------------
   // 関数：inputPitch
   // 今の長さ・付点で、選んでいる場所に音を入れる（鍵盤と音名キーで共通）
-  // 入れられたら音を鳴らす
+  // 入れられたら、選んでいるパートの楽器の音で鳴らす
   //   pitch … 音の高さ { step, alter, octave }
   // ----------------------------------------------------------
   function inputPitch(pitch) {
     const dots = dotted ? 1 : 0;
     const ok = putNote({ pitch: pitch, duration: duration, dots: dots, tie: false });
-    if (ok) playPitch(pitch);
+    // 入れたあとは選択が次の音に進むが、同じパートなので楽器は変わらない
+    if (ok) playPitch(pitch, currentInstrument);
   }
 
   // ----------------------------------------------------------
@@ -405,7 +461,7 @@
   // ----------------------------------------------------------
   function playSelected() {
     const note = getSelectedNote(score, selection);
-    if (note && !note.rest) playPitch(note.pitch);
+    if (note && !note.rest) playPitch(note.pitch, currentInstrument);
   }
 
   // ----------------------------------------------------------
@@ -699,6 +755,13 @@
       newSelection = { ...selection, part: index };
     }
     commit(movePart(score, index, delta), newSelection);
+
+    // 鳴らすパートも、入れ替わったパートについていく
+    if (playTarget === index) {
+      playTarget = target;
+    } else if (playTarget === target) {
+      playTarget = index;
+    }
   }
 
   // ----------------------------------------------------------
@@ -721,6 +784,66 @@
       newSelection = { ...selection, part: selection.part - 1 };
     }
     commit(newScore, newSelection);
+
+    // 鳴らすパートを消したときは「全体」に戻す。下のパートなら番号を1つ減らす
+    if (playTarget === index) {
+      playTarget = "all";
+    } else if (playTarget !== "all" && playTarget > index) {
+      playTarget = playTarget - 1;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handlePlay
+  // 再生のボタン（Space キー）が押されたとき
+  //   ・音か範囲を選んでいれば、その小節の頭から。何も選んでいなければ1小節目から
+  //   ・鳴らすパートの欄で選んだパートだけ（「全体」なら全パート）を鳴らす
+  // ----------------------------------------------------------
+  function handlePlay() {
+    if (!canPlay) return;
+    message = "";
+
+    // 始める小節（範囲を選んでいるときは、範囲の最初の小節）
+    let startMeasure = 0;
+    if (range) {
+      startMeasure = range.start.measure;
+    } else if (selection) {
+      startMeasure = selection.measure;
+    }
+
+    // 楽譜を、鳴らす音の一覧に直す
+    const result = buildEvents(score, startMeasure, playTarget);
+    if (result.events.length === 0) {
+      message = "鳴らす音がありません（休符だけです）";
+      return;
+    }
+
+    // まとめて予約して鳴らす（最後まで行ったら、再生中をやめる）
+    const started = playEvents(result.events, result.totalTicks, secondsPerTick(score.tempo), () => {
+      playing = false;
+    });
+    playing = started;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleStop
+  // 停止のボタン（Space キー）が押されたとき・楽譜が変わったとき：再生を止める
+  // ----------------------------------------------------------
+  function handleStop() {
+    if (!playing) return;
+    stopPlayback();
+    playing = false;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleTarget
+  // 鳴らすパートの欄が変わったとき
+  //   target … "all"（全体）か、パートの番号
+  // 再生中なら止める（選び直したパートで、もう一度再生してもらう）
+  // ----------------------------------------------------------
+  function handleTarget(target) {
+    handleStop();
+    playTarget = target;
   }
 
   // コピーした音の配列（まだ何もコピーしていないときは null。ページを再読み込みすると消える）
@@ -823,6 +946,18 @@
       // Delete / Backspace：音符を休符にする
       handleDelete();
       event.preventDefault(); // Backspace でブラウザが前のページに戻らないようにする
+    } else if (event.key === " ") {
+      // Space キー：再生・停止の切り替え（押しっぱなしのくり返しは無視する）
+      event.preventDefault(); // 画面が下にスクロールしないようにする
+      // ボタンを押したあとは、そのボタンが選ばれたままになっていて、
+      // Space で「もう一度押した」ことになってしまうので、ボタンの選択を外す
+      if (event.target.tagName === "BUTTON") event.target.blur();
+      if (event.repeat) return;
+      if (playing) {
+        handleStop();
+      } else {
+        handlePlay();
+      }
     } else if (event.key === "Escape") {
       // Esc キー：選択と範囲を外す
       selection = null;
@@ -876,7 +1011,24 @@
 
 <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
 <div class="editor">
-  <TopBar tempo={score.tempo} tempoText={score.tempoText} canUndo={history.undo.length > 0} canRedo={history.redo.length > 0} onundo={handleUndo} onredo={handleRedo} />
+  <TopBar
+    tempo={score.tempo}
+    tempoText={score.tempoText}
+    canUndo={history.undo.length > 0}
+    canRedo={history.redo.length > 0}
+    onundo={handleUndo}
+    onredo={handleRedo}
+    parts={score.parts}
+    {playing}
+    {soundState}
+    {playTarget}
+    {canPlay}
+    {soundType}
+    onplay={handlePlay}
+    onstop={handleStop}
+    ontarget={handleTarget}
+    onsoundtype={handleSoundType}
+  />
   <ToolTabs
     {duration}
     {dotted}
