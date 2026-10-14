@@ -64,10 +64,14 @@ export const CLEFS = {
 // 楽器ごとの最初の音部記号
 // ----------------------------------------------------------
 //   keyboardOctave … 鍵盤の一番左のドのオクターブ（そのパートを選んだとき、ここから3オクターブ分を出す）
+//   name           … パート名（同じ楽器が2つ以上あるときは、うしろに I・II… を付ける）
+//   abbreviation   … 2段目からの短いパート名
+//   label          … ボタンに出す日本語の名前
+// （ステップ5-6：name・abbreviation・label を追加）
 export const INSTRUMENTS = {
-  violin: { clef: "treble", keyboardOctave: 4 }, // バイオリン（ド4〜ド7）
-  viola: { clef: "alto", keyboardOctave: 3 }, // ビオラ（ド3〜ド6）
-  cello: { clef: "bass", keyboardOctave: 2 }, // チェロ（ド2〜ド5）
+  violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン" }, // バイオリン（ド4〜ド7）
+  viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ" }, // ビオラ（ド3〜ド6）
+  cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ" }, // チェロ（ド2〜ド5）
 };
 
 // ----------------------------------------------------------

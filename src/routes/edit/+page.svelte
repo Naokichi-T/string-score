@@ -47,6 +47,9 @@
     changeKey,
     changeClef,
     clefAt,
+    addPart,
+    movePart,
+    deletePart,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -667,6 +670,59 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleAddPart
+  // 「パート」タブの追加のボタンが押されたとき
+  //   instrument … 楽器（"violin"・"viola"・"cello"）
+  // 一番下に足して、足したパートの1小節目の最初の音を選ぶ
+  // ----------------------------------------------------------
+  function handleAddPart(instrument) {
+    message = "";
+    const newScore = addPart(score, instrument);
+    commit(newScore, { part: newScore.parts.length - 1, measure: 0, note: 0 });
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleMovePart
+  // 「パート」タブの ↑ ↓ が押されたとき
+  //   index … 動かすパートの番号
+  //   delta … -1（上へ）か 1（下へ）
+  // 選んでいたパートが入れ替わったときは、選択も一緒に動かす（同じ音を選んだままにする）
+  // ----------------------------------------------------------
+  function handleMovePart(index, delta) {
+    message = "";
+    const target = index + delta; // 入れ替える相手の番号
+    let newSelection = selection;
+    if (selection && selection.part === index) {
+      newSelection = { ...selection, part: target };
+    } else if (selection && selection.part === target) {
+      newSelection = { ...selection, part: index };
+    }
+    commit(movePart(score, index, delta), newSelection);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleDeletePart
+  // 「パート」タブの削除が押されたとき
+  //   index … 消すパートの番号
+  // 選択の動かし方
+  //   消したパートを選んでいた → 同じ小節の、すぐ上のパートの最初の音（一番上なら、新しく一番上になったパート）
+  //   消したパートより下を選んでいた → 番号が1つずれるので、1つ減らす（同じ音を選んだまま）
+  // ----------------------------------------------------------
+  function handleDeletePart(index) {
+    message = "";
+    const newScore = deletePart(score, index);
+    if (newScore === score) return; // 1パートしかないときは消さない
+
+    let newSelection = selection;
+    if (selection && selection.part === index) {
+      newSelection = { part: Math.max(index - 1, 0), measure: selection.measure, note: 0 };
+    } else if (selection && selection.part > index) {
+      newSelection = { ...selection, part: selection.part - 1 };
+    }
+    commit(newScore, newSelection);
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -805,6 +861,10 @@
     onkey={handleKeySignature}
     {currentClef}
     onclef={handleClef}
+    selectedPart={selection ? selection.part : null}
+    onaddpart={handleAddPart}
+    onmovepart={handleMovePart}
+    ondeletepart={handleDeletePart}
   />
   <SelectionInfo {score} {selection} {range} {message} />
 

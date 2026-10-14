@@ -1129,3 +1129,95 @@ export function changeClef(score, partIndex, from, to, clef) {
   }
   return newScore;
 }
+
+// ==========================================================
+// ここから下は、パートを足す・並べ替える・消す関数（ステップ5-6）
+// ==========================================================
+
+// パートの番号に使うローマ数字（11個目からは、ふつうの数字にする）
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+
+// ----------------------------------------------------------
+// 関数：renameParts
+// パート名を、楽器と並び順から付け直す（渡されたパートの配列を直接書き換える）
+//   同じ楽器が1つだけ   → 番号なし（"Violin"・"Vln."）
+//   同じ楽器が2つ以上   → 上から順に I・II…（"Violin I"・"Vln. I"）
+// （コピーした楽譜データの中でだけ使う）
+// ----------------------------------------------------------
+function renameParts(parts) {
+  // 楽器ごとの数を数える
+  const totals = {};
+  parts.forEach((part) => {
+    totals[part.instrument] = (totals[part.instrument] ?? 0) + 1;
+  });
+
+  // 上から順に名前を付ける
+  const counters = {}; // 楽器ごとに、ここまでにいくつ出てきたか
+  parts.forEach((part) => {
+    const info = INSTRUMENTS[part.instrument];
+    counters[part.instrument] = (counters[part.instrument] ?? 0) + 1;
+    if (totals[part.instrument] === 1) {
+      part.name = info.name;
+      part.abbreviation = info.abbreviation;
+    } else {
+      const n = counters[part.instrument];
+      const number = ROMAN[n - 1] ?? String(n);
+      part.name = `${info.name} ${number}`;
+      part.abbreviation = `${info.abbreviation} ${number}`;
+    }
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：addPart
+// 一番下にパートを1つ足す
+//   instrument … 楽器（"violin"・"viola"・"cello"）
+// 中身は各小節の拍子に合わせた休符、1小節目には楽器の最初の音部記号を書く
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function addPart(score, instrument) {
+  const newScore = cloneScore(score);
+
+  // 小節ごとに、その小節の拍子に合わせた休符で埋める
+  const measures = newScore.measures.map((_, m) => {
+    const time = timeAt(newScore, m);
+    const measure = { notes: restsForSpan(0, measureTicks(time), time) };
+    if (m === 0) measure.clef = INSTRUMENTS[instrument].clef;
+    return measure;
+  });
+
+  newScore.parts.push({ name: "", abbreviation: "", instrument: instrument, measures: measures });
+  renameParts(newScore.parts);
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：movePart
+// index 番目のパートを、上（delta = -1）か下（delta = 1）のパートと入れ替える
+// 戻り値：新しい楽譜データ（一番上をさらに上に・一番下をさらに下にするときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function movePart(score, index, delta) {
+  const target = index + delta; // 入れ替える相手の番号
+  if (target < 0 || target >= score.parts.length) return score;
+
+  const newScore = cloneScore(score);
+  const parts = newScore.parts;
+  // 2つのパートを入れ替える
+  [parts[index], parts[target]] = [parts[target], parts[index]];
+  renameParts(parts);
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：deletePart
+// index 番目のパートを消す
+// 戻り値：新しい楽譜データ（パートが1つしかないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function deletePart(score, index) {
+  if (score.parts.length <= 1) return score; // 最低1パートは残す
+
+  const newScore = cloneScore(score);
+  newScore.parts.splice(index, 1);
+  renameParts(newScore.parts);
+  return newScore;
+}

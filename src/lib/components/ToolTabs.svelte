@@ -1,7 +1,7 @@
 <script>
   // ==========================================================
   // ToolTabs.svelte
-  // 道具のタブ（音符・記号・小節・楽譜の設定）
+  // 道具のタブ（音符・記号・小節・パート・楽譜の設定）
   // タブを押すと、その下に並ぶボタンが切り替わる
   // （ステップ4-2：「音符」タブに長さ・付点・休符のボタンを追加）
   // （ステップ4-3：臨時記号・高さ・タイ・削除のボタンを追加）
@@ -11,12 +11,14 @@
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // （ステップ5-1：「楽譜の設定」タブの中身を ScoreSettings として追加）
   // （ステップ5-2：「小節」タブの中身を MeasureTools として追加）
+  // （ステップ5-6：「パート」タブを追加。中身は PartTools）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
   import SymbolTools from "./SymbolTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
   import MeasureTools from "./MeasureTools.svelte";
+  import PartTools from "./PartTools.svelte";
 
   // 親から受け取るもの
   //   duration     … 今の長さ（'quarter' など）
@@ -49,6 +51,10 @@
   //   onkey        … 調を選んだときに呼ぶ関数（新しい調の数字を渡す。「小節」タブで使う）
   //   currentClef  … 選んでいるパート・小節の音部記号（何も選んでいないときは null。「小節」タブで使う）
   //   onclef       … 音部記号のボタンが押されたときに呼ぶ関数（「小節」タブで使う）
+  //   selectedPart … 選んでいるパートの番号（何も選んでいないときは null。「パート」タブで使う）
+  //   onaddpart    … パートの追加のボタンが押されたときに呼ぶ関数（「パート」タブで使う）
+  //   onmovepart   … パートの ↑ ↓ が押されたときに呼ぶ関数（「パート」タブで使う）
+  //   ondeletepart … パートの削除が押されたときに呼ぶ関数（「パート」タブで使う）
   let {
     score,
     onsettings = () => {},
@@ -60,6 +66,10 @@
     onkey = () => {},
     currentClef = null,
     onclef = () => {},
+    selectedPart = null,
+    onaddpart = () => {},
+    onmovepart = () => {},
+    ondeletepart = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -87,6 +97,7 @@
     { id: "note", label: "音符" },
     { id: "symbol", label: "記号" },
     { id: "measure", label: "小節" },
+    { id: "part", label: "パート" },
     { id: "settings", label: "楽譜の設定" },
   ];
 
@@ -193,6 +204,8 @@
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
       <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
+    {:else if activeTab === "part"}
+      <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} />
     {/if}
