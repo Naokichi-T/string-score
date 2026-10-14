@@ -7,6 +7,10 @@
 import { CLEFS } from "../model.js";
 import { timeToString, keyToVexKey } from "./helpers.js";
 
+// 2段目からの段の頭で、音部記号・調号と最初の音符の間に空けるすき間（ピクセル）
+// （VexFlow のままだと、最初の音符が音部記号にくっついて、段をまたぐタイを描く場所がない）
+export const LINE_START_PADDING = 12;
+
 // ----------------------------------------------------------
 // 関数：buildStates
 // 楽譜全体を最初の小節から順に見ていき、小節ごとの「状態」を作る
@@ -105,5 +109,7 @@ export function measureModifierWidth(VF, state, partCount, isLineStart, isFirst)
     const width = testStave.getNoteStartX() - testStave.getX();
     if (width > maxWidth) maxWidth = width;
   }
+  // 2段目からの段の頭なら、最初の音符の前のすき間のぶんも足す
+  if (isLineStart && !isFirst) maxWidth = maxWidth + LINE_START_PADDING;
   return maxWidth;
 }

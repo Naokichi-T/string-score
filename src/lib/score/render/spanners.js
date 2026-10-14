@@ -16,10 +16,13 @@ const SLUR_MAX_HEIGHT = 22; // スラーの山の最高の高さ
 const SLUR_THICKNESS = 2; // スラーのまん中の太さ
 const HAIRPIN_HALF = 5; // 松葉の開いた側の、まん中からの幅（上下それぞれ）
 const HAIRPIN_GAP = 6; // 松葉と強弱記号のすき間
+const HAIRPIN_SLUR_GAP = 4; // 松葉と、下側に描いたスラーのすき間
 
 // ----------------------------------------------------------
 // 関数：drawSpanners
 // 全パートのスラーと松葉を描く
+// 先にスラーを全部描いて、下側に描いたスラーの位置を覚えておき、
+// あとから描く松葉がそのスラーにぶつかるときは、松葉をスラーより下にずらす
 //   VF         … VexFlow の部品一式
 //   context    … 描く先
 //   allNotes   … パートごとの音符の一覧（render.js で作ったもの）
@@ -28,6 +31,10 @@ const HAIRPIN_GAP = 6; // 松葉と強弱記号のすき間
 // ----------------------------------------------------------
 export function drawSpanners(VF, context, allNotes, lineBounds) {
   allNotes.forEach((notesOfPart) => {
+    // ① このパートのスラーと松葉を探す（どの音からどの音までか）
+    const slurs = []; // スラーの音符の一覧の並び
+    const wedges = []; // { entries: 松葉の音符の一覧, type: 種類 } の並び
+
     // 今開いている（start を見つけて、まだ stop が来ていない）スラーと松葉の始まり
     let slurStart = -1; // スラーが始まった音の番号（-1 は開いていない）
     let wedgeStart = -1; // 松葉が始まった音の番号
@@ -39,8 +46,7 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
 
       // ----- スラー -----
       if (data.slur === "stop" && slurStart >= 0) {
-        // 始まりから今の音までを描く
-        drawSlurSpan(VF, context, notesOfPart.slice(slurStart, k + 1), lineBounds);
+        slurs.push(notesOfPart.slice(slurStart, k + 1));
         slurStart = -1;
       }
       if (data.slur === "start") {
@@ -49,13 +55,24 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
 
       // ----- 松葉 -----
       if (data.wedge === "stop" && wedgeStart >= 0) {
-        drawWedgeSpan(VF, context, notesOfPart.slice(wedgeStart, k + 1), wedgeType, lineBounds);
+        wedges.push({ entries: notesOfPart.slice(wedgeStart, k + 1), type: wedgeType });
         wedgeStart = -1;
       }
       if (data.wedge === "crescendo" || data.wedge === "diminuendo") {
         wedgeStart = k;
         wedgeType = data.wedge;
       }
+    });
+
+    // ② スラーを描く（下側に描いたスラーの位置を集めておく）
+    const slurBelows = [];
+    slurs.forEach((entries) => {
+      slurBelows.push(...drawSlurSpan(VF, context, entries, lineBounds));
+    });
+
+    // ③ 松葉を描く（下側のスラーにぶつからないようにする）
+    wedges.forEach((wedge) => {
+      drawWedgeSpan(VF, context, wedge.entries, wedge.type, lineBounds, slurBelows);
     });
   });
 }
@@ -92,14 +109,19 @@ function noteBottomY(VF, staveNote) {
 // 関数：drawSlurSpan
 // 1つのスラーを描く（段をまたぐときは段ごとに分けて描く）
 //   entries … スラーの始まりから終わりまでの音符の一覧
+// 戻り値：下側に描いたときの、段ごとの弧の位置 [{ line, x1, x2, bottom }, ...]
+//         （上側に描いたときは空の配列。松葉をずらすのに使う）
 // ----------------------------------------------------------
 function drawSlurSpan(VF, context, entries, lineBounds) {
   const first = entries[0];
   const last = entries[entries.length - 1];
 
-  // 弧の向き：始まりの音の符尾が上向きなら下に、それ以外は上に
-  const firstNote = first.staveNote;
-  const below = firstNote.hasStem() && firstNote.getStemDirection() === VF.Stem.UP;
+  // 弧の向き：スラーの中の音符が「ぜんぶ符尾が上向き」なら下に、それ以外は上に
+  const notes = entries.filter((entry) => !entry.data.rest);
+  const below = notes.every((entry) => entry.staveNote.hasStem() && entry.staveNote.getStemDirection() === VF.Stem.UP);
+
+  // 下側に描いた弧の位置（戻り値）
+  const belows = [];
 
   // 段ごとに分ける（同じ段なら1つのまとまり）
   const groups = groupByLine(entries);
@@ -137,7 +159,20 @@ function drawSlurSpan(VF, context, entries, lineBounds) {
     });
 
     drawCurve(context, x1, y1, x2, y2, below ? height : -height);
+
+    // 下側に描いたときは、弧の一番下の位置を覚えておく
+    // （この形の弧は、山のてっぺんが両端より「高さの 3/4」だけふくらむ）
+    if (below) {
+      belows.push({
+        line: group[0].line,
+        x1: x1,
+        x2: x2,
+        bottom: Math.max(y1, y2) + height * 0.75,
+      });
+    }
   });
+
+  return belows;
 }
 
 // ----------------------------------------------------------
@@ -167,8 +202,9 @@ function drawCurve(context, x1, y1, x2, y2, height) {
 // 1つの松葉を描く（段をまたぐときは段ごとに分けて描く）
 //   entries … 松葉の始まりから終わりまでの音符の一覧
 //   type    … 'crescendo'（だんだん強く ＜）か 'diminuendo'（だんだん弱く ＞）
+//   slurBelows … 下側に描いたスラーの位置 [{ line, x1, x2, bottom }, ...]（ぶつかるなら下にずらす）
 // ----------------------------------------------------------
-function drawWedgeSpan(VF, context, entries, type, lineBounds) {
+function drawWedgeSpan(VF, context, entries, type, lineBounds, slurBelows) {
   const first = entries[0];
   const last = entries[entries.length - 1];
   const groups = groupByLine(entries);
@@ -185,7 +221,7 @@ function drawWedgeSpan(VF, context, entries, type, lineBounds) {
       const y = dynamicBaselineY(VF, entry.staveNote, stave);
       if (y > baseline) baseline = y;
     });
-    const y = baseline - 6; // 強弱記号の文字のまん中あたり
+    let y = baseline - 6; // 強弱記号の文字のまん中あたり
 
     // --- 左の端 ---
     let x1;
@@ -218,6 +254,15 @@ function drawWedgeSpan(VF, context, entries, type, lineBounds) {
     // クレッシェンドは だんだん開く、デクレッシェンドは だんだん閉じる
     const h1 = HAIRPIN_HALF * (type === "crescendo" ? openStart : 1 - openStart);
     const h2 = HAIRPIN_HALF * (type === "crescendo" ? openEnd : 1 - openEnd);
+
+    // --- 下側のスラーと横の位置が重なるなら、そのスラーより下にずらす ---
+    const line = group[0].line;
+    slurBelows.forEach((slur) => {
+      if (slur.line !== line) return; // 違う段のスラーは関係ない
+      if (slur.x2 < x1 || slur.x1 > x2) return; // 横の位置が重ならない
+      const needed = slur.bottom + HAIRPIN_HALF + HAIRPIN_SLUR_GAP;
+      if (y < needed) y = needed;
+    });
 
     // 2本の線を描く
     context.save();

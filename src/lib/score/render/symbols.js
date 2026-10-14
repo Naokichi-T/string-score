@@ -6,6 +6,9 @@
 
 import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
 
+// フェルマータを持ち上げる量（ピクセル。マイナスが上）
+const FERMATA_LIFT = -6;
+
 // ----------------------------------------------------------
 // 関数：addSymbols
 // 音符に、五線の上や音符の近くに付く記号を付ける
@@ -55,9 +58,15 @@ export function addSymbols(VF, staveNote, note) {
   }
 
   // ⑤ フェルマータ（一番上）
+  //    VexFlow は「アーティキュレーション」を先に、「文字（Annotation）」をあとに積み重ねるので、
+  //    アーティキュレーションとして付けると、指番号（文字）より下に来てしまう。
+  //    そこで、楽譜用フォントの文字として付けて、指番号や奏法の文字より上に積み重ねる
   if (note.fermata) {
-    const fermata = new VF.Articulation(FERMATA.vf);
-    fermata.setPosition(ABOVE);
+    const fermata = new VF.Annotation(FERMATA.icon);
+    fermata.setFont("Bravura", 24);
+    fermata.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
+    // 文字として置くと、五線より高い音では玉に近すぎるので、少し上に持ち上げる
+    fermata.setYShift(FERMATA_LIFT);
     staveNote.addModifier(fermata, 0);
   }
 }

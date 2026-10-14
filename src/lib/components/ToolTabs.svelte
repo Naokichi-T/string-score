@@ -8,6 +8,7 @@
   // （ステップ4-4：上書き・挿入の切り替えを追加）
   // （ステップ4-5：「記号」タブの中身を SymbolTools として追加）
   // （ステップ4-7a：範囲を選んでいるときも ▲ ▼・削除を押せるようにする。説明にキーの名前を追加）
+  // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
@@ -20,6 +21,7 @@
   //   onduration   … 長さのボタンが押されたときに呼ぶ関数（長さの名前を渡す）
   //   ondot        … 付点のボタンが押されたときに呼ぶ関数
   //   onrest       … 休符のボタンが押されたときに呼ぶ関数
+  //   canRest      … 休符のボタンを押せるか（今の長さの休符を、選んでいる場所に入れられるか）
   //   noteSelected … 音符（休符ではない）を選んでいるか（false なら臨時記号などのボタンを押せない）
   //   rangeEditable … 選んだ範囲の中に音符があるか（true なら ▲ ▼・削除のボタンを押せる）
   //   onaccidental … 臨時記号のボタンが押されたときに呼ぶ関数（1：♯、-1：♭、0：♮ を渡す）
@@ -47,6 +49,7 @@
     onduration = () => {},
     ondot = () => {},
     onrest = () => {},
+    canRest = true,
     noteSelected = false,
     rangeEditable = false,
     onaccidental = () => {},
@@ -135,7 +138,7 @@
 
       <!-- 休符 -->
       <div class="group">
-        <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
+        <button class="tool" disabled={!canRest} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
           <span class="icon flat">{REST_ICON}</span>
         </button>
       </div>

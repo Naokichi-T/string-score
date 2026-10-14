@@ -45,8 +45,9 @@ export function layoutLines(noteWidths, startWidths, middleWidths, firstLineWidt
   if (current.measures.length > 0) lines.push(current);
 
   // 最後の段以外は、段の幅ぴったりになるよう小節の幅を同じ割合で広げる
+  // （ただし段が1つだけのときは、その段も広げる。短いまま右が空くと、楽譜が途中で切れて見えるため）
   lines.forEach((line, l) => {
-    if (l === lines.length - 1) return; // 最後の段は広げない
+    if (l === lines.length - 1 && lines.length > 1) return; // 2段以上あるときの最後の段は広げない
     const available = l === 0 ? firstLineWidth : otherLineWidth;
     const total = line.widths.reduce((sum, w) => sum + w, 0);
     const ratio = available / total;

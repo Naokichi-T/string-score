@@ -8,6 +8,7 @@
   // （ステップ4-5：記号タブで音符に記号を付ける）
   // （ステップ4-6：範囲選択と、スラー・松葉）
   // （ステップ4-7a：ショートカット・範囲の音をまとめて変える・音名キーで入れる）
+  // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -172,6 +173,10 @@
     if (mode === "insert") return canInsert(score, selection, d, dots);
     return canFit(score, selection, d, dots);
   }
+
+  // 休符のボタンを押せるか（鍵盤で音を入れるときと同じ canPlace で調べる）
+  // 何も選んでいないときは押せる（押すと「先に場所を選んでください」と知らせる）
+  let canRest = $derived(!selection || canPlace(duration, dotted ? 1 : 0));
 
   // ----------------------------------------------------------
   // 関数：changeLength
@@ -608,6 +613,7 @@
     onduration={handleDuration}
     ondot={handleDot}
     onrest={handleRest}
+    {canRest}
     {noteSelected}
     onaccidental={handleAccidental}
     onstep={handleTranspose}

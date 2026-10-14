@@ -16,7 +16,7 @@ import { computeAccidentals } from "./accidentals.js";
 import { timeToString } from "./render/helpers.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic } from "./render/symbols.js";
-import { buildStates, addModifiers, measureModifierWidth } from "./render/measures.js";
+import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
 import { drawSpanners } from "./render/spanners.js";
@@ -177,6 +177,12 @@ export function renderScore(VF, container, score, width, selection = null, range
       // 全パートで、音符が始まる位置をそろえる
       // （音部記号が変わるパートだけ記号の幅が広い、などのずれをなくす）
       VF.Stave.formatBegModifiers(staves);
+
+      // 2段目からの段の頭では、音部記号・調号と最初の音符の間を少し空ける
+      // （段をまたぐタイの弧を描く場所を作る）
+      if (isLineStart && !isFirst) {
+        staves.forEach((stave) => stave.setNoteStartX(stave.getNoteStartX() + LINE_START_PADDING));
+      }
 
       // 五線を描く
       staves.forEach((stave) => stave.setContext(context).draw());
