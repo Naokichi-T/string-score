@@ -10,6 +10,7 @@
   // （ステップ4-7a：ショートカット・範囲の音をまとめて変える・音名キーで入れる）
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // （ステップ5-1：タイトル・作曲者・速度記号・テンポを変える）
+  // （ステップ5-2：小節の追加・削除）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -40,6 +41,8 @@
     transposeRange,
     pitchForLetter,
     setScoreInfo,
+    insertMeasure,
+    deleteMeasures,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -532,6 +535,54 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：measureSpan
+  // 「小節を削除」で消す小節の範囲を返す
+  //   範囲を選んでいるとき … 範囲にかかる小節ぜんぶ
+  //   音を選んでいるとき   … その音がある小節
+  // 戻り値：{ from, to }（小節の番号。何も選んでいなければ null）
+  // ----------------------------------------------------------
+  function measureSpan() {
+    if (range) return { from: range.start.measure, to: range.end.measure };
+    if (selection) return { from: selection.measure, to: selection.measure };
+    return null;
+  }
+
+  // 小節を消せるか（何か選んでいて、消したあとに小節が1つ以上残るか）
+  let canDeleteMeasure = $derived.by(() => {
+    const span = measureSpan();
+    return !!span && span.to - span.from + 1 < score.measures.length;
+  });
+
+  // ----------------------------------------------------------
+  // 関数：handleMeasure
+  // 「小節」タブのボタンが押されたとき
+  //   action … "before"（前に追加）・"after"（後ろに追加）・"delete"（削除）
+  // ----------------------------------------------------------
+  function handleMeasure(action) {
+    message = "";
+    const count = score.measures.length; // 今の小節の数
+
+    if (action === "delete") {
+      if (!canDeleteMeasure) return;
+      const span = measureSpan();
+      const newScore = deleteMeasures(score, span.from, span.to);
+      // 消したあとは、同じ位置の小節（最後の小節を消したときは1つ前）の最初の音を選ぶ
+      const measure = Math.min(span.from, newScore.measures.length - 1);
+      commit(newScore, { part: selection.part, measure: measure, note: 0 });
+      return;
+    }
+
+    // 追加：何も選んでいないときは最後に足す（選択はそのまま）
+    if (!selection) {
+      commit(insertMeasure(score, count));
+      return;
+    }
+    // 選んでいる小節の前か後ろに足して、足した小節の最初の音を選ぶ
+    const index = action === "before" ? selection.measure : selection.measure + 1;
+    commit(insertMeasure(score, index), { part: selection.part, measure: index, note: 0 });
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -662,6 +713,8 @@
     onspanner={handleSpanner}
     {score}
     onsettings={handleSettings}
+    {canDeleteMeasure}
+    onmeasure={handleMeasure}
   />
   <SelectionInfo {score} {selection} {range} {message} />
 

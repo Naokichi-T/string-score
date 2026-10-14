@@ -137,6 +137,7 @@
     font-size: 24px;
     line-height: 1;
     position: relative; /* 記号ごとに上下の位置を調整する */
+    pointer-events: none; /* 文字の透明な箱がタブに重なっても、マウスの操作を受け取らない */
   }
   /* Bravura の記号は形によって文字の基準線からの位置が違うので、まん中に見えるよう少しずつずらす */
   .icon.bow {

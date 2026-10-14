@@ -10,11 +10,13 @@
   // （ステップ4-7a：範囲を選んでいるときも ▲ ▼・削除を押せるようにする。説明にキーの名前を追加）
   // （ステップ4-7b：休符のボタンを押せるかどうかを、鍵盤と同じ判定にする）
   // （ステップ5-1：「楽譜の設定」タブの中身を ScoreSettings として追加）
+  // （ステップ5-2：「小節」タブの中身を MeasureTools として追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
   import SymbolTools from "./SymbolTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
+  import MeasureTools from "./MeasureTools.svelte";
 
   // 親から受け取るもの
   //   duration     … 今の長さ（'quarter' など）
@@ -39,9 +41,13 @@
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（「記号」タブで使う）
   //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
   //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
+  //   canDeleteMeasure … 小節を消せるか（「小節」タブで使う）
+  //   onmeasure    … 「小節」タブのボタンが押されたときに呼ぶ関数（"before"・"after"・"delete" を渡す）
   let {
     score,
     onsettings = () => {},
+    canDeleteMeasure = false,
+    onmeasure = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -174,7 +180,7 @@
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
-      <span class="placeholder">（小節の追加・削除などをステップ5で作ります）</span>
+      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} />
     {/if}
@@ -245,6 +251,10 @@
 		   そのままだとボタンの上にはみ出す。少し下にずらしてまん中に見せる */
     position: relative;
     top: 9px;
+    /* 楽譜用フォントの文字は、見た目より上に大きく広がった「透明な箱」を持つので、
+		   その箱がタブのボタンに重なって、タブを押したつもりがこのボタンを押したことになっていた。
+		   マウスの操作をこの文字では受け取らず、下にあるものに通す */
+    pointer-events: none;
   }
   .icon.flat {
     top: -1px; /* 全音符・休符は符尾がないので、ずらす量を小さくする */
@@ -257,10 +267,6 @@
   }
   .tool.wide {
     width: 52px;
-  }
-  .placeholder {
-    color: #999;
-    font-size: 14px;
   }
   .mode-switch {
     display: flex; /* 2つのボタンをくっつけて並べる */

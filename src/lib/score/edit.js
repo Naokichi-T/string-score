@@ -773,3 +773,159 @@ export function setScoreInfo(score, field, value) {
   newScore[field] = value;
   return newScore;
 }
+
+// ==========================================================
+// ここから下は、小節を足す・消す関数（ステップ5-2）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：insertMeasure
+// 小節を1つ足す（全パートいっしょに。中身は拍子に合わせた休符）
+//   index … 足す位置（この番号の小節の前に入る。小節の数と同じなら最後に足す）
+// 1小節目の前に足すときは、拍子・調・音部記号を新しい1小節目に移す
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function insertMeasure(score, index) {
+  const newScore = cloneScore(score);
+
+  // 足す小節の拍子（前の小節と同じ。1小節目の前なら今の1小節目と同じ）
+  const time = timeAt(newScore, Math.max(index - 1, 0));
+  const total = measureTicks(time);
+
+  // 楽譜全体の小節の情報
+  let info = {};
+  if (index === 0) {
+    // 1小節目の前：拍子と調を新しい1小節目に移す
+    const first = newScore.measures[0];
+    info = { time: first.time, key: first.key };
+    delete first.time;
+    delete first.key;
+  }
+  newScore.measures.splice(index, 0, info);
+
+  // パートごとの小節
+  newScore.parts.forEach((part) => {
+    const measure = { notes: restsForSpan(0, total, time) };
+    if (index === 0) {
+      // 1小節目の前：音部記号を新しい1小節目に移す
+      measure.clef = part.measures[0].clef;
+      delete part.measures[0].clef;
+    }
+    part.measures.splice(index, 0, measure);
+  });
+
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：clefAt
+// i 小節目で使われている音部記号を返す（前の小節にさかのぼって探す）
+// ----------------------------------------------------------
+function clefAt(part, i) {
+  for (let k = i; k >= 0; k--) {
+    if (part.measures[k].clef) return part.measures[k].clef;
+  }
+  return "treble";
+}
+
+// ----------------------------------------------------------
+// 関数：cleanSpanners
+// 1つのパートの中で、相手がいなくなったスラー・松葉の印を外す
+// （「ここから」だけ・「ここまで」だけが残ると、おかしな所どうしがつながってしまうため）
+// ----------------------------------------------------------
+function cleanSpanners(part) {
+  // 休符ではない音符を、前から順に並べる
+  const notes = [];
+  part.measures.forEach((measure) => {
+    measure.notes.forEach((note) => {
+      if (!note.rest) notes.push(note);
+    });
+  });
+
+  // スラー（"start" と "stop"）と松葉（"crescendo"・"diminuendo" と "stop"）を、同じやり方で調べる
+  ["slur", "wedge"].forEach((field) => {
+    let open = null; // 「ここから」の印が付いていて、まだ「ここまで」が来ていない音符
+    notes.forEach((note) => {
+      const value = note[field];
+      if (value === undefined) return;
+      if (value === "stop") {
+        if (open) {
+          open = null; // 正しい組になった
+        } else {
+          delete note[field]; // 「ここから」がない「ここまで」は外す
+        }
+      } else {
+        if (open) delete open[field]; // 前の「ここから」に「ここまで」がなかったので外す
+        open = note;
+      }
+    });
+    if (open) delete open[field]; // 最後まで「ここまで」が来なかった「ここから」は外す
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：deleteMeasures
+// from 小節目から to 小節目までを消す（全パートいっしょに。番号は 0 から）
+// 消すときに、楽譜がおかしくならないように次のことも直す
+//   ・消す小節で拍子・調・音部記号が変わっていたら、その変化を次の小節に移す
+//   ・消す小節の直前の音から出ていたタイを外す
+//   ・片方の端だけ消されたスラー・松葉を外す
+// 戻り値：新しい楽譜データ（小節が1つも残らなくなるときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function deleteMeasures(score, from, to) {
+  const count = to - from + 1;
+  if (count >= score.measures.length) return score; // 少なくとも1小節は残す
+
+  const newScore = cloneScore(score);
+  const next = to + 1; // 消したあと、消した小節の位置に来る小節
+
+  // ① 変化を次の小節に移す（消すのが最後の小節までなら、移す先はない）
+  if (next < newScore.measures.length) {
+    const nextInfo = newScore.measures[next];
+    // 拍子：次の小節に自分の拍子がなく、消す前後で拍子が変わるなら、次の小節に書く
+    const timeAfter = timeAt(newScore, to);
+    if (!nextInfo.time && (from === 0 || !sameTime(timeAt(newScore, from - 1), timeAfter))) {
+      nextInfo.time = timeAfter;
+    }
+    // 調：拍子と同じ考え方
+    const keyAfter = keyAt(newScore, to);
+    if (nextInfo.key === undefined && (from === 0 || keyAt(newScore, from - 1) !== keyAfter)) {
+      nextInfo.key = keyAfter;
+    }
+    // 音部記号：パートごとに同じ考え方
+    newScore.parts.forEach((part) => {
+      const clefAfter = clefAt(part, to);
+      if (!part.measures[next].clef && (from === 0 || clefAt(part, from - 1) !== clefAfter)) {
+        part.measures[next].clef = clefAfter;
+      }
+    });
+  }
+
+  // ② 消す小節の直前の音から出ていたタイを外す
+  if (from > 0) {
+    newScore.parts.forEach((part) => {
+      const notes = part.measures[from - 1].notes;
+      const last = notes[notes.length - 1]; // 直前の小節の最後の音
+      if (last.tie) last.tie = false;
+    });
+  }
+
+  // ③ 小節を消す
+  newScore.measures.splice(from, count);
+  newScore.parts.forEach((part) => {
+    part.measures.splice(from, count);
+  });
+
+  // ④ 相手がいなくなったスラー・松葉を外す
+  newScore.parts.forEach((part) => cleanSpanners(part));
+
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：sameTime
+// 2つの拍子が同じか調べる
+// ----------------------------------------------------------
+function sameTime(a, b) {
+  return a.beats === b.beats && a.beatType === b.beatType;
+}
