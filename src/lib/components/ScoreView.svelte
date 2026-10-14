@@ -2,13 +2,18 @@
   // ==========================================================
   // ScoreView.svelte
   // 楽譜データを受け取って、五線譜を表示する部品
-  // 画面の幅が変わったら、改行の位置を決め直して描き直す
+  // ・画面の幅が変わったら、改行の位置を決め直して描き直す
+  // ・楽譜データや選択中の場所が変わったら描き直す
+  // ・音符がクリックされたら、親に知らせる（onselect）
   // ==========================================================
   import { onMount } from "svelte";
   import { renderScore } from "#lib/score/render.js";
 
-  // 親から受け取る楽譜データ
-  let { score } = $props();
+  // 親から受け取るもの
+  //   score     … 楽譜データ
+  //   selection … 選択中の場所（選んでいなければ null）
+  //   onselect  … 音符がクリックされたときに呼ぶ関数（選ばれた場所か null を渡す）
+  let { score, selection = null, onselect = () => {} } = $props();
 
   // 外側の枠の div（幅を測るのに使う）
   let wrapper;
@@ -17,7 +22,16 @@
   let container;
 
   // 読み込んだ VexFlow（読み込みが終わるまでは null）
-  let VF = null;
+  let VF = $state(null);
+
+  // 最後に描いたときの、音符ごとの当たり判定の四角
+  let hitBoxes = [];
+
+  // 描き直しの予約（何度も続けて頼まれても、まとめて1回だけ描く）
+  let frame = 0;
+
+  // クリックした場所から、この距離（ピクセル）までは「当たり」にする
+  const HIT_MARGIN = 4;
 
   // ----------------------------------------------------------
   // 関数：draw
@@ -28,32 +42,65 @@
     if (!VF) return;
     // 枠の内側の幅（左右の padding 8px ずつを引く）
     const width = wrapper.clientWidth - 16;
-    renderScore(VF, container, score, width);
+    hitBoxes = renderScore(VF, container, score, width, selection);
   }
+
+  // ----------------------------------------------------------
+  // 関数：requestDraw
+  // 次の画面の更新のタイミングで描くように予約する
+  // ----------------------------------------------------------
+  function requestDraw() {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(draw);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleClick
+  // 五線譜がクリックされたとき、どの音符の上かを調べて親に知らせる
+  // ----------------------------------------------------------
+  function handleClick(event) {
+    // クリックした位置を、五線譜の左上を (0, 0) とした位置に直す
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // 当たり判定の四角の中に入っている音符を探す
+    const hit = hitBoxes.find((box) => x >= box.x - HIT_MARGIN && x <= box.x + box.w + HIT_MARGIN && y >= box.y - HIT_MARGIN && y <= box.y + box.h + HIT_MARGIN);
+
+    if (hit) {
+      onselect({ part: hit.part, measure: hit.measure, note: hit.note });
+    } else {
+      onselect(null); // 何もない所をクリックしたら選択を外す
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 楽譜データ・選択中の場所・VexFlow の準備が変わったら描き直す
+  // （ここで読んだ値が変わると、この中身がもう一度実行される）
+  // ----------------------------------------------------------
+  $effect(() => {
+    score;
+    selection;
+    VF;
+    requestDraw();
+  });
 
   // ----------------------------------------------------------
   // 画面が表示されたら実行される処理
   // VexFlow はブラウザの中でしか動かないので、ここで読み込む
   // ----------------------------------------------------------
   onMount(() => {
-    // 描き直しの予約（幅が変わるたびに何度も描かないように、まとめて1回にする）
-    let frame = 0;
-    function requestDraw() {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(draw);
-    }
-
     // 枠の幅が変わったら描き直す
     const observer = new ResizeObserver(requestDraw);
     observer.observe(wrapper);
 
-    // VexFlow を読み込んで、フォントの準備ができたら描く
+    // VexFlow を読み込んで、フォントの準備ができたら VF に入れる（→ 上の $effect で描かれる）
     (async () => {
       // VexFlow を読み込む（読み込むと楽譜用のフォントも読み込みが始まる）
-      VF = (await import("vexflow")).default;
+      const loaded = (await import("vexflow")).default;
       // 楽譜用のフォント（Bravura）の読み込みが終わるのを待つ
       await document.fonts.ready;
-      draw();
+      VF = loaded;
     })();
 
     // この部品が画面から消えるときの後片付け
@@ -66,7 +113,9 @@
 
 <!-- 五線譜が入る枠 -->
 <div class="score-view" bind:this={wrapper}>
-  <div bind:this={container}></div>
+  <!-- クリックで音符を選ぶ（キーボードでの操作は編集ページでまとめて受け取る） -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div bind:this={container} onclick={handleClick}></div>
 </div>
 
 <style>

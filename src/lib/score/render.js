@@ -37,6 +37,9 @@ const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
 const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
 
+// 選択中の音符の色（青）
+const SELECTED_COLOR = "#2563eb";
+
 // ----------------------------------------------------------
 // 関数：renderScore
 // 楽譜データを、指定した HTML の要素の中に五線譜として描く
@@ -44,8 +47,11 @@ const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面で
 //   container … 描く先の HTML の要素（div）
 //   score     … 楽譜データ
 //   width     … 楽譜全体の幅（画面の幅に合わせる）
+//   selection … 選択中の場所 { part, measure, note }（選んでいなければ null）
+// 戻り値：クリックの当たり判定に使う、音符ごとの四角の一覧
+//   [{ part, measure, note, x, y, w, h }, ...]
 // ----------------------------------------------------------
-export function renderScore(VF, container, score, width) {
+export function renderScore(VF, container, score, width, selection = null) {
   // 前に描いたものを消す
   container.innerHTML = "";
 
@@ -179,7 +185,12 @@ export function renderScore(VF, container, score, width) {
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
           const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
-          allNotes[p].push({ staveNote: staveNote, data: note, line: l });
+          // 選択中の音なら青くする
+          if (selection && selection.part === p && selection.measure === i && selection.note === j) {
+            staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+          }
+          // 何パート目・何小節目・何番目の音かも一緒に覚えておく（当たり判定に使う）
+          allNotes[p].push({ staveNote: staveNote, data: note, line: l, part: p, measure: i, note: j });
           return staveNote;
         });
 
@@ -280,4 +291,22 @@ export function renderScore(VF, container, score, width) {
 
   // ----- 8. スラーと松葉を描く -----
   drawSpanners(VF, context, allNotes, lineBounds);
+
+  // ----- 9. クリックの当たり判定に使う四角の一覧を作って返す -----
+  const hitBoxes = [];
+  allNotes.forEach((notesOfPart) => {
+    notesOfPart.forEach((entry) => {
+      const box = entry.staveNote.getBoundingBox(); // 音符を囲む四角
+      hitBoxes.push({
+        part: entry.part,
+        measure: entry.measure,
+        note: entry.note,
+        x: box.getX(),
+        y: box.getY(),
+        w: box.getW(),
+        h: box.getH(),
+      });
+    });
+  });
+  return hitBoxes;
 }
