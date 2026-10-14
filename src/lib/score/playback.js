@@ -5,6 +5,7 @@
 // （ステップ6-3a：スタッカート・テヌート・アクセント・スラーを、音の長さと強さに反映する）
 // （ステップ6-3b：フェルマータ。その音を2倍にのばし、ほかのパートもその間は待つ）
 // （ステップ6-3c：pizz.／arco。pizz. から arco までの音に印を付ける（ピチカートの音で鳴らすため））
+// （ステップ6-3d：松葉（＜ ＞）。始まりから終わりまで、だんだん強く・弱くする）
 //
 // 【鳴らす音の一覧の1つ分】
 // {
@@ -61,6 +62,13 @@ const ACCENT_BOOST = 20;
 
 // フェルマータでのばす倍率（2 なら、その音符の長さの2倍）（ステップ6-3b）
 const FERMATA_RATE = 2;
+
+// 強弱の段階（弱い順）（ステップ6-3d）
+// 松葉の終わりに強弱記号がないとき、ここから2段階上げる・下げる
+const DYNAMIC_LEVELS = ["pp", "p", "mp", "mf", "f", "ff"];
+
+// 松葉の終わりに強弱記号がないとき、何段階変えるか
+const WEDGE_STEPS = 2;
 
 // ----------------------------------------------------------
 // 関数：pitchToMidi
@@ -148,6 +156,99 @@ export function isPizzAt(score, position) {
 }
 
 // ----------------------------------------------------------
+// 関数：stepLevel
+// 強弱を何段階か上げる・下げる（pp より下・ff より上には行かない）（ステップ6-3d）
+//   dynamic … 今の強弱（"mf" など）
+//   steps   … 上げる段階の数（マイナスなら下げる）
+// 例：("mf", 2) → "ff"、("mf", -2) → "p"、("f", 2) → "ff"
+// ----------------------------------------------------------
+function stepLevel(dynamic, steps) {
+  const index = DYNAMIC_LEVELS.indexOf(dynamic);
+  const next = Math.min(DYNAMIC_LEVELS.length - 1, Math.max(0, index + steps));
+  return DYNAMIC_LEVELS[next];
+}
+
+// ----------------------------------------------------------
+// 関数：computeWedges
+// 1つのパートの松葉（＜ ＞）を調べて、松葉の中の音の強さを決める（ステップ6-3d）
+//   part … パートのデータ
+// 戻り値：Map（キー "小節番号-音の番号" → { velocity: その音の強さ, after: 松葉のあとの強弱 }）
+//   after は松葉の終わりの音にだけ入る（終わりの音に強弱記号がないとき、そこから続く強弱）
+// 決め方
+//   ・始まりの強さ ＝ 始まりの音の強さ（今の強弱）
+//   ・終わりの強さ ＝ 終わりの音に強弱記号（pp〜ff）があればその強さ
+//                    なければ ＜ は2段階上、＞ は2段階下
+//   ・間の音は、始まりの音からの時間の割合で、だんだん変える
+// ----------------------------------------------------------
+function computeWedges(part) {
+  // パートの音を、1小節目からの時刻（ティック）といっしょに1列に並べる
+  const list = [];
+  let tick = 0;
+  part.measures.forEach((measure, i) => {
+    measure.notes.forEach((note, j) => {
+      list.push({ key: `${i}-${j}`, note: note, tick: tick });
+      tick = tick + noteTicks(note);
+    });
+  });
+
+  const wedges = new Map();
+  let dynamic = DEFAULT_DYNAMIC; // 今の強弱（buildEvents と同じ数え方をする）
+
+  for (let k = 0; k < list.length; k++) {
+    const item = list[k];
+    if (item.note.rest) continue;
+
+    // 強弱を進める
+    const result = applyDynamic(item.note.dynamic, dynamic);
+    dynamic = result.next;
+    const before = wedges.get(item.key); // 前の松葉で、この音の強さが決まっているか
+    if (before && before.after) dynamic = before.after;
+
+    // 松葉の始まりの音でなければ次へ
+    const kind = item.note.wedge;
+    if (kind !== "crescendo" && kind !== "diminuendo") continue;
+
+    // 終わりの音（"stop" の印のある音符）を先まで探す
+    let endK = -1;
+    for (let m = k + 1; m < list.length; m++) {
+      if (!list[m].note.rest && list[m].note.wedge === "stop") {
+        endK = m;
+        break;
+      }
+    }
+    if (endK < 0) continue; // 終わりが見つからなければ何もしない
+
+    // 始まりの強さ（前の松葉の終わりと重なっていれば、その強さから）
+    const startVelocity = before ? before.velocity : result.velocity;
+
+    // 終わりの強さ
+    const endNote = list[endK].note;
+    let target;
+    let after;
+    if (endNote.dynamic && DYNAMIC_VELOCITY[endNote.dynamic] !== undefined) {
+      // 終わりの音に強弱記号がある：その強さ（そのあとの強弱は applyDynamic で変わる）
+      target = DYNAMIC_VELOCITY[endNote.dynamic];
+    } else {
+      // ない：＜ は2段階上、＞ は2段階下。松葉のあとも、その強弱が続く
+      after = stepLevel(dynamic, kind === "crescendo" ? WEDGE_STEPS : -WEDGE_STEPS);
+      target = DYNAMIC_VELOCITY[after];
+    }
+
+    // 始まりの音から終わりの音まで、時間の割合でだんだん変える
+    const startTick = item.tick;
+    const endTick = list[endK].tick;
+    for (let m = k; m <= endK; m++) {
+      if (list[m].note.rest) continue;
+      const rate = endTick === startTick ? 1 : (list[m].tick - startTick) / (endTick - startTick);
+      const velocity = Math.round(startVelocity + (target - startVelocity) * rate);
+      wedges.set(list[m].key, { velocity: velocity, after: m === endK ? after : undefined });
+    }
+  }
+
+  return wedges;
+}
+
+// ----------------------------------------------------------
 // 関数：buildEvents
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
@@ -158,7 +259,7 @@ export function isPizzAt(score, position) {
 //   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
-// ・強弱・スラー・pizz. は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
+// ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, partIndex) {
   const events = [];
@@ -180,6 +281,7 @@ export function buildEvents(score, startMeasure, partIndex) {
     let tiedEvent = null; // 前の音からタイでつながっているときの、その音（まとめる先）
     let inSlur = false; // 今スラーの中か（スラーの始まりの音から、終わりの音の1つ前まで true）
     let pizz = false; // 今ピチカートか（pizz. の付いた音から、arco の付いた音の1つ前まで true）
+    const wedges = computeWedges(part); // 松葉の中の音の強さ（ステップ6-3d）
 
     part.measures.forEach((measure, i) => {
       const playing = i >= startMeasure; // この小節は鳴らすか
@@ -200,6 +302,14 @@ export function buildEvents(score, startMeasure, partIndex) {
         // 強弱を決める（鳴らさない小節でも、強弱の変化だけは数えておく）
         const result = applyDynamic(note.dynamic, dynamic);
         dynamic = result.next;
+
+        // 松葉の中の音なら、松葉で決めた強さにする。松葉の終わりなら、そのあとの強弱も変える（ステップ6-3d）
+        let baseVelocity = result.velocity;
+        const wedge = wedges.get(`${i}-${j}`);
+        if (wedge) {
+          baseVelocity = wedge.velocity;
+          if (wedge.after) dynamic = wedge.after;
+        }
 
         // スラーの状態を進める（鳴らさない小節でも数えておく）
         //   始まりの音 → ここから次の音とつなげる
@@ -222,7 +332,7 @@ export function buildEvents(score, startMeasure, partIndex) {
 
         // アクセントが付いていたら、少し強くする（127 をこえないようにする）
         const accented = (note.articulations ?? []).includes("accent");
-        const velocity = accented ? Math.min(127, result.velocity + ACCENT_BOOST) : result.velocity;
+        const velocity = accented ? Math.min(127, baseVelocity + ACCENT_BOOST) : baseVelocity;
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
           // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
