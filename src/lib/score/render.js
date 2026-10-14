@@ -43,6 +43,9 @@ const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面で
 const SELECTED_COLOR = "#2563eb";
 const RANGE_COLOR = "#60a5fa";
 
+// 再生中に鳴っている音符の色（緑）（ステップ6-2）
+const PLAYING_COLOR = "#16a34a";
+
 // ----------------------------------------------------------
 // 関数：renderScore
 // 楽譜データを、指定した HTML の要素の中に五線譜として描く
@@ -52,10 +55,14 @@ const RANGE_COLOR = "#60a5fa";
 //   width     … 楽譜全体の幅（画面の幅に合わせる）
 //   selection … 選択中の場所 { part, measure, note }（選んでいなければ null）
 //   range     … 範囲選択 { part, start, end }（範囲を選んでいなければ null）
+//   playingNotes … 再生中に鳴っている音符の場所の一覧 [{ part, measure, note }, ...]（ステップ6-2）
 // 戻り値：クリックの当たり判定に使う、音符ごとの四角の一覧
-//   [{ part, measure, note, x, y, w, h }, ...]
+//   [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
+//   lineTop・lineBottom … その音符がある段の上端と下端（再生中の自動スクロールに使う）
 // ----------------------------------------------------------
-export function renderScore(VF, container, score, width, selection = null, range = null) {
+export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = []) {
+  // 鳴っている音符を「パート-小節-番号」の文字にして、すぐに探せるようにしておく
+  const playingKeys = new Set(playingNotes.map((n) => `${n.part}-${n.measure}-${n.note}`));
   // 前に描いたものを消す
   container.innerHTML = "";
 
@@ -198,8 +205,10 @@ export function renderScore(VF, container, score, width, selection = null, range
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
           const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
-          // 選択中の音なら青、範囲選択の中の音なら明るい青にする
-          if (selection && selection.part === p && selection.measure === i && selection.note === j) {
+          // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
+          if (playingKeys.has(`${p}-${i}-${j}`)) {
+            staveNote.setStyle({ fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR });
+          } else if (selection && selection.part === p && selection.measure === i && selection.note === j) {
             staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
           } else if (isInRange(range, p, i, j)) {
             staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
@@ -312,6 +321,9 @@ export function renderScore(VF, container, score, width, selection = null, range
   allNotes.forEach((notesOfPart) => {
     notesOfPart.forEach((entry) => {
       const box = entry.staveNote.getBoundingBox(); // 音符を囲む四角
+      // この音符がある段の上端（上の余白も含める）と下端（一番下の五線の下に飛び出す音符のぶんも含める）
+      const lineTop = headerHeight + systemHeight * entry.line;
+      const lineBottom = lineTop + TOP + PART_SPACING * (partCount - 1) + 100;
       hitBoxes.push({
         part: entry.part,
         measure: entry.measure,
@@ -320,6 +332,8 @@ export function renderScore(VF, container, score, width, selection = null, range
         y: box.getY(),
         w: box.getW(),
         h: box.getH(),
+        lineTop: lineTop,
+        lineBottom: lineBottom,
       });
     });
   });

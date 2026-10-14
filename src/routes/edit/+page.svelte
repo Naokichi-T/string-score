@@ -12,6 +12,7 @@
   // （ステップ5-1：タイトル・作曲者・速度記号・テンポを変える）
   // （ステップ5-2：小節の追加・削除）
   // （ステップ6-1：録音した楽器の音で再生する（全体・パート別）、鍵盤の音も楽器の音にする）
+  // （ステップ6-2：再生中に鳴っている音符を緑にする）
   // ==========================================================
   import { onMount } from "svelte";
   import TopBar from "#lib/components/TopBar.svelte";
@@ -55,7 +56,7 @@
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
-  import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType } from "#lib/audio/sound.js";
+  import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick } from "#lib/score/playback.js";
 
   // 楽譜データ（空の弦楽四重奏で始める）
@@ -118,6 +119,57 @@
   // 再生できるか（電子音ならいつでも、楽器の音なら読み込みが終わってから）
   let canPlay = $derived(soundType === "synth" || soundState === "ready");
 
+  // 今鳴っている音符の場所の一覧 [{ part, measure, note }, ...]（五線譜で緑にする）（ステップ6-2）
+  // （$state.raw：入れ替えたときだけ画面を更新する）
+  let playingNotes = $state.raw([]);
+
+  // 緑にする音符の一覧（再生を始めたときに buildEvents で作る）
+  let highlights = [];
+
+  // 1ティックが何秒か（再生を始めたときのテンポで決める）
+  let highlightTickSeconds = 0;
+
+  // 前の画面の更新のときに鳴っていた音符（変わったときだけ描き直すため）
+  let lastHighlightKey = "";
+
+  // 画面の更新のたびに呼ぶ予約の番号（止めるときに使う）
+  let highlightFrame = 0;
+
+  // ----------------------------------------------------------
+  // 関数：updateHighlight
+  // 今鳴っている音符を調べて、変わっていたら playingNotes を入れ替える
+  // 画面が更新されるたび（1秒に60回くらい）に、自分で自分を予約して呼ばれ続ける
+  // ----------------------------------------------------------
+  function updateHighlight() {
+    const time = getPlaybackTime(); // 再生を始めてから何秒たったか
+    if (time === null) return; // 再生していなければ終わり
+
+    // 秒をティックに直して、その時間に鳴っている音符を探す
+    const tick = time / highlightTickSeconds;
+    const now = highlights.filter((h) => h.startTick <= tick && tick < h.endTick);
+
+    // 前と同じなら描き直さない（描き直しは時間がかかるので）
+    const key = now.map((h) => `${h.part}-${h.measure}-${h.note}`).join(",");
+    if (key !== lastHighlightKey) {
+      lastHighlightKey = key;
+      playingNotes = now.map((h) => ({ part: h.part, measure: h.measure, note: h.note }));
+    }
+
+    // 次の画面の更新のときに、もう一度呼ぶ
+    highlightFrame = requestAnimationFrame(updateHighlight);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：clearHighlight
+  // 緑を消して、調べるのをやめる（止めたとき・最後まで鳴ったとき）
+  // ----------------------------------------------------------
+  function clearHighlight() {
+    cancelAnimationFrame(highlightFrame);
+    highlights = [];
+    lastHighlightKey = "";
+    playingNotes = [];
+  }
+
   // ----------------------------------------------------------
   // 関数：handleSoundType
   // 上のバーで音の種類が選ばれたとき
@@ -147,8 +199,11 @@
         soundState = "error";
       });
 
-    // ページから離れるときは、鳴っている音を止める
-    return () => stopPlayback();
+    // ページから離れるときは、鳴っている音を止めて、緑を調べるのもやめる
+    return () => {
+      stopPlayback();
+      cancelAnimationFrame(highlightFrame);
+    };
   });
 
   // 選んでいるのが音符（休符ではない）か（臨時記号などのボタンを押せるかどうかに使う）
@@ -818,11 +873,22 @@
       return;
     }
 
-    // まとめて予約して鳴らす（最後まで行ったら、再生中をやめる）
-    const started = playEvents(result.events, result.totalTicks, secondsPerTick(score.tempo), () => {
+    // まとめて予約して鳴らす（最後まで行ったら、再生中をやめて緑を消す）
+    const tickSeconds = secondsPerTick(score.tempo);
+    const started = playEvents(result.events, result.totalTicks, tickSeconds, () => {
       playing = false;
+      clearHighlight();
     });
     playing = started;
+
+    // 鳴っている音符を緑にし始める
+    if (started) {
+      highlights = result.highlights;
+      highlightTickSeconds = tickSeconds;
+      lastHighlightKey = "";
+      cancelAnimationFrame(highlightFrame);
+      highlightFrame = requestAnimationFrame(updateHighlight);
+    }
   }
 
   // ----------------------------------------------------------
@@ -833,6 +899,7 @@
     if (!playing) return;
     stopPlayback();
     playing = false;
+    clearHighlight(); // 緑を消す
   }
 
   // ----------------------------------------------------------
@@ -1072,7 +1139,7 @@
 
   <!-- 五線譜の部分だけスクロールする -->
   <main class="score-area">
-    <ScoreView {score} {selection} {range} onselect={handleSelect} />
+    <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} />
   </main>
 
   <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />

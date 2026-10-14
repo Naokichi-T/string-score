@@ -27,6 +27,20 @@ let stopFunctions = [];
 // 再生が最後まで行ったことを知らせるためのタイマー
 let endTimer = null;
 
+// 再生を始めた時刻（AudioContext の時計で。再生していないときは null）（ステップ6-2）
+let playStartTime = null;
+
+// ----------------------------------------------------------
+// 関数：getPlaybackTime
+// 再生を始めてから何秒たったかを返す（再生していないときは null）
+// 鳴っている音符を緑にするのに使う（ステップ6-2）
+// 始めてすぐの 0.1 秒（予約の待ち時間）はマイナスになる
+// ----------------------------------------------------------
+export function getPlaybackTime() {
+  if (playStartTime === null || !audioContext) return null;
+  return audioContext.currentTime - playStartTime;
+}
+
 // 録音の音はラ4 = 440Hz なので、442Hz に合わせるために上げる量（セント。半音 = 100セント）
 // 1200 × log2(442 ÷ 440) ≒ 7.85
 const DETUNE_CENTS = 1200 * Math.log2(442 / 440);
@@ -234,6 +248,7 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
   const ctx = resumeAudio();
   // 予約が間に合うように、ほんの少し（0.1秒）あとから始める
   const startTime = ctx.currentTime + 0.1;
+  playStartTime = startTime; // 緑にする音符を決めるために覚えておく
 
   events.forEach((event) => {
     const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
@@ -260,6 +275,7 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
   endTimer = setTimeout(() => {
     endTimer = null;
     stopFunctions = [];
+    playStartTime = null;
     onend();
   }, totalSeconds * 1000);
 
@@ -273,6 +289,7 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
 export function stopPlayback() {
   stopFunctions.forEach((stop) => stop());
   stopFunctions = [];
+  playStartTime = null;
   if (endTimer) {
     clearTimeout(endTimer);
     endTimer = null;

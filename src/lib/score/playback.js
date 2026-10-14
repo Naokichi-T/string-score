@@ -82,13 +82,16 @@ function applyDynamic(dynamic, current) {
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（0 から数える）
 //   partIndex    … どのパートを鳴らすか（"all" なら全パート、数字ならそのパートだけ）
-// 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック） }
+// 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧 }
+//   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
+//   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱は1小節目から数えておく（途中から鳴らしても、それまでの強弱を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, partIndex) {
   const events = [];
+  const highlights = []; // 緑にする音符の一覧（ステップ6-2）
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
   let totalTicks = 0;
@@ -145,6 +148,9 @@ export function buildEvents(score, startMeasure, partIndex) {
           tiedEvent = event;
         }
 
+        // 緑にする音符の一覧に入れる（タイの後ろの音符も、その音符の時間だけ緑にする）
+        highlights.push({ part: p, measure: i, note: j, startTick: tick, endTick: tick + length });
+
         // この音にタイが付いていなければ、つながりはここで終わり
         if (!note.tie) tiedEvent = null;
 
@@ -156,7 +162,7 @@ export function buildEvents(score, startMeasure, partIndex) {
   // 鳴り始める順に並べる（同じ時間なら上のパートから）
   events.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
 
-  return { events: events, totalTicks: totalTicks };
+  return { events: events, totalTicks: totalTicks, highlights: highlights };
 }
 
 // ----------------------------------------------------------
