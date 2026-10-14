@@ -4,6 +4,7 @@
   // 道具のタブ（音符・記号・小節・楽譜の設定）
   // タブを押すと、その下に並ぶボタンが切り替わる
   // （ステップ4-2：「音符」タブに長さ・付点・休符のボタンを追加）
+  // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
 
@@ -25,13 +26,20 @@
   ];
 
   // 長さのボタンに出す記号と名前
+  //   icon … 楽譜用フォント（Bravura）の文字。Bravura では音楽記号に決まった番号が付いている
+  //   name … マウスを乗せたときに出す名前
+  //   flat … 符尾のない平たい記号なら true（下にずらさなくてよいので、位置の調整を変える）
   const DURATION_LABELS = {
-    whole: { icon: "𝅝", text: "全" },
-    half: { icon: "𝅗𝅥", text: "2分" },
-    quarter: { icon: "♩", text: "4分" },
-    eighth: { icon: "♪", text: "8分" },
-    "16th": { icon: "𝅘𝅥𝅯", text: "16分" },
+    whole: { icon: "\uE1D2", name: "全音符", flat: true },
+    half: { icon: "\uE1D3", name: "2分音符" },
+    quarter: { icon: "\uE1D5", name: "4分音符" },
+    eighth: { icon: "\uE1D7", name: "8分音符" },
+    "16th": { icon: "\uE1D9", name: "16分音符" },
   };
+
+  // 付点・休符のボタンに出す記号（楽譜用フォントの文字）
+  const DOT_ICON = "\uE1D5\uE1E7"; // 4分音符＋付点
+  const REST_ICON = "\uE4E5"; // 4分休符
 
   // 今選んでいるタブ
   let activeTab = $state("note");
@@ -53,21 +61,30 @@
       <!-- 長さのボタン（今の長さは色が付く。入らない長さは押せない） -->
       <div class="group">
         {#each DURATION_ORDER as d (d)}
-          <button class="tool" class:on={duration === d} disabled={!canUse(d, dotted ? 1 : 0) && !canUse(d, 0)} onclick={() => onduration(d)} title="{DURATION_LABELS[d].text}音符">
-            <span class="icon">{DURATION_LABELS[d].icon}</span>{DURATION_LABELS[d].text}
+          <button
+            class="tool"
+            class:on={duration === d}
+            disabled={!canUse(d, dotted ? 1 : 0) && !canUse(d, 0)}
+            onclick={() => onduration(d)}
+            title={DURATION_LABELS[d].name}
+            aria-label={DURATION_LABELS[d].name}
+          >
+            <span class="icon" class:flat={DURATION_LABELS[d].flat}>{DURATION_LABELS[d].icon}</span>
           </button>
         {/each}
       </div>
 
       <!-- 付点 -->
       <div class="group">
-        <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点">・付点</button>
+        <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点" aria-label="付点">
+          <span class="icon">{DOT_ICON}</span>
+        </button>
       </div>
 
       <!-- 休符 -->
       <div class="group">
-        <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする">
-          <span class="icon">𝄽</span>休符
+        <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする" aria-label="休符にする">
+          <span class="icon flat">{REST_ICON}</span>
         </button>
       </div>
     {:else if activeTab === "symbol"}
@@ -117,8 +134,10 @@
   .tool {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
+    justify-content: center;
+    width: 44px; /* 記号だけのボタンなので、幅をそろえる */
+    height: 40px;
+    padding: 0;
     font-size: 14px;
     border: 1px solid #ccc;
     border-radius: 4px;
@@ -135,8 +154,16 @@
     cursor: not-allowed;
   }
   .icon {
-    font-size: 20px;
+    font-family: "Bravura"; /* 楽譜用フォント（VexFlow が読み込んだもの） */
+    font-size: 24px;
     line-height: 1;
+    /* Bravura の音符は、玉が文字の基準線の上にあって符尾が上に長く伸びる形なので、
+		   そのままだとボタンの上にはみ出す。少し下にずらしてまん中に見せる */
+    position: relative;
+    top: 9px;
+  }
+  .icon.flat {
+    top: -1px; /* 全音符・休符は符尾がないので、ずらす量を小さくする */
   }
   .placeholder {
     color: #999;

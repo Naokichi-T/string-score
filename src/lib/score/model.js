@@ -166,36 +166,20 @@ export function measureTicks(time) {
   return (time.beats * 16) / time.beatType;
 }
 
-// 1つの休符で書ける長さ（16分音符いくつ分か）と、その書き方の表
-// 小節まるごと休みのときに使う
-const SINGLE_REST = {
-  16: { duration: "whole", dots: 0 },
-  12: { duration: "half", dots: 1 },
-  8: { duration: "half", dots: 0 },
-  6: { duration: "quarter", dots: 1 },
-  4: { duration: "quarter", dots: 0 },
-  3: { duration: "eighth", dots: 1 },
-  2: { duration: "eighth", dots: 0 },
-  1: { duration: "16th", dots: 0 },
-};
-
 // ----------------------------------------------------------
 // 関数：restsForSpan
 // 小節の中の「start から length の長さ」を、休符で埋めるための休符の並びを作る
-//   start   … 埋め始める位置（小節の頭から、16分音符いくつ分か）
-//   length  … 埋める長さ（16分音符いくつ分か）
-//   measure … 1小節の長さ（16分音符いくつ分か）
-// 拍の区切りに合わせて、自然な形の休符にする
-//   ・小節まるごと休みなら、1つの休符（4分の4拍子なら全休符、4分の3拍子なら付点2分休符）
-//   ・それ以外は、長い休符から順に「その休符の長さで割り切れる位置」にだけ置く
-//     例：4分の4拍子で2拍目から3拍分 → 4分休符（2拍目）＋2分休符（3拍目から）
+//   start  … 埋め始める位置（小節の頭から、16分音符いくつ分か）
+//   length … 埋める長さ（16分音符いくつ分か）
+//   time   … その小節の拍子 { beats, beatType }
+// Flat と同じように「1拍ずつの休符」で埋める
+//   ・1拍の長さ = 拍子の下の数字の音符1つ分（4分の4拍子なら4分音符、8分の6拍子なら8分音符）
+//   ・1拍より長い休符は使わない（空の4分の4拍子の小節 → 4分休符が4つ）
+//   ・拍の途中から始まるときは、その休符の長さで割り切れる位置にだけ置く
+//     例：4分の4拍子で、3拍目のうら（8分音符1つ分あと）から → 8分休符 → 4分休符…
 // ----------------------------------------------------------
-export function restsForSpan(start, length, measure) {
-  // 小節まるごと休み
-  if (start === 0 && length === measure && SINGLE_REST[measure]) {
-    const rest = SINGLE_REST[measure];
-    return [{ rest: true, duration: rest.duration, dots: rest.dots }];
-  }
+export function restsForSpan(start, length, time) {
+  const beat = 16 / time.beatType; // 1拍の長さ（16分音符いくつ分か）
 
   const rests = [];
   let position = start;
@@ -204,9 +188,10 @@ export function restsForSpan(start, length, measure) {
     // 長い休符から順に、置けるものを探す
     for (const duration of DURATION_ORDER) {
       const ticks = DURATION_TICKS[duration];
+      const withinBeat = ticks <= beat; // 1拍より長くない
       const fits = position + ticks <= end; // はみ出さない
       const aligned = position % ticks === 0; // その休符の長さで割り切れる位置
-      if (fits && aligned) {
+      if (withinBeat && fits && aligned) {
         rests.push({ rest: true, duration: duration, dots: 0 });
         position = position + ticks;
         break;
@@ -244,7 +229,7 @@ export function createEmptyScore() {
       abbreviation: info.abbreviation,
       instrument: info.instrument,
       measures: Array.from({ length: measureCount }, (_, i) => {
-        const measure = { notes: restsForSpan(0, ticks, ticks) };
+        const measure = { notes: restsForSpan(0, ticks, time) };
         // 1小節目には楽器に合った音部記号を書いておく
         if (i === 0) measure.clef = INSTRUMENTS[info.instrument].clef;
         return measure;

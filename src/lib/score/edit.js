@@ -84,7 +84,7 @@ export function replaceAt(score, selection, newNote) {
   });
 
   // 新しい音の終わりから、残す音の始まりまでのすき間を休符で埋める
-  const fill = restsForSpan(end, firstAfterStart - end, total);
+  const fill = restsForSpan(end, firstAfterStart - end, timeAt(newScore, selection.measure));
 
   measure.notes = [...before, newNote, ...fill, ...after];
   return newScore;
@@ -110,11 +110,12 @@ export function setDuration(score, selection, duration, dots) {
 export function appendMeasure(score) {
   const newScore = cloneScore(score);
   const lastIndex = newScore.measures.length - 1;
-  const total = measureTicks(timeAt(newScore, lastIndex));
+  const time = timeAt(newScore, lastIndex);
+  const total = measureTicks(time);
 
   newScore.measures.push({}); // 拍子・調は変えない
   newScore.parts.forEach((part) => {
-    part.measures.push({ notes: restsForSpan(0, total, total) });
+    part.measures.push({ notes: restsForSpan(0, total, time) });
   });
   return newScore;
 }
