@@ -72,7 +72,7 @@
 
   <!-- スラー・松葉（範囲を選んだときだけ押せる） -->
   <div class="group">
-    <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
+    <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（S）（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
     <button
       class="tool text"
       class:on={spanState.wedge === "crescendo"}

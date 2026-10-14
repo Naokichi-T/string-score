@@ -7,6 +7,7 @@
   // （ステップ4-3：臨時記号・高さ・タイ・削除のボタンを追加）
   // （ステップ4-4：上書き・挿入の切り替えを追加）
   // （ステップ4-5：「記号」タブの中身を SymbolTools として追加）
+  // （ステップ4-7a：範囲を選んでいるときも ▲ ▼・削除を押せるようにする。説明にキーの名前を追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
@@ -20,6 +21,7 @@
   //   ondot        … 付点のボタンが押されたときに呼ぶ関数
   //   onrest       … 休符のボタンが押されたときに呼ぶ関数
   //   noteSelected … 音符（休符ではない）を選んでいるか（false なら臨時記号などのボタンを押せない）
+  //   rangeEditable … 選んだ範囲の中に音符があるか（true なら ▲ ▼・削除のボタンを押せる）
   //   onaccidental … 臨時記号のボタンが押されたときに呼ぶ関数（1：♯、-1：♭、0：♮ を渡す）
   //   onstep       … ▲ ▼ が押されたときに呼ぶ関数（1：半音上、-1：半音下 を渡す）
   //   ontie        … タイのボタンが押されたときに呼ぶ関数
@@ -46,6 +48,7 @@
     ondot = () => {},
     onrest = () => {},
     noteSelected = false,
+    rangeEditable = false,
     onaccidental = () => {},
     onstep = () => {},
     ontie = () => {},
@@ -64,12 +67,13 @@
   //   icon … 楽譜用フォント（Bravura）の文字。Bravura では音楽記号に決まった番号が付いている
   //   name … マウスを乗せたときに出す名前
   //   flat … 符尾のない平たい記号なら true（下にずらさなくてよいので、位置の調整を変える）
+  //   key  … ショートカットのキー（マウスを乗せたときの説明に出す）
   const DURATION_LABELS = {
-    whole: { icon: "\uE1D2", name: "全音符", flat: true },
-    half: { icon: "\uE1D3", name: "2分音符" },
-    quarter: { icon: "\uE1D5", name: "4分音符" },
-    eighth: { icon: "\uE1D7", name: "8分音符" },
-    "16th": { icon: "\uE1D9", name: "16分音符" },
+    whole: { icon: "\uE1D2", name: "全音符", flat: true, key: "7" },
+    half: { icon: "\uE1D3", name: "2分音符", key: "6" },
+    quarter: { icon: "\uE1D5", name: "4分音符", key: "5" },
+    eighth: { icon: "\uE1D7", name: "8分音符", key: "4" },
+    "16th": { icon: "\uE1D9", name: "16分音符", key: "3" },
   };
 
   // 付点・休符のボタンに出す記号（楽譜用フォントの文字）
@@ -114,7 +118,7 @@
             class:on={duration === d}
             disabled={!canUse(d, dotted ? 1 : 0) && !canUse(d, 0)}
             onclick={() => onduration(d)}
-            title={DURATION_LABELS[d].name}
+            title="{DURATION_LABELS[d].name}（{DURATION_LABELS[d].key}）"
             aria-label={DURATION_LABELS[d].name}
           >
             <span class="icon" class:flat={DURATION_LABELS[d].flat}>{DURATION_LABELS[d].icon}</span>
@@ -124,14 +128,14 @@
 
       <!-- 付点 -->
       <div class="group">
-        <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点" aria-label="付点">
+        <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点（.）" aria-label="付点">
           <span class="icon">{DOT_ICON}</span>
         </button>
       </div>
 
       <!-- 休符 -->
       <div class="group">
-        <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする" aria-label="休符にする">
+        <button class="tool" disabled={!canUse(duration, dotted ? 1 : 0)} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
           <span class="icon flat">{REST_ICON}</span>
         </button>
       </div>
@@ -147,14 +151,16 @@
 
       <!-- 半音上げる・下げる -->
       <div class="group">
-        <button class="tool text" disabled={!noteSelected} onclick={() => onstep(1)} title="半音上げる（↑）"> ▲ </button>
-        <button class="tool text" disabled={!noteSelected} onclick={() => onstep(-1)} title="半音下げる（↓）"> ▼ </button>
+        <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(1)} title="半音上げる（↑。⌘ / Ctrl＋↑ で1オクターブ）"> ▲ </button>
+        <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(-1)} title="半音下げる（↓。⌘ / Ctrl＋↓ で1オクターブ）"> ▼ </button>
       </div>
 
       <!-- タイ・削除 -->
       <div class="group">
-        <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ"> タイ </button>
-        <button class="tool text wide" disabled={!noteSelected} onclick={() => ondelete()} title="音符を休符にする（Delete）"> 削除 </button>
+        <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
+        <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
+          削除
+        </button>
       </div>
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />

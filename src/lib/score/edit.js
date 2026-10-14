@@ -10,9 +10,10 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS } from "./model.js";
 import { TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
+import { keyAlters } from "./accidentals.js";
 
 // ----------------------------------------------------------
 // 関数：cloneScore
@@ -626,4 +627,131 @@ export function toggleSpanner(score, range, kind) {
   first[field] = startValue;
   last[field] = "stop";
   return newScore;
+}
+
+// ==========================================================
+// ここから下は、範囲の音をまとめて変える関数と、音名キーで入れる音を決める関数（ステップ4-7a）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：rangeHasNotes
+// 範囲の中に音符（休符ではない）が1つでもあるか調べる（▲ ▼・削除のボタンを押せるかどうかに使う）
+// ----------------------------------------------------------
+export function rangeHasNotes(score, range) {
+  return positionsInRange(score, range).some((pos) => {
+    const note = score.parts[pos.part].measures[pos.measure].notes[pos.note];
+    return !note.rest;
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：deleteRange
+// 範囲の中の音符を、ぜんぶ同じ長さの休符にする
+// 戻り値：新しい楽譜データ（音符が1つもなければ元の楽譜データのまま）
+// ----------------------------------------------------------
+export function deleteRange(score, range) {
+  if (!rangeHasNotes(score, range)) return score;
+
+  const newScore = cloneScore(score);
+  positionsInRange(newScore, range).forEach((pos) => {
+    const notes = newScore.parts[pos.part].measures[pos.measure].notes;
+    const note = notes[pos.note];
+    if (note.rest) return; // 休符はそのまま
+    // 長さだけ残して休符にする（deleteNote と同じ。記号やタイは消える）
+    notes[pos.note] = { rest: true, duration: note.duration, dots: note.dots ?? 0 };
+  });
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：transposeRange
+// 範囲の中の音符を、ぜんぶ同じだけ高さを変える
+//   semitones … 変える半音の数（transposeNote と同じ）
+// 1つでも範囲の外に出る音があれば、どれも変えない
+// 戻り値：新しい楽譜データ（変えられないときは元の楽譜データのまま）
+// ----------------------------------------------------------
+export function transposeRange(score, range, semitones) {
+  // 範囲の中の音符の場所だけを集める
+  const positions = positionsInRange(score, range).filter((pos) => {
+    return !score.parts[pos.part].measures[pos.measure].notes[pos.note].rest;
+  });
+  if (positions.length === 0) return score;
+
+  // 先に、ぜんぶの音が範囲の中に収まるかを調べる
+  const allInside = positions.every((pos) => {
+    const note = score.parts[pos.part].measures[pos.measure].notes[pos.note];
+    const midi = pitchToMidi(note.pitch) + semitones;
+    return midi >= LOWEST_MIDI && midi <= HIGHEST_MIDI;
+  });
+  if (!allInside) return score;
+
+  // 1つずつ高さを変える（transposeNote を順番に使う）
+  let newScore = score;
+  positions.forEach((pos) => {
+    newScore = transposeNote(newScore, pos, semitones);
+  });
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：findPreviousPitch
+// 選んでいる場所より前にある、いちばん近い音符の高さを探す（休符は飛ばす。小節をまたいでもよい）
+// 戻り値：音の高さ { step, alter, octave }（前に音符がなければ null）
+// ----------------------------------------------------------
+function findPreviousPitch(score, selection) {
+  const measures = score.parts[selection.part].measures;
+  let measure = selection.measure;
+  let note = selection.note - 1;
+  while (measure >= 0) {
+    const notes = measures[measure].notes;
+    for (let j = note; j >= 0; j--) {
+      if (!notes[j].rest) return notes[j].pitch;
+    }
+    // この小節にはなかったので、前の小節の最後の音から探す
+    measure = measure - 1;
+    if (measure >= 0) note = measures[measure].notes.length - 1;
+  }
+  return null;
+}
+
+// ----------------------------------------------------------
+// 関数：pitchForLetter
+// 音名キー（C D E F G A B）が押されたときに入れる音の高さを決める
+//   step … 音名（"C"〜"B"）
+// 決め方：
+//   ① ♯♭は調号どおりにする（例：ト長調で F → ファ♯）
+//   ② オクターブは、前の音にいちばん近い高さにする
+//      前に音がなければ、楽器ごとの真ん中あたり（鍵盤の左はしのドの1オクターブ上）に近い高さにする
+//      （バイオリン：ド5、ビオラ：ド4、チェロ：ド3）
+//   ちょうど同じ近さのときは、低い方にする
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+export function pitchForLetter(score, selection, step) {
+  // ① 調号どおりの♯♭
+  const alter = keyAlters(keyAt(score, selection.measure))[step];
+
+  // ② 基準にする高さ（MIDI の番号）
+  const previous = findPreviousPitch(score, selection);
+  let base;
+  if (previous) {
+    base = pitchToMidi(previous);
+  } else {
+    const instrument = score.parts[selection.part].instrument;
+    base = pitchToMidi({ step: "C", alter: 0, octave: INSTRUMENTS[instrument].keyboardOctave + 1 });
+  }
+
+  // 基準の前後のオクターブを比べて、いちばん近いものを選ぶ
+  const baseOctave = Math.floor(base / 12) - 1;
+  let best = null;
+  for (let octave = baseOctave - 1; octave <= baseOctave + 1; octave++) {
+    const pitch = { step: step, alter: alter, octave: octave };
+    const midi = pitchToMidi(pitch);
+    if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) continue; // 範囲の外は使わない
+    const distance = Math.abs(midi - base);
+    // 低い方から調べるので、「より近い」ときだけ入れ替えれば、同じ近さなら低い方が残る
+    if (best === null || distance < best.distance) {
+      best = { pitch: pitch, distance: distance };
+    }
+  }
+  return best.pitch;
 }

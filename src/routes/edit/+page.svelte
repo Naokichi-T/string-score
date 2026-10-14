@@ -7,6 +7,7 @@
   // （ステップ4-4：挿入モード）
   // （ステップ4-5：記号タブで音符に記号を付ける）
   // （ステップ4-6：範囲選択と、スラー・松葉）
+  // （ステップ4-7a：ショートカット・範囲の音をまとめて変える・音名キーで入れる）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -32,6 +33,10 @@
     canSpan,
     getSpanState,
     toggleSpanner,
+    rangeHasNotes,
+    deleteRange,
+    transposeRange,
+    pitchForLetter,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -54,6 +59,12 @@
 
   // 範囲に付いているスラー・松葉（ボタンを青くするため）
   let spanState = $derived(getSpanState(score, range));
+
+  // 範囲の中に音符が1つでもあるか（範囲をまとめて ▲ ▼・削除できるかどうかに使う）
+  let rangeEditable = $derived(!!range && rangeHasNotes(score, range));
+
+  // 数字キーと音の長さの対応（MuseScore と同じ割り当て）
+  const DURATION_KEYS = { 3: "16th", 4: "eighth", 5: "quarter", 6: "half", 7: "whole" };
 
   // 元に戻す・やり直しの履歴
   // （$state.raw：中身を細かく見張らず、入れ替えたときだけ画面を更新する）
@@ -333,9 +344,32 @@
       pitch = { step: NEXT_STEP[key.step], alter: -1, octave: key.octave };
     }
 
+    inputPitch(pitch);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleLetter
+  // 音名キー（C D E F G A B）が押されたとき
+  // 調号どおりの♯♭で、前の音にいちばん近い高さの音を入れる
+  //   step … 音名（"C"〜"B"）
+  // ----------------------------------------------------------
+  function handleLetter(step) {
+    if (!selection) {
+      message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
+      return;
+    }
+    inputPitch(pitchForLetter(score, selection, step));
+  }
+
+  // ----------------------------------------------------------
+  // 関数：inputPitch
+  // 今の長さ・付点で、選んでいる場所に音を入れる（鍵盤と音名キーで共通）
+  // 入れられたら音を鳴らす
+  //   pitch … 音の高さ { step, alter, octave }
+  // ----------------------------------------------------------
+  function inputPitch(pitch) {
     const dots = dotted ? 1 : 0;
     const ok = putNote({ pitch: pitch, duration: duration, dots: dots, tie: false });
-    // 入れられたら音を鳴らす
     if (ok) playPitch(pitch);
   }
 
@@ -359,9 +393,25 @@
   // ----------------------------------------------------------
   // 関数：handleTranspose
   // 選んでいる音の高さを変える（▲ ▼ ボタン、↑ ↓ キー）
+  // 範囲を選んでいるときは、範囲の中の音符をぜんぶ変える
   //   semitones … 半音の数（1・-1 で半音、12・-12 で1オクターブ）
   // ----------------------------------------------------------
   function handleTranspose(semitones) {
+    if (rangeEditable) {
+      message = "";
+      const newScore = transposeRange(score, range, semitones);
+      if (newScore === score) {
+        message = "これ以上は高さを変えられません";
+        return;
+      }
+      // commit で範囲選択が消えるので、覚えておいて元に戻す（音の並びは変わらない）
+      const end = rangeEnd;
+      commit(newScore);
+      rangeEnd = end;
+      playSelected();
+      return;
+    }
+
     if (!noteSelected) return;
     message = "";
     const newScore = transposeNote(score, selection, semitones);
@@ -399,8 +449,18 @@
   // ----------------------------------------------------------
   // 関数：handleDelete
   // 削除のボタン・Delete キー：選んでいる音符を同じ長さの休符にする
+  // 範囲を選んでいるときは、範囲の中の音符をぜんぶ休符にする
   // ----------------------------------------------------------
   function handleDelete() {
+    if (rangeEditable) {
+      message = "";
+      // commit で範囲選択が消えるので、覚えておいて元に戻す（音の並びは変わらない）
+      const end = rangeEnd;
+      commit(deleteRange(score, range));
+      rangeEnd = end;
+      return;
+    }
+
     if (!noteSelected) return;
     message = "";
     commit(deleteNote(score, selection));
@@ -504,7 +564,28 @@
       selection = null;
       rangeEnd = null;
       message = "";
-    } else if (!command && (event.key === "i" || event.key === "I")) {
+    } else if (command) {
+      // ここから下は Ctrl / ⌘ なしのキーだけ（Ctrl＋C のコピーなどを邪魔しないため）
+      return;
+    } else if (DURATION_KEYS[event.key]) {
+      // 3〜7：音の長さ（ボタンを押したときと同じ）
+      handleDuration(DURATION_KEYS[event.key]);
+    } else if (event.key === ".") {
+      // .（ピリオド）：付点
+      handleDot();
+    } else if (event.key === "0") {
+      // 0：休符
+      handleRest();
+    } else if ("ABCDEFG".includes(event.key.toUpperCase()) && event.key.length === 1) {
+      // C D E F G A B：その音名の音を入れる
+      handleLetter(event.key.toUpperCase());
+    } else if (event.key === "t" || event.key === "T") {
+      // T：タイ
+      handleTie();
+    } else if (event.key === "s" || event.key === "S") {
+      // S：スラー（範囲を選んでいるとき）
+      handleSpanner("slur");
+    } else if (event.key === "i" || event.key === "I") {
       // I キー：上書き・挿入を切り替える
       handleMode(mode === "insert" ? "overwrite" : "insert");
     }
@@ -530,6 +611,7 @@
     {noteSelected}
     onaccidental={handleAccidental}
     onstep={handleTranspose}
+    {rangeEditable}
     ontie={handleTie}
     ondelete={handleDelete}
     {mode}
