@@ -5,6 +5,7 @@
   // （ステップ4-2：長さのボタン・付点・休符・鍵盤で音を入れる（上書き））
   // （ステップ4-3：高さ・臨時記号・タイ・削除・元に戻す・やり直し）
   // （ステップ4-4：挿入モード）
+  // （ステップ4-5：記号タブで音符に記号を付ける）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -13,7 +14,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import { createEmptyScore, keyAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote } from "#lib/score/selection.js";
-  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie, canInsert, canResize, insertAt, resizeAt } from "#lib/score/edit.js";
+  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie, canInsert, canResize, insertAt, resizeAt, toggleNoteSymbol } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
 
@@ -338,6 +339,18 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleSymbol
+  // 「記号」タブのボタンが押されたとき：選んでいる音符に記号を付ける・外す
+  //   kind  … 記号の種類（'bowing'・'fingering' など）
+  //   value … 記号の名前や数字
+  // ----------------------------------------------------------
+  function handleSymbol(kind, value) {
+    if (!noteSelected) return;
+    message = "";
+    commit(toggleNoteSymbol(score, selection, kind, value));
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -425,6 +438,8 @@
     ondelete={handleDelete}
     {mode}
     onmode={handleMode}
+    selectedNote={noteSelected ? getSelectedNote(score, selection) : null}
+    onsymbol={handleSymbol}
   />
   <SelectionInfo {score} {selection} {message} />
 

@@ -11,6 +11,7 @@
 // ==========================================================
 
 import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan } from "./model.js";
+import { TECHNIQUES } from "./symbols.js";
 
 // ----------------------------------------------------------
 // 関数：cloneScore
@@ -468,4 +469,80 @@ export function resizeAt(score, selection, duration, dots) {
   const newScore = cloneScore(score);
   newScore.parts[selection.part].measures[selection.measure].notes = rebuilt;
   return { score: newScore, error: "" };
+}
+
+// ==========================================================
+// ここから下は、記号を付ける・外す関数（ステップ4-5）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：toggleInList
+// 並び（配列）に値があれば外し、なければ最後に足した新しい並びを返す
+// 例：([1, 2], 2) → [1]、([1], 3) → [1, 3]
+// ----------------------------------------------------------
+function toggleInList(list, value) {
+  const current = list ?? [];
+  if (current.includes(value)) {
+    return current.filter((item) => item !== value);
+  }
+  return [...current, value];
+}
+
+// ----------------------------------------------------------
+// 関数：toggleNoteSymbol
+// 選んでいる音符に記号を付ける（すでに付いていれば外す）
+//   kind  … 記号の種類
+//            'bowing'（弓）・'fingering'（指番号）・'articulation'（スタッカートなど）
+//            'fermata'（フェルマータ）・'technique'（奏法）・'dynamic'（強弱）
+//   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
+// 1つだけのもの（弓・強弱）は、別のものを押すと入れ替わる
+// 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleNoteSymbol(score, selection, kind, value) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest) return score;
+
+  return updateNote(score, selection, (n) => {
+    if (kind === "bowing") {
+      // 弓：同じものなら外す、違うものなら入れ替える
+      if (n.bowing === value) {
+        delete n.bowing;
+      } else {
+        n.bowing = value;
+      }
+    } else if (kind === "dynamic") {
+      // 強弱：同じものなら外す、違うものなら入れ替える
+      if (n.dynamic === value) {
+        delete n.dynamic;
+      } else {
+        n.dynamic = value;
+      }
+    } else if (kind === "fermata") {
+      // フェルマータ：付いていれば外す、なければ付ける
+      if (n.fermata) {
+        delete n.fermata;
+      } else {
+        n.fermata = true;
+      }
+    } else if (kind === "fingering") {
+      // 指番号：いくつでも付けられる
+      n.fingerings = toggleInList(n.fingerings, value);
+      if (n.fingerings.length === 0) delete n.fingerings;
+    } else if (kind === "articulation") {
+      // スタッカートなど：いくつでも付けられる
+      n.articulations = toggleInList(n.articulations, value);
+      if (n.articulations.length === 0) delete n.articulations;
+    } else if (kind === "technique") {
+      // 奏法：いくつでも付けられるが、同じ group のもの（pizz. と arco）は1つだけ
+      const adding = !(n.techniques ?? []).includes(value);
+      let list = toggleInList(n.techniques, value);
+      if (adding) {
+        const group = TECHNIQUES[value]?.group;
+        // 同じ group の別の奏法を外す
+        list = list.filter((name) => name === value || !group || TECHNIQUES[name]?.group !== group);
+      }
+      n.techniques = list;
+      if (n.techniques.length === 0) delete n.techniques;
+    }
+  });
 }

@@ -5,14 +5,15 @@
 //   label    … 画面に出す日本語の名前（入力ボタンなどで使う）
 //   vf       … VexFlow での書き方
 //   musicxml … MusicXML での名前（書き出し・読み込みで使う）
+//   icon     … ボタンに出す記号（楽譜用フォント Bravura の文字）
 // ==========================================================
 
 // ----------------------------------------------------------
-// 弓の記号（データの bowing に入れる）
+// 弓の記号（データの bowing に入れる。1つの音に1つだけ）
 // ----------------------------------------------------------
 export const BOWINGS = {
-  down: { label: "ダウンボウ", vf: "am", musicxml: "down-bow" },
-  up: { label: "アップボウ", vf: "a|", musicxml: "up-bow" },
+  down: { label: "ダウンボウ", vf: "am", musicxml: "down-bow", icon: "\uE610" },
+  up: { label: "アップボウ", vf: "a|", musicxml: "up-bow", icon: "\uE612" },
 };
 
 // ----------------------------------------------------------
@@ -20,32 +21,35 @@ export const BOWINGS = {
 // 音符の玉の近く（符尾と反対側）に付く
 // ----------------------------------------------------------
 export const ARTICULATIONS = {
-  staccato: { label: "スタッカート", vf: "a.", musicxml: "staccato" },
-  tenuto: { label: "テヌート", vf: "a-", musicxml: "tenuto" },
-  accent: { label: "アクセント", vf: "a>", musicxml: "accent" },
+  staccato: { label: "スタッカート", vf: "a.", musicxml: "staccato", icon: "\uE4A2" },
+  tenuto: { label: "テヌート", vf: "a-", musicxml: "tenuto", icon: "\uE4A4" },
+  accent: { label: "アクセント", vf: "a>", musicxml: "accent", icon: "\uE4A0" },
 };
 
 // ----------------------------------------------------------
 // フェルマータ（データの fermata に true を入れる）
 // ----------------------------------------------------------
-export const FERMATA = { label: "フェルマータ", vf: "a@a", musicxml: "fermata" };
+export const FERMATA = { label: "フェルマータ", vf: "a@a", musicxml: "fermata", icon: "\uE4C0" };
 
 // ----------------------------------------------------------
-// 指番号（データの fingering に数字を入れる）
+// 指番号（データの fingerings に数字の並びを入れる。いくつでも付けられる）
+// 例：fingerings: [1, 2] → 下から「1」「2」と積み重ねて表示
 // ----------------------------------------------------------
 export const FINGERINGS = [0, 1, 2, 3, 4];
 
 // ----------------------------------------------------------
-// 奏法の文字（データの technique に入れる）
-//   text … 楽譜に書く文字
+// 奏法の文字（データの techniques に名前の並びを入れる。いくつでも付けられる）
+//   text  … 楽譜に書く文字
+//   group … 同じ group の奏法は反対の意味なので、1つの音に1つだけ
+//           （例：pizz. を付けると arco は外れる）
 // ----------------------------------------------------------
 export const TECHNIQUES = {
-  "pizz.": { label: "ピチカート", text: "pizz.", musicxml: "pizz." },
-  arco: { label: "アルコ", text: "arco", musicxml: "arco" },
+  "pizz.": { label: "ピチカート", text: "pizz.", musicxml: "pizz.", group: "pluck" },
+  arco: { label: "アルコ", text: "arco", musicxml: "arco", group: "pluck" },
 };
 
 // ----------------------------------------------------------
-// 強弱（データの dynamic に入れる）
+// 強弱（データの dynamic に入れる。1つの音に1つだけ）
 //   glyph … 楽譜用フォント（Bravura）で強弱記号を描くための文字
 //           （Bravura では、強弱記号の p・m・f・s・z が専用の形で入っている）
 // ----------------------------------------------------------

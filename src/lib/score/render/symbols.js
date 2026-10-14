@@ -37,17 +37,18 @@ export function addSymbols(VF, staveNote, note) {
     staveNote.addModifier(bowing, 0);
   }
 
-  // ③ 指番号（弓の記号の上に小さい数字で書く）
-  if (note.fingering !== undefined && note.fingering !== null) {
-    const fingering = new VF.Annotation(String(note.fingering));
+  // ③ 指番号（弓の記号の上に小さい数字で書く。複数あれば、付けた順に下から積み重ねる）
+  for (const number of note.fingerings ?? []) {
+    const fingering = new VF.Annotation(String(number));
     fingering.setFont("Academico", 11);
     fingering.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
     staveNote.addModifier(fingering, 0);
   }
 
-  // ④ 奏法の文字（pizz.・arco。斜めの文字で上に書く）
-  if (note.technique && TECHNIQUES[note.technique]) {
-    const technique = new VF.Annotation(TECHNIQUES[note.technique].text);
+  // ④ 奏法の文字（pizz.・arco など。斜めの文字で上に書く。複数あれば積み重ねる）
+  for (const name of note.techniques ?? []) {
+    if (!TECHNIQUES[name]) continue; // 表にない名前は無視する
+    const technique = new VF.Annotation(TECHNIQUES[name].text);
     technique.setFont("Academico", 13, "normal", "italic");
     technique.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
     staveNote.addModifier(technique, 0);

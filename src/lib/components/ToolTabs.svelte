@@ -6,9 +6,11 @@
   // （ステップ4-2：「音符」タブに長さ・付点・休符のボタンを追加）
   // （ステップ4-3：臨時記号・高さ・タイ・削除のボタンを追加）
   // （ステップ4-4：上書き・挿入の切り替えを追加）
+  // （ステップ4-5：「記号」タブの中身を SymbolTools として追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
+  import SymbolTools from "./SymbolTools.svelte";
 
   // 親から受け取るもの
   //   duration     … 今の長さ（'quarter' など）
@@ -24,7 +26,11 @@
   //   ondelete     … 削除のボタンが押されたときに呼ぶ関数
   //   mode         … 入力のしかた（'overwrite'：上書き、'insert'：挿入）
   //   onmode       … 切り替えのボタンが押されたときに呼ぶ関数（'overwrite' か 'insert' を渡す）
+  //   selectedNote … 選んでいる音符のデータ（音符を選んでいないときは null。「記号」タブで使う）
+  //   onsymbol     … 「記号」タブのボタンが押されたときに呼ぶ関数（記号の種類と名前を渡す）
   let {
+    selectedNote = null,
+    onsymbol = () => {},
     mode = "overwrite",
     onmode = () => {},
     duration,
@@ -145,7 +151,7 @@
         <button class="tool text wide" disabled={!noteSelected} onclick={() => ondelete()} title="音符を休符にする（Delete）"> 削除 </button>
       </div>
     {:else if activeTab === "symbol"}
-      <span class="placeholder">（弓・指番号・強弱などのボタンをステップ4-4で作ります）</span>
+      <SymbolTools note={selectedNote} {onsymbol} />
     {:else if activeTab === "measure"}
       <span class="placeholder">（小節の追加・削除などをステップ5で作ります）</span>
     {:else if activeTab === "settings"}

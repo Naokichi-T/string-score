@@ -26,7 +26,7 @@ function tied(note) {
 // ----------------------------------------------------------
 // 関数：sym
 // 音符に記号を付ける関数
-// 例：sym(n('D', 5, 'quarter'), { bowing: 'down', fingering: 3 })
+// 例：sym(n('D', 5, 'quarter'), { bowing: 'down', fingerings: [3] })
 //     → ダウンボウと指番号3が付いたレ5
 // ----------------------------------------------------------
 function sym(note, symbols) {
@@ -84,7 +84,7 @@ export const sampleScore = {
         {
           clef: "treble",
           notes: [
-            sym(n("F", 5, "quarter", 0, 1), { dynamic: "mf", bowing: "down", fingering: 2 }),
+            sym(n("F", 5, "quarter", 0, 1), { dynamic: "mf", bowing: "down", fingerings: [2] }),
             sym(n("E", 5, "quarter"), { bowing: "up", articulations: ["staccato"] }),
             sym(n("D", 5, "half"), { articulations: ["tenuto", "accent"] }),
           ],
@@ -139,10 +139,10 @@ export const sampleScore = {
         { clef: "treble", notes: [n("D", 5, "whole")] },
         // 2小節目：pizz.（ピチカート）、強弱 p
         {
-          notes: [sym(n("A", 4, "half"), { technique: "pizz.", dynamic: "p" }), n("B", 4, "quarter"), n("C", 5, "quarter", 0, 1)],
+          notes: [sym(n("A", 4, "half"), { techniques: ["pizz."], dynamic: "p" }), n("B", 4, "quarter"), n("C", 5, "quarter", 0, 1)],
         },
         // 3小節目：arco（弓で弾くのに戻る）、ダウンボウ・指番号0
-        { notes: [sym(n("D", 5, "half", 1), { technique: "arco", bowing: "down", fingering: 0 })] },
+        { notes: [sym(n("D", 5, "half", 1), { techniques: ["arco"], bowing: "down", fingerings: [0] })] },
         { notes: [n("A", 4, "half"), n("B", 4, "quarter", 0, -1)] },
         { notes: [n("A", 4, "half", 1)] },
         { notes: [n("F", 4, "half", 1)] },
