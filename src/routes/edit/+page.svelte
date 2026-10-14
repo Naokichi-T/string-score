@@ -17,7 +17,7 @@
   import SelectionInfo from "#lib/components/SelectionInfo.svelte";
   import ScoreView from "#lib/components/ScoreView.svelte";
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
-  import { createEmptyScore, keyAt, INSTRUMENTS } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
     canFit,
@@ -43,6 +43,7 @@
     setScoreInfo,
     insertMeasure,
     deleteMeasures,
+    changeTime,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -582,6 +583,40 @@
     commit(insertMeasure(score, index), { part: selection.part, measure: index, note: 0 });
   }
 
+  // 選んでいる小節の拍子（「小節」タブの拍子のボタンを青くするのに使う。何も選んでいないときは1小節目）
+  let currentTime = $derived(timeAt(score, selection ? selection.measure : 0));
+
+  // ----------------------------------------------------------
+  // 関数：handleTime
+  // 「小節」タブの拍子のボタンが押されたとき
+  //   time … 新しい拍子 { beats, beatType }
+  // 効かせる小節
+  //   範囲を選んでいるとき … 範囲にかかる小節だけ
+  //   音を選んでいるとき   … その小節から、次に拍子が変わる所まで
+  //   何も選んでいないとき … 1小節目から、次に拍子が変わる所まで
+  // ----------------------------------------------------------
+  function handleTime(time) {
+    message = "";
+    let result;
+    if (range) {
+      result = changeTime(score, range.start.measure, range.end.measure, time);
+    } else if (selection) {
+      result = changeTime(score, selection.measure, null, time);
+    } else {
+      result = changeTime(score, 0, null, time);
+    }
+
+    // 入りきらない音があったときは、知らせて終わり（楽譜は変えない）
+    if (result.error) {
+      message = result.error;
+      return;
+    }
+
+    // 小節の中の音の数が変わることがあるので、選んでいた小節の最初の音を選び直す
+    const newSelection = selection ? { part: selection.part, measure: selection.measure, note: 0 } : null;
+    commit(result.score, newSelection);
+  }
+
   // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
@@ -715,7 +750,9 @@
     onsettings={handleSettings}
     {canDeleteMeasure}
     onmeasure={handleMeasure}
-  />
+    {currentTime}
+    ontime={handleTime}
+  />ｓ
   <SelectionInfo {score} {selection} {range} {message} />
 
   <!-- 五線譜の部分だけスクロールする -->

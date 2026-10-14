@@ -43,11 +43,15 @@
   //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
   //   canDeleteMeasure … 小節を消せるか（「小節」タブで使う）
   //   onmeasure    … 「小節」タブのボタンが押されたときに呼ぶ関数（"before"・"after"・"delete" を渡す）
+  //   currentTime  … 選んでいる小節の拍子 { beats, beatType }（「小節」タブで使う）
+  //   ontime       … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子を渡す。「小節」タブで使う）
   let {
     score,
     onsettings = () => {},
     canDeleteMeasure = false,
     onmeasure = () => {},
+    currentTime = { beats: 4, beatType: 4 },
+    ontime = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -180,7 +184,7 @@
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
-      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} />
+      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} />
     {/if}

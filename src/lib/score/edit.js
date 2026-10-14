@@ -929,3 +929,89 @@ export function deleteMeasures(score, from, to) {
 function sameTime(a, b) {
   return a.beats === b.beats && a.beatType === b.beatType;
 }
+
+// ==========================================================
+// ここから下は、拍子を変える関数（ステップ5-3）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：changeTime
+// from 小節目から to 小節目までの拍子を変える（全パートいっしょに。番号は 0 から）
+//   time … 新しい拍子 { beats, beatType }
+//   to   … null のときは「次に拍子が変わる小節の手前まで（なければ最後まで）」
+// 入りきらない音がある小節が1つでもあるときは、何も変えない
+// 変えるときは、小節の中身（終わりの休符より前の音）はそのままにして、
+// 残りを新しい拍子の「1拍ずつの休符」で埋め直す
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文 }
+//   （何も変わらないとき・入りきらないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function changeTime(score, from, to, time) {
+  const count = score.measures.length; // 小節の数
+
+  // ① 効かせる最後の小節を決める（to が null なら、次に拍子が変わる小節の手前まで）
+  let last = to;
+  if (last === null) {
+    last = from;
+    while (last + 1 < count && !score.measures[last + 1].time) {
+      last = last + 1;
+    }
+  }
+
+  // ② 入りきらない音がないか、全パート・全小節を先に調べる
+  const total = measureTicks(time); // 新しい拍子の1小節の長さ
+  for (const part of score.parts) {
+    for (let m = from; m <= last; m++) {
+      const notes = part.measures[m].notes;
+      const contents = notes.slice(0, contentCount(notes)); // 終わりの休符をのぞいた中身
+      const used = contents.reduce((sum, note) => sum + noteTicks(note), 0);
+      if (used > total) {
+        return { score: score, error: `${m + 1}小節目の ${part.name} に入りきらない音があります` };
+      }
+    }
+  }
+
+  // ③ 効かせる範囲のすぐ後ろの小節の拍子（変える前の拍子）を覚えておく
+  const timeAfter = timeAt(score, last);
+
+  const newScore = cloneScore(score);
+
+  // ④ パートごとに、小節の中身を新しい拍子で作り直す
+  newScore.parts.forEach((part) => {
+    for (let m = from; m <= last; m++) {
+      const notes = part.measures[m].notes;
+      const contents = notes.slice(0, contentCount(notes));
+      const rebuilt = rebuildMeasure(contents, time);
+      // 中身の最後の音のうしろに休符が来たら、その音のタイは外す（休符とはつなげないため）
+      if (contents.length > 0 && rebuilt.length > contents.length) {
+        const lastNote = rebuilt[contents.length - 1];
+        if (lastNote.tie) lastNote.tie = false;
+      }
+      part.measures[m].notes = rebuilt;
+    }
+  });
+
+  // ⑤ 楽譜全体の小節の情報に、拍子を書く
+  newScore.measures[from].time = { beats: time.beats, beatType: time.beatType };
+  // 範囲の中にあった、ほかの拍子の変化は消す
+  for (let m = from + 1; m <= last; m++) {
+    delete newScore.measures[m].time;
+  }
+  // 範囲のすぐ後ろの小節には、元の拍子を書いておく（後ろの小節まで変わらないように）
+  if (last + 1 < count && !newScore.measures[last + 1].time) {
+    newScore.measures[last + 1].time = timeAfter;
+  }
+
+  // ⑥ 前の小節と同じ拍子になった所は、拍子を書かない（1小節目は必ず残す）
+  for (let m = Math.max(from, 1); m <= Math.min(last + 1, count - 1); m++) {
+    const info = newScore.measures[m];
+    if (info.time && sameTime(info.time, timeAt(newScore, m - 1))) {
+      delete info.time;
+    }
+  }
+
+  // 何も変わっていなければ、元の楽譜データを返す（「元に戻す」の履歴に残さないため）
+  if (JSON.stringify(newScore) === JSON.stringify(score)) {
+    return { score: score, error: "" };
+  }
+  return { score: newScore, error: "" };
+}
