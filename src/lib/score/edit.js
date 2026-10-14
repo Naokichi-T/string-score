@@ -820,8 +820,9 @@ export function insertMeasure(score, index) {
 // ----------------------------------------------------------
 // 関数：clefAt
 // i 小節目で使われている音部記号を返す（前の小節にさかのぼって探す）
+// （ステップ5-5：編集ページでも使うので export した）
 // ----------------------------------------------------------
-function clefAt(part, i) {
+export function clefAt(part, i) {
   for (let k = i; k >= 0; k--) {
     if (part.measures[k].clef) return part.measures[k].clef;
   }
@@ -1061,6 +1062,64 @@ export function changeKey(score, from, to, key) {
     const info = newScore.measures[m];
     if (info.key !== undefined && info.key === keyAt(newScore, m - 1)) {
       delete info.key;
+    }
+  }
+
+  // 何も変わっていなければ、元の楽譜データを返す（「元に戻す」の履歴に残さないため）
+  if (JSON.stringify(newScore) === JSON.stringify(score)) {
+    return score;
+  }
+  return newScore;
+}
+
+// ==========================================================
+// ここから下は、音部記号を変える関数（ステップ5-5）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：changeClef
+// 1つのパートの from 小節目から to 小節目までの音部記号を変える（番号は 0 から）
+//   partIndex … パートの番号（0 から）
+//   clef      … 新しい音部記号（"treble"・"alto"・"tenor"・"bass"）
+//   to        … null のときは「次に音部記号が変わる小節の手前まで（なければ最後まで）」
+// 音のデータ（高さ）は変えない（描く位置だけが変わる）
+// 戻り値：新しい楽譜データ（何も変わらないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function changeClef(score, partIndex, from, to, clef) {
+  const count = score.measures.length; // 小節の数
+  const part = score.parts[partIndex];
+
+  // ① 効かせる最後の小節を決める（to が null なら、次に音部記号が変わる小節の手前まで）
+  let last = to;
+  if (last === null) {
+    last = from;
+    while (last + 1 < count && !part.measures[last + 1].clef) {
+      last = last + 1;
+    }
+  }
+
+  // ② 効かせる範囲のすぐ後ろの小節の音部記号（変える前の音部記号）を覚えておく
+  const clefAfter = clefAt(part, last);
+
+  const newScore = cloneScore(score);
+  const newPart = newScore.parts[partIndex];
+
+  // ③ そのパートの小節に、音部記号を書く
+  newPart.measures[from].clef = clef;
+  // 範囲の中にあった、ほかの切り替えは消す
+  for (let m = from + 1; m <= last; m++) {
+    delete newPart.measures[m].clef;
+  }
+  // 範囲のすぐ後ろの小節には、元の音部記号を書いておく（後ろの小節まで変わらないように）
+  if (last + 1 < count && !newPart.measures[last + 1].clef) {
+    newPart.measures[last + 1].clef = clefAfter;
+  }
+
+  // ④ 前の小節と同じ音部記号になった所は、書かない（1小節目は必ず残す）
+  for (let m = Math.max(from, 1); m <= Math.min(last + 1, count - 1); m++) {
+    const measure = newPart.measures[m];
+    if (measure.clef && measure.clef === clefAt(newPart, m - 1)) {
+      delete measure.clef;
     }
   }
 

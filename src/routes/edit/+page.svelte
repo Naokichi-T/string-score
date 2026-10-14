@@ -45,6 +45,8 @@
     deleteMeasures,
     changeTime,
     changeKey,
+    changeClef,
+    clefAt,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
@@ -642,6 +644,28 @@
     }
   }
 
+  // 選んでいるパート・小節の音部記号（「小節」タブのボタンを青くするのに使う。何も選んでいないときは null）
+  let currentClef = $derived(selection ? clefAt(score.parts[selection.part], selection.measure) : null);
+
+  // ----------------------------------------------------------
+  // 関数：handleClef
+  // 「小節」タブの音部記号のボタンが押されたとき
+  //   clef … 新しい音部記号（"treble"・"alto"・"tenor"・"bass"）
+  // 選んでいるパートだけに効かせる（何も選んでいないときは何もしない）
+  //   範囲を選んでいるとき … 範囲にかかる小節だけ
+  //   音を選んでいるとき   … その小節から、次に音部記号が変わる所まで
+  // 音の高さは変えないので、選択はそのまま
+  // ----------------------------------------------------------
+  function handleClef(clef) {
+    if (!selection) return;
+    message = "";
+    if (range) {
+      commit(changeClef(score, range.part, range.start.measure, range.end.measure, clef));
+    } else {
+      commit(changeClef(score, selection.part, selection.measure, null, clef));
+    }
+  }
+
   // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
@@ -779,6 +803,8 @@
     ontime={handleTime}
     {currentKey}
     onkey={handleKeySignature}
+    {currentClef}
+    onclef={handleClef}
   />
   <SelectionInfo {score} {selection} {range} {message} />
 

@@ -1,10 +1,11 @@
 <script>
   // ==========================================================
   // MeasureTools.svelte
-  // 「小節」タブの中身（小節の追加・削除、拍子・調の変更）
+  // 「小節」タブの中身（小節の追加・削除、拍子・調・音部記号の変更）
   // （ステップ5-2で追加）
   // （ステップ5-3：拍子の変更を追加）
   // （ステップ5-4：調の変更を追加）
+  // （ステップ5-5：音部記号の変更を追加）
   // ==========================================================
 
   // 親から受け取るもの
@@ -15,7 +16,9 @@
   //   ontime      … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子 { beats, beatType } を渡す）
   //   currentKey  … 選んでいる小節の調（♯の数がプラス、♭の数がマイナス。選ぶ欄に出すのに使う）
   //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
-  let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {}, currentKey = 0, onkey = () => {} } = $props();
+  //   currentClef … 選んでいるパート・小節の音部記号（何も選んでいないときは null。ボタンを青くするのに使う）
+  //   onclef      … 音部記号のボタンが押されたときに呼ぶ関数（"treble"・"alto"・"tenor"・"bass" を渡す）
+  let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {}, currentKey = 0, onkey = () => {}, currentClef = null, onclef = () => {} } = $props();
 
   // よく使う拍子（ボタンにして並べる）
   const PRESETS = [
@@ -51,6 +54,26 @@
     { key: -6, name: "♭6つ（変ト長調・変ホ短調）" },
     { key: -7, name: "♭7つ（変ハ長調・変イ短調）" },
   ];
+
+  // 音部記号のボタン
+  //   clef  … データで使う名前
+  //   name  … マウスを乗せたときに出す名前
+  //   icon  … 楽譜用フォント（Bravura）の文字（ト音記号・ハ音記号・ヘ音記号）
+  //   y     … 記号を置く高さ（ボタンの中の小さな五線の、どの線に乗せるか）
+  //           線の高さは上から 8・14・20・26・32。記号の「基準の線」をそこに合わせる
+  //             ト音記号 … 下から2本目の線（ソ）＝ 26
+  //             アルト   … まん中の線（ド）＝ 20
+  //             テノール … 上から2本目の線（ド）＝ 14
+  //             ヘ音記号 … 上から2本目の線（ファ）＝ 14
+  const CLEF_BUTTONS = [
+    { clef: "treble", name: "ト音記号", icon: "\uE050", y: 26 },
+    { clef: "alto", name: "アルト記号（ハ音記号・まん中の線がド）", icon: "\uE05C", y: 20 },
+    { clef: "tenor", name: "テノール記号（ハ音記号・上から2本目の線がド）", icon: "\uE05C", y: 14 },
+    { clef: "bass", name: "ヘ音記号", icon: "\uE062", y: 14 },
+  ];
+
+  // ボタンの中の小さな五線の、線の高さ（上から）
+  const STAFF_LINES = [8, 14, 20, 26, 32];
 
   // 「その他」で今選んでいる数字
   let otherBeats = $state(5);
@@ -122,6 +145,28 @@
       {/each}
     </select>
   </div>
+
+  <!-- 音部記号：選んでいるパートだけに効く（何も選んでいないときは押せない） -->
+  <div class="group">
+    <span class="label">音部記号</span>
+    {#each CLEF_BUTTONS as item}
+      <button
+        class="clef"
+        class:active={currentClef === item.clef}
+        disabled={currentClef === null}
+        onclick={() => onclef(item.clef)}
+        title={`${item.name}：選んでいるパートの、選んでいる小節から次に音部記号が変わる所まで（範囲を選んでいるときは、範囲にかかる小節だけ）`}
+      >
+        <!-- 小さな五線と記号を、SVG で描く（文字の基準の線を、決まった線にぴったり合わせられるため） -->
+        <svg width="34" height="40" viewBox="0 0 34 40">
+          {#each STAFF_LINES as lineY}
+            <line x1="2" y1={lineY} x2="32" y2={lineY} stroke="currentColor" stroke-width="0.8" />
+          {/each}
+          <text x="7" y={item.y} class="clef-icon">{item.icon}</text>
+        </svg>
+      </button>
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -154,7 +199,7 @@
     width: 40px;
     padding: 0;
   }
-  /* 選んでいる小節と同じ拍子のボタンは青（記号タブと同じ色） */
+  /* 今の拍子・音部記号のボタンは青（記号タブと同じ色） */
   button.active {
     background: #2563eb;
     color: #fff;
@@ -175,6 +220,24 @@
   }
   .slash {
     color: #666;
+  }
+  /* 音部記号のボタンは、小さな五線が入る大きさにする */
+  button.clef {
+    width: 44px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* 記号の文字は楽譜用フォントで描く（大きさは「五線の高さ＝24」に合わせる） */
+  .clef-icon {
+    font-family: "Bravura";
+    font-size: 24px;
+    fill: currentColor;
+  }
+  /* 中の SVG ではマウスの操作を受け取らず、下のボタンに通す（「小節」タブが押せなかったときと同じ対策） */
+  button.clef svg {
+    pointer-events: none;
   }
   select {
     height: 40px;

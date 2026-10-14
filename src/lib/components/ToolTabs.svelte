@@ -47,6 +47,8 @@
   //   ontime       … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子を渡す。「小節」タブで使う）
   //   currentKey   … 選んでいる小節の調（「小節」タブで使う）
   //   onkey        … 調を選んだときに呼ぶ関数（新しい調の数字を渡す。「小節」タブで使う）
+  //   currentClef  … 選んでいるパート・小節の音部記号（何も選んでいないときは null。「小節」タブで使う）
+  //   onclef       … 音部記号のボタンが押されたときに呼ぶ関数（「小節」タブで使う）
   let {
     score,
     onsettings = () => {},
@@ -56,6 +58,8 @@
     ontime = () => {},
     currentKey = 0,
     onkey = () => {},
+    currentClef = null,
+    onclef = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -188,7 +192,7 @@
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
-      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} />
+      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} />
     {/if}
