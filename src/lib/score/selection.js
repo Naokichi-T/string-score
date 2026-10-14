@@ -99,3 +99,79 @@ export function describeSelection(score, selection) {
   }
   return `${where}　${pitchToJapanese(note.pitch)}・${length}`;
 }
+
+// ==========================================================
+// ここから下は、範囲選択の関数（ステップ4-6）
+// 範囲 = 「選択中の場所」と「範囲のもう一方の端」の間（同じパートの中だけ）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：comparePosition
+// 2つの場所のどちらが前かを比べる（同じパートの中で）
+// 戻り値：a が前ならマイナス、同じなら 0、a が後ろならプラス
+// ----------------------------------------------------------
+function comparePosition(a, b) {
+  if (a.measure !== b.measure) return a.measure - b.measure;
+  return a.note - b.note;
+}
+
+// ----------------------------------------------------------
+// 関数：makeRange
+// 2つの場所から範囲を作る（前の方を start、後ろの方を end にする）
+//   a, b … 場所 { part, measure, note }（同じパートであること）
+// 戻り値：{ part, start: { measure, note }, end: { measure, note } }
+//   どちらかが null のときや、パートが違うときは null
+// ----------------------------------------------------------
+export function makeRange(a, b) {
+  if (!a || !b || a.part !== b.part) return null;
+  const [first, last] = comparePosition(a, b) <= 0 ? [a, b] : [b, a];
+  return {
+    part: a.part,
+    start: { measure: first.measure, note: first.note },
+    end: { measure: last.measure, note: last.note },
+  };
+}
+
+// ----------------------------------------------------------
+// 関数：positionsInRange
+// 範囲の中の場所を、前から順に全部並べる
+// 戻り値：[{ part, measure, note }, ...]
+// ----------------------------------------------------------
+export function positionsInRange(score, range) {
+  if (!range) return [];
+  const positions = [];
+  const measures = score.parts[range.part].measures;
+  for (let m = range.start.measure; m <= range.end.measure; m++) {
+    const count = measures[m].notes.length;
+    const from = m === range.start.measure ? range.start.note : 0;
+    const to = m === range.end.measure ? range.end.note : count - 1;
+    for (let n = from; n <= to; n++) {
+      positions.push({ part: range.part, measure: m, note: n });
+    }
+  }
+  return positions;
+}
+
+// ----------------------------------------------------------
+// 関数：isInRange
+// 場所が範囲の中に入っているか調べる
+// ----------------------------------------------------------
+export function isInRange(range, part, measure, note) {
+  if (!range || range.part !== part) return false;
+  const position = { measure: measure, note: note };
+  return comparePosition(range.start, position) <= 0 && comparePosition(position, range.end) <= 0;
+}
+
+// ----------------------------------------------------------
+// 関数：describeRange
+// 範囲を、画面に出す文章にする
+// 例：'Violin I　1小節目 2つ目 〜 2小節目 3つ目（6つ）'
+// ----------------------------------------------------------
+export function describeRange(score, range) {
+  if (!range) return "";
+  const partName = score.parts[range.part].name;
+  const count = positionsInRange(score, range).length;
+  const from = `${range.start.measure + 1}小節目 ${range.start.note + 1}つ目`;
+  const to = `${range.end.measure + 1}小節目 ${range.end.note + 1}つ目`;
+  return `${partName}　${from} 〜 ${to}（${count}つ）`;
+}

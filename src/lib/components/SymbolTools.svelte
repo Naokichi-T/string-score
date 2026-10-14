@@ -4,6 +4,7 @@
   // 「記号」タブの中身（音符1つに付ける記号のボタン）
   // ボタンを押すと記号が付き、もう一度押すと外れる
   // 選んでいる音にすでに付いている記号のボタンは青くなる
+  // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
   import { BOWINGS, ARTICULATIONS, FERMATA, FINGERINGS, TECHNIQUES, DYNAMICS } from "#lib/score/symbols.js";
 
@@ -11,7 +12,10 @@
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
   //   onsymbol … ボタンが押されたときに呼ぶ関数（記号の種類と名前を渡す）
   //              例：onsymbol('bowing', 'down')、onsymbol('fingering', 2)
-  let { note = null, onsymbol = () => {} } = $props();
+  //   spanState    … 選んだ範囲に付いているスラー・松葉 { slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
+  //   canSpanRange … 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
+  //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
+  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {} } = $props();
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!note);
@@ -64,6 +68,31 @@
         <span class="icon dynamic">{symbol.glyph}</span>
       </button>
     {/each}
+  </div>
+
+  <!-- スラー・松葉（範囲を選んだときだけ押せる） -->
+  <div class="group">
+    <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
+    <button
+      class="tool text"
+      class:on={spanState.wedge === "crescendo"}
+      disabled={!canSpanRange}
+      onclick={() => onspanner("crescendo")}
+      title="クレッシェンド（Shift＋クリックで範囲を選んでから押す）"
+      aria-label="クレッシェンド"
+    >
+      ＜
+    </button>
+    <button
+      class="tool text"
+      class:on={spanState.wedge === "diminuendo"}
+      disabled={!canSpanRange}
+      onclick={() => onspanner("diminuendo")}
+      title="ディミヌエンド（Shift＋クリックで範囲を選んでから押す）"
+      aria-label="ディミヌエンド"
+    >
+      ＞
+    </button>
   </div>
 </div>
 

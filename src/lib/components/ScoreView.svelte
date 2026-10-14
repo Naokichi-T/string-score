@@ -12,8 +12,10 @@
   // 親から受け取るもの
   //   score     … 楽譜データ
   //   selection … 選択中の場所（選んでいなければ null）
-  //   onselect  … 音符がクリックされたときに呼ぶ関数（選ばれた場所か null を渡す）
-  let { score, selection = null, onselect = () => {} } = $props();
+  //   range     … 範囲選択（範囲を選んでいなければ null）
+  //   onselect  … 音符がクリックされたときに呼ぶ関数
+  //               （選ばれた場所か null と、Shift キーを押していたか true / false を渡す）
+  let { score, selection = null, range = null, onselect = () => {} } = $props();
 
   // 外側の枠の div（幅を測るのに使う）
   let wrapper;
@@ -42,7 +44,7 @@
     if (!VF) return;
     // 枠の内側の幅（左右の padding 8px ずつを引く）
     const width = wrapper.clientWidth - 16;
-    hitBoxes = renderScore(VF, container, score, width, selection);
+    hitBoxes = renderScore(VF, container, score, width, selection, range);
   }
 
   // ----------------------------------------------------------
@@ -68,19 +70,21 @@
     const hit = hitBoxes.find((box) => x >= box.x - HIT_MARGIN && x <= box.x + box.w + HIT_MARGIN && y >= box.y - HIT_MARGIN && y <= box.y + box.h + HIT_MARGIN);
 
     if (hit) {
-      onselect({ part: hit.part, measure: hit.measure, note: hit.note });
+      // Shift キーを押しながらのクリックかどうかも一緒に知らせる（範囲選択に使う）
+      onselect({ part: hit.part, measure: hit.measure, note: hit.note }, event.shiftKey);
     } else {
-      onselect(null); // 何もない所をクリックしたら選択を外す
+      onselect(null, false); // 何もない所をクリックしたら選択を外す
     }
   }
 
   // ----------------------------------------------------------
-  // 楽譜データ・選択中の場所・VexFlow の準備が変わったら描き直す
+  // 楽譜データ・選択中の場所・範囲・VexFlow の準備が変わったら描き直す
   // （ここで読んだ値が変わると、この中身がもう一度実行される）
   // ----------------------------------------------------------
   $effect(() => {
     score;
     selection;
+    range;
     VF;
     requestDraw();
   });

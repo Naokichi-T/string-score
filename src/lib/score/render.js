@@ -20,6 +20,7 @@ import { buildStates, addModifiers, measureModifierWidth } from "./render/measur
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
 import { drawSpanners } from "./render/spanners.js";
+import { isInRange } from "./selection.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -37,8 +38,9 @@ const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
 const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
 
-// 選択中の音符の色（青）
+// 選択中の音符の色（青）と、範囲選択の中の音符の色（明るい青）
 const SELECTED_COLOR = "#2563eb";
+const RANGE_COLOR = "#60a5fa";
 
 // ----------------------------------------------------------
 // 関数：renderScore
@@ -48,10 +50,11 @@ const SELECTED_COLOR = "#2563eb";
 //   score     … 楽譜データ
 //   width     … 楽譜全体の幅（画面の幅に合わせる）
 //   selection … 選択中の場所 { part, measure, note }（選んでいなければ null）
+//   range     … 範囲選択 { part, start, end }（範囲を選んでいなければ null）
 // 戻り値：クリックの当たり判定に使う、音符ごとの四角の一覧
 //   [{ part, measure, note, x, y, w, h }, ...]
 // ----------------------------------------------------------
-export function renderScore(VF, container, score, width, selection = null) {
+export function renderScore(VF, container, score, width, selection = null, range = null) {
   // 前に描いたものを消す
   container.innerHTML = "";
 
@@ -185,9 +188,11 @@ export function renderScore(VF, container, score, width, selection = null) {
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
           const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
-          // 選択中の音なら青くする
+          // 選択中の音なら青、範囲選択の中の音なら明るい青にする
           if (selection && selection.part === p && selection.measure === i && selection.note === j) {
             staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+          } else if (isInRange(range, p, i, j)) {
+            staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
           }
           // 何パート目・何小節目・何番目の音かも一緒に覚えておく（当たり判定に使う）
           allNotes[p].push({ staveNote: staveNote, data: note, line: l, part: p, measure: i, note: j });

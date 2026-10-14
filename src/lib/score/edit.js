@@ -12,6 +12,7 @@
 
 import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan } from "./model.js";
 import { TECHNIQUES } from "./symbols.js";
+import { positionsInRange } from "./selection.js";
 
 // ----------------------------------------------------------
 // 関数：cloneScore
@@ -545,4 +546,84 @@ export function toggleNoteSymbol(score, selection, kind, value) {
       if (n.techniques.length === 0) delete n.techniques;
     }
   });
+}
+
+// ==========================================================
+// ここから下は、スラー・松葉を付ける・外す関数（ステップ4-6）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：spanEnds
+// 範囲の中で、最初の音符と最後の音符（休符は飛ばす）の場所を返す
+// 戻り値：{ first, last, inner }（音符が2つ未満なら null）
+//   inner … 最初と最後の間にある音符の場所の並び
+// ----------------------------------------------------------
+function spanEnds(score, range) {
+  const notes = positionsInRange(score, range).filter((pos) => {
+    const note = score.parts[pos.part].measures[pos.measure].notes[pos.note];
+    return !note.rest;
+  });
+  if (notes.length < 2) return null;
+  return { first: notes[0], last: notes[notes.length - 1], inner: notes.slice(1, -1) };
+}
+
+// ----------------------------------------------------------
+// 関数：canSpan
+// 範囲にスラー・松葉を付けられるか（音符が2つ以上あるか）調べる
+// ----------------------------------------------------------
+export function canSpan(score, range) {
+  return !!range && spanEnds(score, range) !== null;
+}
+
+// ----------------------------------------------------------
+// 関数：getSpanState
+// 範囲の最初と最後の音符に、どのスラー・松葉が付いているかを調べる（ボタンを青くするため）
+// 戻り値：{ slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
+// ----------------------------------------------------------
+export function getSpanState(score, range) {
+  const ends = range ? spanEnds(score, range) : null;
+  if (!ends) return { slur: false, wedge: null };
+  const noteAt = (pos) => score.parts[pos.part].measures[pos.measure].notes[pos.note];
+  const first = noteAt(ends.first);
+  const last = noteAt(ends.last);
+  return {
+    slur: first.slur === "start" && last.slur === "stop",
+    wedge: last.wedge === "stop" ? (first.wedge ?? null) : null,
+  };
+}
+
+// ----------------------------------------------------------
+// 関数：toggleSpanner
+// 範囲にスラーか松葉を付ける（同じものがすでに付いていれば外す）
+//   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）
+// 範囲の最初の音符に「ここから」、最後の音符に「ここまで」の印を付ける
+// 間の音符に付いていた同じ種類の印は消す（重なってわかりにくくならないように）
+// 戻り値：新しい楽譜データ（付けられないときは元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleSpanner(score, range, kind) {
+  const ends = spanEnds(score, range);
+  if (!ends) return score;
+
+  const field = kind === "slur" ? "slur" : "wedge"; // データのどの項目を使うか
+  const startValue = kind === "slur" ? "start" : kind; // 「ここから」の印
+
+  const newScore = cloneScore(score);
+  const noteAt = (pos) => newScore.parts[pos.part].measures[pos.measure].notes[pos.note];
+  const first = noteAt(ends.first);
+  const last = noteAt(ends.last);
+
+  // すでに同じものが付いていれば外す
+  if (first[field] === startValue && last[field] === "stop") {
+    delete first[field];
+    delete last[field];
+    return newScore;
+  }
+
+  // 付ける（間の音符の同じ種類の印は消す）
+  ends.inner.forEach((pos) => {
+    delete noteAt(pos)[field];
+  });
+  first[field] = startValue;
+  last[field] = "stop";
+  return newScore;
 }

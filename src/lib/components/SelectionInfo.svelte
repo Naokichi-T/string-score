@@ -3,24 +3,32 @@
   // SelectionInfo.svelte
   // 今選んでいる音の情報を1行で表示する
   // 例：「選択中：Viola　3小節目　2つ目　ラ3・4分音符」
+  // 範囲を選んでいるときは、範囲を表示する
+  // 例：「範囲：Violin I　1小節目 2つ目 〜 2小節目 3つ目（6つ）」
   // ==========================================================
-  import { describeSelection } from "#lib/score/selection.js";
+  import { describeSelection, describeRange } from "#lib/score/selection.js";
 
   // 親から受け取るもの
   //   score     … 楽譜データ
   //   selection … 選択中の場所（選んでいなければ null）
+  //   range     … 範囲選択（範囲を選んでいなければ null）
   //   message   … 知らせたいこと（「小節に入りきりません」など。なければ空の文字）
-  let { score, selection, message = "" } = $props();
+  let { score, selection, range = null, message = "" } = $props();
 
   // 表示する文章（score か selection が変わると自動で作り直される）
   let text = $derived(describeSelection(score, selection));
+
+  // 範囲の文章（範囲を選んでいなければ空の文字）
+  let rangeText = $derived(describeRange(score, range));
 </script>
 
 <div class="selection-info">
-  {#if text}
+  {#if rangeText}
+    範囲：{rangeText}
+  {:else if text}
     選択中：{text}
   {:else}
-    <span class="hint">音符をクリックすると選べます（← → キーで前後の音へ、Esc で選択を外す）</span>
+    <span class="hint">音符をクリックすると選べます（← → キーで前後の音へ、Shift＋クリックか Shift＋← → で範囲を選ぶ、Esc で選択を外す）</span>
   {/if}
   <!-- 知らせたいことがあれば、右側に赤い文字で出す -->
   {#if message}

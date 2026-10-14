@@ -28,9 +28,15 @@
   //   onmode       … 切り替えのボタンが押されたときに呼ぶ関数（'overwrite' か 'insert' を渡す）
   //   selectedNote … 選んでいる音符のデータ（音符を選んでいないときは null。「記号」タブで使う）
   //   onsymbol     … 「記号」タブのボタンが押されたときに呼ぶ関数（記号の種類と名前を渡す）
+  //   spanState    … 選んだ範囲に付いているスラー・松葉（「記号」タブで使う）
+  //   canSpanRange … 範囲にスラー・松葉を付けられるか（「記号」タブで使う）
+  //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（「記号」タブで使う）
   let {
     selectedNote = null,
     onsymbol = () => {},
+    spanState = { slur: false, wedge: null },
+    canSpanRange = false,
+    onspanner = () => {},
     mode = "overwrite",
     onmode = () => {},
     duration,
@@ -151,7 +157,7 @@
         <button class="tool text wide" disabled={!noteSelected} onclick={() => ondelete()} title="音符を休符にする（Delete）"> 削除 </button>
       </div>
     {:else if activeTab === "symbol"}
-      <SymbolTools note={selectedNote} {onsymbol} />
+      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
       <span class="placeholder">（小節の追加・削除などをステップ5で作ります）</span>
     {:else if activeTab === "settings"}

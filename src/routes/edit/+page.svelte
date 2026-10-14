@@ -6,6 +6,7 @@
   // （ステップ4-3：高さ・臨時記号・タイ・削除・元に戻す・やり直し）
   // （ステップ4-4：挿入モード）
   // （ステップ4-5：記号タブで音符に記号を付ける）
+  // （ステップ4-6：範囲選択と、スラー・松葉）
   // ==========================================================
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
@@ -13,8 +14,25 @@
   import ScoreView from "#lib/components/ScoreView.svelte";
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import { createEmptyScore, keyAt, INSTRUMENTS } from "#lib/score/model.js";
-  import { moveSelection, getSelectedNote } from "#lib/score/selection.js";
-  import { canFit, replaceAt, setDuration, nextPosition, transposeNote, setAccidental, deleteNote, toggleTie, canInsert, canResize, insertAt, resizeAt, toggleNoteSymbol } from "#lib/score/edit.js";
+  import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
+  import {
+    canFit,
+    replaceAt,
+    setDuration,
+    nextPosition,
+    transposeNote,
+    setAccidental,
+    deleteNote,
+    toggleTie,
+    canInsert,
+    canResize,
+    insertAt,
+    resizeAt,
+    toggleNoteSymbol,
+    canSpan,
+    getSpanState,
+    toggleSpanner,
+  } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { playPitch } from "#lib/audio/sound.js";
 
@@ -23,6 +41,19 @@
 
   // 選択中の場所 { part, measure, note }（何も選んでいないときは null）
   let selection = $state(null);
+
+  // 範囲選択の「もう一方の端」{ part, measure, note }（範囲を選んでいないときは null）
+  // 範囲は「選択中の場所」から「もう一方の端」まで（Shift＋クリックか Shift＋← → で決める）
+  let rangeEnd = $state(null);
+
+  // 選んでいる範囲 { part, start, end }（範囲を選んでいないときは null）
+  let range = $derived(makeRange(selection, rangeEnd));
+
+  // 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
+  let canSpanRange = $derived(canSpan(score, range));
+
+  // 範囲に付いているスラー・松葉（ボタンを青くするため）
+  let spanState = $derived(getSpanState(score, range));
 
   // 元に戻す・やり直しの履歴
   // （$state.raw：中身を細かく見張らず、入れ替えたときだけ画面を更新する）
@@ -75,6 +106,8 @@
     history = record(history, { score: score, selection: selection });
     score = newScore;
     selection = newSelection;
+    // 楽譜が変わると範囲の場所がずれることがあるので、範囲選択はやめる
+    rangeEnd = null;
   }
 
   // ----------------------------------------------------------
@@ -87,6 +120,7 @@
     history = result.history;
     score = result.entry.score;
     selection = result.entry.selection;
+    rangeEnd = null; // 範囲選択はやめる
     message = "";
   }
 
@@ -100,6 +134,7 @@
     history = result.history;
     score = result.entry.score;
     selection = result.entry.selection;
+    rangeEnd = null; // 範囲選択はやめる
     message = "";
   }
 
@@ -159,9 +194,42 @@
   // ----------------------------------------------------------
   // 関数：handleSelect
   // 五線譜で音符がクリックされたとき（ScoreView から呼ばれる）
+  //   newSelection … クリックされた場所（何もない所なら null）
+  //   shift        … Shift キーを押しながらのクリックか
+  // Shift＋クリックで、選んでいる音と同じパートの音なら、そこまでを範囲にする
   // ----------------------------------------------------------
-  function handleSelect(newSelection) {
+  function handleSelect(newSelection, shift = false) {
+    message = "";
+    if (shift && selection && newSelection && newSelection.part === selection.part) {
+      // 範囲のもう一方の端にする（選んでいる音そのものをクリックしたら範囲をやめる）
+      rangeEnd = samePlace(newSelection, selection) ? null : newSelection;
+      return;
+    }
+    // ふつうのクリック（または違うパート）：その音だけを選ぶ
     selection = newSelection;
+    rangeEnd = null;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：samePlace
+  // 2つの場所が同じかどうかを調べる
+  // ----------------------------------------------------------
+  function samePlace(a, b) {
+    return a.part === b.part && a.measure === b.measure && a.note === b.note;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：extendRange
+  // Shift＋← → で、範囲のもう一方の端を前後の音に動かす
+  //   direction … 1 なら次の音へ、-1 なら前の音へ
+  // ----------------------------------------------------------
+  function extendRange(direction) {
+    if (!selection) return;
+    // まだ範囲がなければ、選択中の場所から動かし始める
+    const from = rangeEnd ?? selection;
+    const to = moveSelection(score, from, direction);
+    // 選択中の場所まで戻ってきたら、範囲をやめる
+    rangeEnd = samePlace(to, selection) ? null : to;
     message = "";
   }
 
@@ -351,6 +419,21 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleSpanner
+  // スラー・＜・＞ のボタンが押されたとき：選んだ範囲に付ける・外す
+  //   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）
+  // ----------------------------------------------------------
+  function handleSpanner(kind) {
+    if (!canSpanRange) return;
+    message = "";
+    // commit で範囲選択が消えるので、覚えておいて元に戻す
+    // （スラーや松葉を付けても音の並びは変わらないので、範囲はずれない）
+    const end = rangeEnd;
+    commit(toggleSpanner(score, range, kind));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
   // ----------------------------------------------------------
@@ -391,22 +474,35 @@
       handleTranspose(command ? -12 : -1);
       event.preventDefault();
     } else if (event.key === "ArrowRight") {
-      // → キー：次の音へ
-      selection = moveSelection(score, selection, 1);
-      message = "";
+      if (event.shiftKey) {
+        // Shift＋→：範囲を次の音まで広げる（縮める）
+        extendRange(1);
+      } else {
+        // → キー：次の音へ（範囲選択はやめる）
+        selection = moveSelection(score, selection, 1);
+        rangeEnd = null;
+        message = "";
+      }
       event.preventDefault(); // 画面が横にスクロールしないようにする
     } else if (event.key === "ArrowLeft") {
-      // ← キー：前の音へ
-      selection = moveSelection(score, selection, -1);
-      message = "";
+      if (event.shiftKey) {
+        // Shift＋←：範囲を前の音まで広げる（縮める）
+        extendRange(-1);
+      } else {
+        // ← キー：前の音へ（範囲選択はやめる）
+        selection = moveSelection(score, selection, -1);
+        rangeEnd = null;
+        message = "";
+      }
       event.preventDefault();
     } else if (event.key === "Delete" || event.key === "Backspace") {
       // Delete / Backspace：音符を休符にする
       handleDelete();
       event.preventDefault(); // Backspace でブラウザが前のページに戻らないようにする
     } else if (event.key === "Escape") {
-      // Esc キー：選択を外す
+      // Esc キー：選択と範囲を外す
       selection = null;
+      rangeEnd = null;
       message = "";
     } else if (!command && (event.key === "i" || event.key === "I")) {
       // I キー：上書き・挿入を切り替える
@@ -440,12 +536,15 @@
     onmode={handleMode}
     selectedNote={noteSelected ? getSelectedNote(score, selection) : null}
     onsymbol={handleSymbol}
+    {spanState}
+    {canSpanRange}
+    onspanner={handleSpanner}
   />
-  <SelectionInfo {score} {selection} {message} />
+  <SelectionInfo {score} {selection} {range} {message} />
 
   <!-- 五線譜の部分だけスクロールする -->
   <main class="score-area">
-    <ScoreView {score} {selection} onselect={handleSelect} />
+    <ScoreView {score} {selection} {range} onselect={handleSelect} />
   </main>
 
   <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
