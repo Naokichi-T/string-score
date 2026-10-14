@@ -12,6 +12,7 @@
   // （ステップ5-1：「楽譜の設定」タブの中身を ScoreSettings として追加）
   // （ステップ5-2：「小節」タブの中身を MeasureTools として追加）
   // （ステップ5-6：「パート」タブを追加。中身は PartTools）
+  // （ステップ5-7：「音符」タブにコピー・切り取り・貼り付けのボタンを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { DURATION_ORDER } from "#lib/score/model.js";
@@ -55,6 +56,9 @@
   //   onaddpart    … パートの追加のボタンが押されたときに呼ぶ関数（「パート」タブで使う）
   //   onmovepart   … パートの ↑ ↓ が押されたときに呼ぶ関数（「パート」タブで使う）
   //   ondeletepart … パートの削除が押されたときに呼ぶ関数（「パート」タブで使う）
+  //   canCopy      … コピー・切り取りができるか（音か範囲を選んでいるか）
+  //   canPaste     … 貼り付けができるか（コピーした音があって、場所を選んでいるか）
+  //   onclipboard  … コピー・切り取り・貼り付けのボタンが押されたときに呼ぶ関数（"copy"・"cut"・"paste" を渡す）
   let {
     score,
     onsettings = () => {},
@@ -70,6 +74,9 @@
     onaddpart = () => {},
     onmovepart = () => {},
     ondeletepart = () => {},
+    canCopy = false,
+    canPaste = false,
+    onclipboard = () => {},
     selectedNote = null,
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
@@ -200,6 +207,13 @@
           削除
         </button>
       </div>
+
+      <!-- コピー・切り取り・貼り付け -->
+      <div class="group">
+        <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("copy")} title="選んでいる音（範囲）をコピーする（⌘ / Ctrl＋C）"> コピー </button>
+        <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("cut")} title="コピーしてから、音符を休符にする（⌘ / Ctrl＋X）"> 切り取り </button>
+        <button class="tool text clip" disabled={!canPaste} onclick={() => onclipboard("paste")} title="選んでいる音の頭から、コピーした音を上書きで貼り付ける（⌘ / Ctrl＋V）"> 貼り付け </button>
+      </div>
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
     {:else if activeTab === "measure"}
@@ -292,6 +306,11 @@
   }
   .tool.wide {
     width: 52px;
+  }
+  .tool.clip {
+    width: auto; /* コピーなどは文字が長いので、文字に合わせた幅にする */
+    padding: 0 10px;
+    font-size: 14px;
   }
   .mode-switch {
     display: flex; /* 2つのボタンをくっつけて並べる */

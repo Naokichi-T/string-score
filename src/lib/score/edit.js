@@ -833,8 +833,9 @@ export function clefAt(part, i) {
 // 関数：cleanSpanners
 // 1つのパートの中で、相手がいなくなったスラー・松葉の印を外す
 // （「ここから」だけ・「ここまで」だけが残ると、おかしな所どうしがつながってしまうため）
+// （ステップ5-7：コピー＆貼り付けでも使うので export した）
 // ----------------------------------------------------------
-function cleanSpanners(part) {
+export function cleanSpanners(part) {
   // 休符ではない音符を、前から順に並べる
   const notes = [];
   part.measures.forEach((measure) => {

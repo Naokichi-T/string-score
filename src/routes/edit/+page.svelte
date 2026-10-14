@@ -52,6 +52,7 @@
     deletePart,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
+  import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
   import { playPitch } from "#lib/audio/sound.js";
 
   // 楽譜データ（空の弦楽四重奏で始める）
@@ -722,6 +723,40 @@
     commit(newScore, newSelection);
   }
 
+  // コピーした音の配列（まだ何もコピーしていないときは null。ページを再読み込みすると消える）
+  let clipboard = $state.raw(null);
+
+  // コピー・切り取りができるか（音か範囲を選んでいるか）
+  let canCopy = $derived(!!selection);
+
+  // 貼り付けができるか（コピーした音があって、場所を選んでいるか）
+  let canPaste = $derived(!!clipboard && !!selection);
+
+  // ----------------------------------------------------------
+  // 関数：handleClipboard
+  // コピー・切り取り・貼り付けのボタン（キー）が押されたとき
+  //   action … "copy"（コピー）・"cut"（切り取り）・"paste"（貼り付け）
+  // ----------------------------------------------------------
+  function handleClipboard(action) {
+    message = "";
+
+    if (action === "copy" || action === "cut") {
+      if (!canCopy) return;
+      clipboard = copyNotes(score, range, selection);
+      // 切り取り：コピーしたあと、音符を休符にする（削除のボタンと同じ）
+      if (action === "cut") handleDelete();
+      return;
+    }
+
+    // 貼り付け：選んでいる音の頭から上書きして、貼り付けた所を範囲で選ぶ
+    if (!canPaste) return;
+    const result = pasteNotes(score, selection, clipboard);
+    commit(result.score, result.start);
+    // commit で範囲選択が消えるので、そのあとで範囲の終わりを決める（1つだけなら範囲にしない）
+    const single = result.start.measure === result.end.measure && result.start.note === result.end.note;
+    rangeEnd = single ? null : result.end;
+  }
+
   // ----------------------------------------------------------
   // 関数：handleShift
   // 鍵盤の ◀ ▶ が押されたとき：1オクターブずつずらす（ド1〜ド6 の範囲）
@@ -793,8 +828,20 @@
       selection = null;
       rangeEnd = null;
       message = "";
+    } else if (command && (event.key === "c" || event.key === "C") && selection) {
+      // Ctrl / ⌘＋C：コピー（何も選んでいないときは、ブラウザのふつうのコピーにまかせる）
+      handleClipboard("copy");
+      event.preventDefault();
+    } else if (command && (event.key === "x" || event.key === "X") && selection) {
+      // Ctrl / ⌘＋X：切り取り
+      handleClipboard("cut");
+      event.preventDefault();
+    } else if (command && (event.key === "v" || event.key === "V") && canPaste) {
+      // Ctrl / ⌘＋V：貼り付け
+      handleClipboard("paste");
+      event.preventDefault();
     } else if (command) {
-      // ここから下は Ctrl / ⌘ なしのキーだけ（Ctrl＋C のコピーなどを邪魔しないため）
+      // ここから下は Ctrl / ⌘ なしのキーだけ（ブラウザのほかのショートカットを邪魔しないため）
       return;
     } else if (DURATION_KEYS[event.key]) {
       // 3〜7：音の長さ（ボタンを押したときと同じ）
@@ -865,6 +912,9 @@
     onaddpart={handleAddPart}
     onmovepart={handleMovePart}
     ondeletepart={handleDeletePart}
+    {canCopy}
+    {canPaste}
+    onclipboard={handleClipboard}
   />
   <SelectionInfo {score} {selection} {range} {message} />
 
