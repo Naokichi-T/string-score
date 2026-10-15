@@ -411,7 +411,10 @@ function computeWedges(part) {
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（0 から数える）
 //   mixer        … パートごとの音量の設定（くわしくは mixer.js）（ステップ12-3b）
-//                  ミュート・ソロで鳴らさないパートは飛ばし、鳴らすパートは音の強さに音量（0〜100%）をかける
+//                  ミュート・ソロで鳴らさないパートは鳴らす音の一覧に入れず、鳴らすパートは音の強さに音量（0〜100%）をかける
+//                  （ステップ12-4a2）緑にする音符の一覧には、鳴らすパートに加えて、ミュートしたパートも入れる
+//                  （ミュート＝自分で弾くので音を消す、という使い方のため。ソロで外れたパートは入れない）
+//                  フェルマータは、鳴らさないパートのものも数える（ほかのパートも、その間は待つ）
 // 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧,
 //          measureStarts: 小節ごとの始まりの時刻 }
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
@@ -423,8 +426,9 @@ function computeWedges(part) {
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, mixer = {}) {
-  const events = [];
-  const highlights = []; // 緑にする音符の一覧（ステップ6-2）
+  // let：あとで、鳴らすパート・緑にするパートの分だけに入れ替えるため（ステップ12-4a2）
+  let events = [];
+  let highlights = []; // 緑にする音符の一覧（ステップ6-2）
   const fermatas = []; // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
@@ -433,11 +437,19 @@ export function buildEvents(score, startMeasure, mixer = {}) {
     totalTicks = totalTicks + measureTicks(timeAt(score, i));
   }
 
+  // 鳴らすパートと、緑にするパートの番号（ステップ12-4a2）
+  // 全パートを計算してから、最後にこの2つで分ける（フェルマータを全パートで数えるため）
+  const audibleParts = new Set(); // 鳴らすパート
+  const highlightParts = new Set(); // 緑にするパート（鳴らすパート＋ミュートしたパート）
+
   score.parts.forEach((part, p) => {
-    // 鳴らさないパート（ミュート・ほかのパートがソロ）は飛ばす（ステップ12-3b）
-    if (!isAudible(mixer, score.parts, part.id)) return;
+    // 鳴らすか・緑にするかを決めておく（ステップ12-4a2：ここで飛ばすのをやめた）
+    const setting = mixerOf(mixer, part.id);
+    const audible = isAudible(mixer, score.parts, part.id);
+    if (audible) audibleParts.add(p);
+    if (audible || setting.mute) highlightParts.add(p);
     // このパートの音量の割合（100 なら 1、80 なら 0.8）（ステップ12-3b）
-    const volumeRate = mixerOf(mixer, part.id).volume / 100;
+    const volumeRate = setting.volume / 100;
 
     let dynamic = DEFAULT_DYNAMIC; // 今の強弱
     let tick = 0; // 再生を始めた所から何ティック目か（始める小節より前は数えない）
@@ -568,6 +580,11 @@ export function buildEvents(score, startMeasure, mixer = {}) {
       });
     });
   });
+
+  // 鳴らすパートの音だけを残し、緑にするパートの音符だけを残す（ステップ12-4a2）
+  // （フェルマータ（fermatas）は全パートのものをそのまま使う）
+  events = events.filter((event) => audibleParts.has(event.part));
+  highlights = highlights.filter((h) => highlightParts.has(h.part));
 
   // フェルマータのぶん、時間をずらす（ステップ6-3b）
   const points = mergeFermatas(fermatas);
