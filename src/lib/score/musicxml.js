@@ -22,15 +22,57 @@
 // 【長さの書き方】
 //   MusicXML では「4分音符をいくつに分けるか（divisions）」を先に決めて、
 //   音の長さをその数で書く。divisions を 4 にすると 16分音符＝1 になる
-//   このアプリのティックは 16分音符＝TICKS_PER_16TH なので、その数で割って書く（ステップ10-1）
+//   連符があると 4 では割り切れないので、楽譜ごとに「全部の長さが整数になる数」を決める（ステップ10-5）
+//     例：連符なし → 4、8分音符の3連符あり → 12（3連符の8分音符1つ = 4）
+//
+// 【連符の書き方】（ステップ10-5）
+//   連符の音には <time-modification>（3連符なら「2個分に3個」）を書く
+//   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
-// 4分音符をいくつに分けるか（16分音符＝1 にするので 4）
-const DIVISIONS = 4;
+// 4分音符1つ分のティック
+const QUARTER_TICKS = 4 * TICKS_PER_16TH;
+
+// ----------------------------------------------------------
+// 関数：gcd
+// 2つの整数の最大公約数（両方を割り切れる一番大きい数）を求める（ステップ10-5）
+// 例：(12, 8) → 4
+// ----------------------------------------------------------
+function gcd(a, b) {
+  while (b !== 0) {
+    const r = a % b;
+    a = b;
+    b = r;
+  }
+  return a;
+}
+
+// ----------------------------------------------------------
+// 関数：scoreDivisions
+// この楽譜の divisions（4分音符をいくつに分けるか）を決める（ステップ10-5）
+// 全部の音の長さが整数で書ける、一番小さい数にする（ただし 4 より小さくはしない）
+//   考え方：音の長さ ÷ 4分音符の長さ × divisions が整数になればよい
+//           → divisions は「4分音符の長さ ÷ (音の長さと4分音符の長さの最大公約数)」で割り切れればよい
+//           → 全部の音について、その数の最小公倍数をとる
+// 例：連符なし → 4、8分音符の3連符 → 12、16分音符の5連符 → 20
+// ----------------------------------------------------------
+function scoreDivisions(score) {
+  let divisions = 4; // 今までと同じ 4 から始める（16分音符＝1）
+  score.parts.forEach((part) => {
+    part.measures.forEach((measure) => {
+      measure.notes.forEach((note) => {
+        const need = QUARTER_TICKS / gcd(noteTicks(note), QUARTER_TICKS);
+        // 最小公倍数 = a × b ÷ 最大公約数
+        divisions = (divisions * need) / gcd(divisions, need);
+      });
+    });
+  });
+  return divisions;
+}
 
 // ----------------------------------------------------------
 // 音部記号の表（MusicXML では「記号の形（sign）」と「何本目の線か（line）」で書く）
@@ -130,15 +172,16 @@ function partListXml(score) {
 //   key     … 調号（変わらないときは undefined）
 //   time    … 拍子（変わらないときは undefined）
 //   clef    … 音部記号（変わらないときは undefined）
+//   divisions … 4分音符をいくつに分けるか（scoreDivisions で決めたもの）（ステップ10-5）
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function attributesXml(isFirst, key, time, clef) {
+function attributesXml(isFirst, key, time, clef, divisions) {
   if (!isFirst && key === undefined && !time && !clef) return [];
 
   // 書く順番は MusicXML の決まり（divisions → key → time → clef）に合わせる
   const lines = [];
   lines.push("      <attributes>");
-  if (isFirst) lines.push(`        <divisions>${DIVISIONS}</divisions>`);
+  if (isFirst) lines.push(`        <divisions>${divisions}</divisions>`);
   if (key !== undefined) {
     // fifths：♯の数はプラス、♭の数はマイナス（このアプリの key と同じ）
     lines.push("        <key>");
@@ -197,9 +240,12 @@ function tempoXml(score) {
 //   note       … 音符・休符のデータ
 //   accidental … 表示する臨時記号（"#"・"b"・"n" など。付けないときは null）
 //   tieStop    … 前の音からタイでつながってきているか
+//   divisions  … 4分音符をいくつに分けるか（ステップ10-5）
+//   tupletMark … 連符の中の音なら { actual, normal, start, stop, bracket }、そうでなければ null（ステップ10-5）
+//                start … 連符の最初の音か　stop … 連符の最後の音か　bracket … 括弧を付けるか
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function noteXml(note, accidental, tieStop) {
+function noteXml(note, accidental, tieStop, divisions, tupletMark) {
   const lines = [];
   lines.push("      <note>");
 
@@ -215,8 +261,9 @@ function noteXml(note, accidental, tieStop) {
     lines.push("        </pitch>");
   }
 
-  // 長さ（divisions を 4 にしているので、16分音符＝1 になるように TICKS_PER_16TH で割る）（ステップ10-1）
-  lines.push(`        <duration>${noteTicks(note) / TICKS_PER_16TH}</duration>`);
+  // 長さ（4分音符の長さを divisions とした数で書く）（ステップ10-5）
+  //   例：divisions が 12 のとき、4分音符 → 12、3連符の8分音符 → 4
+  lines.push(`        <duration>${(noteTicks(note) * divisions) / QUARTER_TICKS}</duration>`);
 
   // タイ（再生用の <tie>）。前からの「ここまで」を先に、次への「ここから」をあとに書く
   const tieStart = !note.rest && note.tie;
@@ -237,8 +284,16 @@ function noteXml(note, accidental, tieStop) {
     lines.push(`        <accidental>${ACCIDENTAL_TO_XML[accidental]}</accidental>`);
   }
 
-  // 音符に付く記号（タイの表示・スラー・アーティキュレーション・弓・指番号・フェルマータ）
-  lines.push(...notationsXml(note, tieStop, tieStart));
+  // 連符：「normal 個分の長さに actual 個」（臨時記号のあとに書く決まり）（ステップ10-5）
+  if (tupletMark) {
+    lines.push("        <time-modification>");
+    lines.push(`          <actual-notes>${tupletMark.actual}</actual-notes>`);
+    lines.push(`          <normal-notes>${tupletMark.normal}</normal-notes>`);
+    lines.push("        </time-modification>");
+  }
+
+  // 音符に付く記号（タイの表示・スラー・アーティキュレーション・弓・指番号・フェルマータ・連符の始まりと終わり）
+  lines.push(...notationsXml(note, tieStop, tieStart, tupletMark));
 
   lines.push("      </note>");
   return lines;
@@ -250,20 +305,28 @@ function noteXml(note, accidental, tieStop) {
 //   note      … 音符・休符のデータ
 //   tieStop   … 前の音からタイでつながってきているか
 //   tieStart  … 次の音へタイでつながるか
+//   tupletMark … 連符の情報（noteXml と同じ。連符でなければ null）（ステップ10-5）
 // 中に書くもの（MusicXML の名前）
 //   タイの表示 … <tied>（再生用の <tie> とは別に、表示用にも書く決まり）
+//   連符       … <tuplet type="start"> ～ <tuplet type="stop">（ステップ10-5）
 //   スラー     … <slur type="start"> ～ <slur type="stop">
 //   スタッカートなど … <articulations> の中
 //   弓・指番号 … <technical> の中（弦楽器の奏法の記号はここ）
 //   フェルマータ … <fermata>
 // 何もなければ空の配列を返す（<notations> 自体を書かない）
 // ----------------------------------------------------------
-function notationsXml(note, tieStop, tieStart) {
+function notationsXml(note, tieStop, tieStart, tupletMark) {
   const inner = []; // <notations> の中身
 
   // タイの表示
   if (tieStop) inner.push(`          <tied type="stop"/>`);
   if (tieStart) inner.push(`          <tied type="start"/>`);
+
+  // 連符の始まりと終わり（ステップ10-5）
+  if (tupletMark && tupletMark.start) {
+    inner.push(`          <tuplet type="start" bracket="${tupletMark.bracket ? "yes" : "no"}"/>`);
+  }
+  if (tupletMark && tupletMark.stop) inner.push(`          <tuplet type="stop"/>`);
 
   // スラー（このアプリは同時に1本だけなので、番号はいつも 1）
   if (note.slur === "start") inner.push(`          <slur type="start" number="1"/>`);
@@ -381,9 +444,10 @@ function sameTimeSignature(a, b) {
 // 1つのパートの <part> を作る
 //   score … 楽譜データ
 //   p     … パートの番号（0 から）
+//   divisions … 4分音符をいくつに分けるか（ステップ10-5）
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function partXml(score, p) {
+function partXml(score, p, divisions) {
   const part = score.parts[p];
   const lines = [];
   lines.push(`  <part id="P${p + 1}">`);
@@ -408,7 +472,7 @@ function partXml(score, p) {
     const time = isFirst || !sameTimeSignature(nowTime, prevTime) ? nowTime : undefined;
     const key = isFirst || nowKey !== prevKey ? nowKey : undefined;
     const clef = isFirst || nowClef !== prevClef ? nowClef : undefined;
-    lines.push(...attributesXml(isFirst, key, time, clef));
+    lines.push(...attributesXml(isFirst, key, time, clef, divisions));
     prevTime = nowTime;
     prevKey = nowKey;
     prevClef = nowClef;
@@ -419,12 +483,31 @@ function partXml(score, p) {
     // 臨時記号を、五線譜の表示と同じ決め方で決める
     const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedIn);
 
+    // この小節の連符（ステップ10-5）
+    const groups = tupletGroups(measure.notes);
+
     // 音符・休符
     let prevTie = tiedIn; // 1つ前の音が、この音にタイでつながっているか
     measure.notes.forEach((note, k) => {
       const tieStop = prevTie && !note.rest;
+
+      // 連符の情報（連符でなければ null）（ステップ10-5）
+      // 括弧は、4分音符以上の連符か、休符が入っている連符に付ける（連桁で全部つながらないとき。画面の表示と同じ）
+      const group = groups.find((g) => g.start <= k && k <= g.end);
+      let tupletMark = null;
+      if (group) {
+        const members = measure.notes.slice(group.start, group.end + 1);
+        tupletMark = {
+          actual: group.actual,
+          normal: group.normal,
+          start: k === group.start,
+          stop: k === group.end,
+          bracket: !["eighth", "16th"].includes(group.duration) || members.some((n) => n.rest),
+        };
+      }
+
       lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
-      lines.push(...noteXml(note, accidentals[k], tieStop));
+      lines.push(...noteXml(note, accidentals[k], tieStop, divisions, tupletMark));
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
     });
@@ -473,9 +556,11 @@ export function scoreToMusicXML(score) {
   lines.push("  </identification>");
 
   // パートの一覧と、パートごとの中身
+  // divisions（4分音符をいくつに分けるか）は、楽譜全体で1つに決める（ステップ10-5）
+  const divisions = scoreDivisions(score);
   lines.push(...partListXml(score));
   score.parts.forEach((_, p) => {
-    lines.push(...partXml(score, p));
+    lines.push(...partXml(score, p, divisions));
   });
 
   lines.push("</score-partwise>");
