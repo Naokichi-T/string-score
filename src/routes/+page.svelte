@@ -4,12 +4,14 @@
   // 保存した楽譜の一覧（開く・削除・並び順の切り替え）
   // （ステップ7-2：一覧を作った）
   // （ステップ7-3：［＋ 新しい楽譜］で楽器の数を選んで作る）
+  // （ステップ8-3：［MusicXML を読み込む］で、ファイルから新しい楽譜を作る）
   // ==========================================================
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { listScores, deleteScore, createScore } from "#lib/score/library.js";
   import { createEmptyScore } from "#lib/score/model.js";
   import NewScoreDialog from "#lib/components/NewScoreDialog.svelte";
+  import { readMusicXMLFile, musicXMLToScore, titleFromFileName } from "#lib/score/musicxmlImport.js";
 
   // 保存した楽譜の一覧 [{ id, title, parts, createdAt, updatedAt }, ...]
   let scores = $state([]);
@@ -25,6 +27,51 @@
 
   // 新しい楽譜を作る窓を出しているか（ステップ7-3）
   let showNewDialog = $state(false);
+
+  // ファイルを選ぶ欄（画面には出さず、ボタンから開く）（ステップ8-3）
+  let fileInput = $state(null);
+
+  // 読み込み中か（読み込み中はボタンを押せなくする）（ステップ8-3）
+  let importing = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleImport
+  // ファイルが選ばれたとき：MusicXML を読み込んで新しい楽譜として保存し、編集ページで開く（ステップ8-3）
+  //   event … ファイルを選ぶ欄の change イベント
+  // ----------------------------------------------------------
+  async function handleImport(event) {
+    const file = event.currentTarget.files[0];
+    // 同じファイルをもう一度選んでも change が起きるように、欄を空に戻しておく
+    event.currentTarget.value = "";
+    if (!file) return; // 選ばずに閉じたとき
+
+    message = "";
+    importing = true;
+    try {
+      // ファイル → MusicXML の文字（.mxl なら解凍）
+      const text = await readMusicXMLFile(file);
+      // MusicXML の文字 → 楽譜データ（タイトルがなければファイルの名前を使う）
+      const { score, warnings } = musicXMLToScore(text, titleFromFileName(file.name));
+      // 知らせることは、今はブラウザの開発者ツールに出すだけ（画面に出すのはステップ8-4で）
+      if (warnings.length > 0) console.warn("MusicXML の読み込みで知らせること", warnings);
+
+      // 一覧に新しい楽譜として保存する
+      const id = createScore(score);
+      if (!id) {
+        message = "読み込んだ楽譜を保存できませんでした（ブラウザの保存できる量を超えているかもしれません）";
+        return;
+      }
+      // 編集ページで開く（新しく作ったときと違って、「楽譜の設定」タブではなく「音符」タブで始める）
+      goto(`/edit?id=${id}`);
+    } catch (error) {
+      // 読めなかったとき：理由を赤い字で出す
+      console.error(error);
+      message = `「${file.name}」を読み込めませんでした：${error.message}`;
+    } finally {
+      // うまくいっても、いかなくても、最後に読み込み中を終える
+      importing = false;
+    }
+  }
 
   // ----------------------------------------------------------
   // 関数：handleCreate
@@ -123,8 +170,8 @@
   <h1>string-score</h1>
   <p class="lead">弦楽器のための楽譜作成アプリ</p>
 
-  <!-- 新しい楽譜（押すと、楽器の数を選ぶ窓が出る） -->
-  <p>
+  <!-- 新しい楽譜（押すと、楽器の数を選ぶ窓が出る）と、MusicXML の読み込み -->
+  <p class="actions">
     <button
       class="new-button"
       onclick={() => {
@@ -132,6 +179,12 @@
         showNewDialog = true;
       }}>＋ 新しい楽譜</button
     >
+    <!-- 押すと、下の見えないファイルの欄を開く（ステップ8-3） -->
+    <button class="import-button" disabled={importing} onclick={() => fileInput.click()} title="MusicXML のファイル（.musicxml・.xml・.mxl）から、新しい楽譜を作る">
+      {importing ? "読み込み中…" : "MusicXML を読み込む"}
+    </button>
+    <!-- ファイルを選ぶ欄（見た目がそろわないので画面には出さない。accept：選べるファイルの種類） -->
+    <input bind:this={fileInput} type="file" accept=".musicxml,.xml,.mxl" onchange={handleImport} hidden />
   </p>
 
   <div class="list-header">
@@ -196,6 +249,29 @@
   }
   .new-button:hover {
     background: #1d4ed8; /* マウスを乗せたら少し濃い青 */
+  }
+  /* ［＋ 新しい楽譜］と［MusicXML を読み込む］を横に並べる（ステップ8-3） */
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+  /* ［MusicXML を読み込む］は、白地に青い枠（［＋ 新しい楽譜］より目立たないように） */
+  .import-button {
+    padding: 8px 16px;
+    background: #fff;
+    color: #2563eb;
+    border: 1px solid #2563eb;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .import-button:hover {
+    background: #eff6ff; /* マウスを乗せたら、うすい青 */
+  }
+  .import-button:disabled {
+    opacity: 0.5;
+    cursor: wait; /* 読み込み中は、待ちの形のマウス */
   }
   .list-header {
     display: flex; /* 見出しと並び順を横に並べる */
