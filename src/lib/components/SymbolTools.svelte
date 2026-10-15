@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, FERMATA, FINGERINGS, TECHNIQUES, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, FINGERINGS, TECHNIQUES, DYNAMICS } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -57,6 +57,15 @@
     {#each Object.entries(STRING_MARKS) as [name, symbol] (name)}
       <button class="tool" class:on={(note?.stringMarks ?? []).includes(name)} {disabled} onclick={() => onsymbol("stringMark", name)} title={symbol.label} aria-label={symbol.label}>
         <span class="icon string-mark">{symbol.icon}</span>
+      </button>
+    {/each}
+  </div>
+
+  <!-- ブレス・カエスーラ（ステップ11-1c） -->
+  <div class="group">
+    {#each Object.entries(BREATHS) as [name, symbol] (name)}
+      <button class="tool" class:on={note?.breath === name} {disabled} onclick={() => onsymbol("breath", name)} title={symbol.label} aria-label={symbol.label}>
+        <span class="icon breath">{symbol.icon}</span>
       </button>
     {/each}
   </div>
@@ -161,6 +170,9 @@
   .icon.string-mark {
     top: 6px; /* ステップ11-1b */
     font-size: 32px; /* ハーモニクスなどは形が小さいので、ほかより大きく出す */
+  }
+  .icon.breath {
+    top: 10px; /* ステップ11-1c */
   }
   .icon.dynamic {
     top: -2px;

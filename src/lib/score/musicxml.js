@@ -32,7 +32,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -332,13 +332,14 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
   if (note.slur === "start") inner.push(`          <slur type="start" number="1"/>`);
   if (note.slur === "stop") inner.push(`          <slur type="stop" number="1"/>`);
 
-  // スタッカート・テヌート・アクセント（symbols.js の musicxml の名前を使う）
+  // スタッカート・テヌート・アクセントなどと、ブレス・カエスーラ（symbols.js の musicxml の名前を使う）（ブレス・カエスーラはステップ11-1c）
   const articulations = note.articulations ?? [];
-  if (articulations.length > 0) {
+  if (articulations.length > 0 || note.breath) {
     inner.push("          <articulations>");
     articulations.forEach((name) => {
       inner.push(`            <${ARTICULATIONS[name].musicxml}/>`);
     });
+    if (note.breath) inner.push(`            <${BREATHS[note.breath].musicxml}/>`);
     inner.push("          </articulations>");
   }
 

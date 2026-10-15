@@ -38,7 +38,7 @@
 
 import { unzipSync } from "fflate";
 import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
@@ -86,6 +86,7 @@ function reverseTable(table) {
 const XML_TO_BOWING = reverseTable(BOWINGS);
 const XML_TO_ARTICULATION = reverseTable(ARTICULATIONS);
 const XML_TO_STRING_MARK = reverseTable(STRING_MARKS); // ステップ11-1b
+const XML_TO_BREATH = reverseTable(BREATHS); // ステップ11-1c
 const XML_TO_DYNAMIC = reverseTable(DYNAMICS);
 
 // ----------------------------------------------------------
@@ -470,7 +471,7 @@ function readNotations(noteElement, note, state, counter) {
       }
     });
 
-    // スタッカート・テヌート・アクセント
+    // スタッカート・テヌート・アクセントなどと、ブレス・カエスーラ（ブレス・カエスーラはステップ11-1c）
     childElements(notations, "articulations").forEach((group) => {
       for (const child of Array.from(group.childNodes)) {
         if (child.nodeType !== 1) continue;
@@ -478,6 +479,9 @@ function readNotations(noteElement, note, state, counter) {
         if (name) {
           note.articulations = note.articulations ?? [];
           if (!note.articulations.includes(name)) note.articulations.push(name);
+        } else if (XML_TO_BREATH[child.nodeName]) {
+          // ブレス・カエスーラは1つだけ（両方あれば、あとのほう）
+          note.breath = XML_TO_BREATH[child.nodeName];
         } else {
           report(counter, unsupportedLabel(child.nodeName));
         }

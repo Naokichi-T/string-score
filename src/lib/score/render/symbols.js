@@ -4,7 +4,7 @@
 // （記号の一覧表は ../symbols.js にある）
 // ==========================================================
 
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
 
 // フェルマータを持ち上げる量（ピクセル。マイナスが上）
 const FERMATA_LIFT = -6;
@@ -82,6 +82,37 @@ export function addSymbols(VF, staveNote, note) {
     fermata.setYShift(FERMATA_LIFT);
     staveNote.addModifier(fermata, 0);
   }
+}
+
+// ----------------------------------------------------------
+// 関数：drawBreath
+// ブレス（'）・カエスーラ（//）を、音符の右上（次の音符との間）に描く（ステップ11-1c）
+//   VF            … VexFlow の部品一式
+//   context       … 描く先
+//   staveNote     … 記号を付ける VexFlow の音符（位置が決まったあとのもの）
+//   nextStaveNote … 同じ小節の次の音符（小節の最後の音符なら null）
+//   stave         … その音符の五線
+//   breath        … 'breath' か 'caesura'
+// 横の位置：この音符の玉の右端と、次の音符（なければ小節の終わり）の、まん中
+// 縦の位置：五線の一番上の線にかかる高さ
+// ----------------------------------------------------------
+export function drawBreath(VF, context, staveNote, nextStaveNote, stave, breath) {
+  const symbol = BREATHS[breath];
+  if (!symbol) return; // 表にない名前は無視する
+
+  // 横の位置：まん中に記号の左端を置くと右に寄って見えるので、記号の幅の半分くらい（4px）左にずらす
+  const left = staveNote.getNoteHeadEndX();
+  const right = nextStaveNote ? nextStaveNote.getAbsoluteX() : stave.getNoteEndX();
+  const x = (left + right) / 2 - 4;
+
+  // 縦の位置（文字の基準線）：ブレスは上の線のすぐ上、カエスーラは上の線をまたぐように少し下げる
+  const topLineY = stave.getYForLine(0);
+  const y = breath === "caesura" ? topLineY + 6 : topLineY - 4;
+
+  context.save();
+  context.setFont("Bravura", 24); // 楽譜用フォントで記号の形を描く
+  context.fillText(symbol.icon, x, y);
+  context.restore();
 }
 
 // ----------------------------------------------------------

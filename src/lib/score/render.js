@@ -15,7 +15,7 @@
 
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
-import { drawDynamic } from "./render/symbols.js";
+import { drawDynamic, drawBreath } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
@@ -331,12 +331,13 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
-      // 強弱を描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）
+      // 強弱とブレス・カエスーラを描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）（ブレス・カエスーラはステップ11-1c）
       score.parts.forEach((part, p) => {
         const tickables = voices[p].getTickables();
         part.measures[i].notes.forEach((note, j) => {
-          if (note.rest || !note.dynamic) return;
-          drawDynamic(VF, context, tickables[j], staves[p], note.dynamic);
+          if (note.rest) return;
+          if (note.dynamic) drawDynamic(VF, context, tickables[j], staves[p], note.dynamic);
+          if (note.breath) drawBreath(VF, context, tickables[j], tickables[j + 1] ?? null, staves[p], note.breath);
         });
       });
 

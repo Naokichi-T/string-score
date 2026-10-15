@@ -57,6 +57,10 @@ const GATE_STACCATO = 0.5; // スタッカート：半分で切る
 const GATE_STACCATISSIMO = 0.25; // スタッカーティシモ：4分の1で切る（ステップ11-1a）
 const GATE_TENUTO = 1.0; // テヌート：いっぱいに鳴らす
 const GATE_SLUR = 1.0; // スラーの中：切れ目なしでつなげる
+const GATE_BREATH = 0.7; // ブレス・カエスーラの付いた音：7割で切って、弓を上げる間を作る（ステップ11-1c）
+
+// カエスーラであける間（ティック）：4分音符1つ分（ステップ11-1c）
+const CAESURA_PAUSE = TICKS_PER_16TH * 4;
 
 // アクセントで強くする量（0〜127 の強さに足す）
 const ACCENT_BOOST = 20;
@@ -332,7 +336,9 @@ export function buildEvents(score, startMeasure, partIndex) {
 
         // 音を出す長さ（ティック）：楽譜の長さ × 割合
         // ピチカートは、はじいた音が自然に消えていくので、長さの記号（スタッカート・スラーなど）は効かせない
-        const gate = plucked ? GATE_NORMAL : noteGate(note, legato);
+        let gate = plucked ? GATE_NORMAL : noteGate(note, legato);
+        // ブレス・カエスーラの付いた音は、スタッカートなどでもっと短くなっていなければ 7割で切る（ピチカートは除く）（ステップ11-1c）
+        if (note.breath && !plucked) gate = Math.min(gate, GATE_BREATH);
         const soundLength = length * gate;
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
         const connected = gate >= 1;
@@ -379,6 +385,12 @@ export function buildEvents(score, startMeasure, partIndex) {
         // フェルマータ：この音符が終わる所で止まり、この音符の長さぶん（2倍になるように）のばす
         if (note.fermata) {
           fermatas.push({ at: tick + length, extra: length * (FERMATA_RATE - 1) });
+        }
+
+        // カエスーラ：この音符が終わる所で、4分音符1つ分の間をあける（ステップ11-1c）
+        // フェルマータと同じ仕組みで時間をずらす。この音ののばす印（fermataEnd）は付けないので、音はのびずに無音の間になる
+        if (note.breath === "caesura") {
+          fermatas.push({ at: tick + length, extra: CAESURA_PAUSE });
         }
 
         // この音にタイが付いていなければ、つながりはここで終わり
