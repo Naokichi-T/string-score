@@ -15,8 +15,14 @@
 //   → 長さ × 4 ÷ divisions で「16分音符いくつ分か」に直して、長さの名前を表から探す
 //   → そのあと TICKS_PER_16TH を掛けて、このアプリのティックにする（ステップ10-1）
 //
+// 【連符の読み方】（ステップ10-6）
+//   <time-modification> のある音は連符の音。長さは <type>（音符の形）と連符の数から決める
+//   （ファイルの <duration> は、割り切れずに丸めてあることがあるので使わない）
+//   連符の数（2〜12）・付点なし・1つの連符の中が全部同じ長さ、のときだけ読める
+//   それ以外の連符（付点の連符・長さがまちまちの連符など）がある小節は、休符にする
+//
 // 【このアプリで扱えないもの】（ステップ8-4b）
-//   読めない長さの音（連符・32分音符など）がある小節 … 小節ごと休符にする
+//   読めない長さの音（32分音符・読めない連符など）がある小節 … 小節ごと休符にする
 //   重音 … 一番上の音だけ残す（ほかの音に付いていた記号は、残した音にまとめる）
 //   2つ目の声部・装飾音 … 使わない
 //   アウフタクト（1小節目が拍子より短い）… 1小節目の前を休符で埋める
@@ -31,7 +37,7 @@
 // ==========================================================
 
 import { unzipSync } from "fflate";
-import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH } from "./model.js";
+import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
 import { BOWINGS, ARTICULATIONS, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
@@ -368,13 +374,34 @@ function readNote(noteElement, divisions) {
   // 長さ：MusicXML の長さ → 16分音符いくつ分か → ティック（ステップ10-1）
   const rawDuration = Number(childText(noteElement, "duration"));
   const sixteenths = (rawDuration * 4) / divisions; // 16分音符いくつ分か
-  const ticks = sixteenths * TICKS_PER_16TH; // このアプリのティック
-  const shape = TICKS_TO_DURATION[sixteenths]; // 整数でない・表にない長さは undefined
+  let ticks = sixteenths * TICKS_PER_16TH; // このアプリのティック
+  let shape = TICKS_TO_DURATION[sixteenths]; // 整数でない・表にない長さは undefined
+
+  // 連符の音（<time-modification> がある）（ステップ10-6）
+  // 長さは、音符の形（<type>）と「normal 個分の長さに actual 個」から決める
+  let tuplet = null;
+  const modification = childElement(noteElement, "time-modification");
+  if (modification) {
+    const actual = Number(childText(modification, "actual-notes"));
+    const normal = Number(childText(modification, "normal-notes"));
+    const type = childText(noteElement, "type"); // 音符の形（"eighth" など）
+    const dotted = childElements(noteElement, "dot").length > 0;
+    // このアプリで使える連符か（2〜12連符・使える音符の形・付点なし）
+    const usable = actual >= 2 && actual <= 12 && normal >= 1 && DURATION_ORDER.includes(type) && !dotted;
+    if (!usable) return { note: null, ticks: ticks };
+    tuplet = { actual: actual, normal: normal };
+    shape = { duration: type, dots: 0 };
+    ticks = (durationToTicks(type, 0) * normal) / actual;
+    if (!Number.isInteger(ticks)) return { note: null, ticks: ticks }; // 念のため（整数にならない連符は使えない）
+  }
+
   if (!shape) return { note: null, ticks: ticks };
 
-  // 休符
+  // 休符（連符の中なら、連符の印も付ける）
   if (childElement(noteElement, "rest")) {
-    return { note: { rest: true, duration: shape.duration, dots: shape.dots }, ticks: ticks };
+    const rest = { rest: true, duration: shape.duration, dots: shape.dots };
+    if (tuplet) rest.tuplet = tuplet;
+    return { note: rest, ticks: ticks };
   }
 
   // 音符：高さ
@@ -388,6 +415,7 @@ function readNote(noteElement, divisions) {
   const tie = childElements(noteElement, "tie").some((t) => t.getAttribute("type") === "start");
 
   const note = { pitch: { step: step, alter: alter, octave: octave }, duration: shape.duration, dots: shape.dots, tie: tie };
+  if (tuplet) note.tuplet = tuplet; // 連符の印（ステップ10-6）
   return { note: note, ticks: ticks };
 }
 
@@ -411,10 +439,11 @@ function pitchNumber(pitch) {
 // ----------------------------------------------------------
 function readNotations(noteElement, note, state, counter) {
   childElements(noteElement, "notations").forEach((notations) => {
-    // 休符：記号は付けない（タイの表示・スラー以外を数える）
+    // 休符：記号は付けない（タイの表示・スラー・連符の印以外を数える）
+    // （連符が休符から始まる・休符で終わるときは、休符に連符の印が付く）（ステップ10-6）
     if (note.rest) {
       for (const child of Array.from(notations.childNodes)) {
-        if (child.nodeType === 1 && child.nodeName !== "tied" && child.nodeName !== "slur") report(counter, "休符に付いた記号");
+        if (child.nodeType === 1 && child.nodeName !== "tied" && child.nodeName !== "slur" && child.nodeName !== "tuplet") report(counter, "休符に付いた記号");
       }
       return;
     }
@@ -704,6 +733,12 @@ function readPart(partElement, counter, skipped) {
         measure.ticks = measure.ticks + ticks;
       }
       // <backup>（声部をさかのぼる印）は見ない（2つ目の声部は使わないため）
+    }
+
+    // 連符がそろっているか調べる（ステップ10-6）
+    // 1つの連符の中で長さがまちまち・数が足りない連符は、このアプリでは扱えないので、小節ごと休符にする
+    if (measure.readable && tupletGroups(measure.notes).some((g) => g.end - g.start + 1 !== g.actual)) {
+      measure.readable = false;
     }
 
     if (!measure.readable) problems.push(index + 1);
