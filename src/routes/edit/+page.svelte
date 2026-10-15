@@ -66,7 +66,8 @@
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, isLoaded, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
-  import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
+  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer } from "#lib/score/library.js";
+  import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
   // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
@@ -137,6 +138,23 @@
 
   // 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
   let playTarget = $state("all");
+
+  // パートごとの音量の設定（くわしくは score/mixer.js）（ステップ12-3）
+  // 楽譜を開いたときに、その楽譜の設定を読み込む
+  let mixer = $state({});
+
+  // ----------------------------------------------------------
+  // 関数：handleMixer
+  // 「再生」タブで音量・ミュート・ソロが変わったとき（ステップ12-3）
+  //   partId  … パートの名札（id）
+  //   changes … 変えた項目（例：{ volume: 80 }、{ mute: true }）
+  // そのパートの設定に変えた項目を重ねて、すぐに保存する
+  // （楽譜の中身ではないので、元に戻すの履歴には残さない）
+  // ----------------------------------------------------------
+  function handleMixer(partId, changes) {
+    mixer = { ...mixer, [partId]: { ...mixerOf(mixer, partId), ...changes } };
+    saveMixer(scoreId, mixer);
+  }
 
   // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
   let soundType = $state("instrument");
@@ -285,6 +303,7 @@
       return;
     }
     scoreId = id;
+    mixer = loadMixer(id); // この楽譜の音量の設定（ステップ12-3）
     // パートに id（名札）がなければ付ける（ステップ12-3 より前に作った楽譜）（ステップ12-3）
     const withIds = ensurePartIds(loaded);
     score = withIds;
@@ -1349,6 +1368,8 @@
       onaddpart={handleAddPart}
       onmovepart={handleMovePart}
       ondeletepart={handleDeletePart}
+      {mixer}
+      onmixer={handleMixer}
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}

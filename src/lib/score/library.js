@@ -9,6 +9,7 @@
 //       （parts は短いパート名の配列。例：["Vln. I", "Vln. II", "Vla.", "Vc."]）（ステップ7-2）
 //       （createdAt・updatedAt は日時を数字にしたもの。Date.now() の値）
 //   "string-score:score:（id）"   … 楽譜データそのもの（1曲に1つ）
+//   "string-score:mixer:（id）"   … 楽譜ごとの、パートの音量の設定（ステップ12-3。くわしくは mixer.js）
 //   "string-score:settings"      … アプリ全体の設定（楽譜とは別）（ステップ7-4）
 //       { soundType: "instrument" }（音の種類。"instrument"：楽器の音、"synth"：電子音）
 //
@@ -152,12 +153,60 @@ export function createScore(score) {
 export function deleteScore(id) {
   try {
     localStorage.removeItem(scoreKey(id));
+    localStorage.removeItem(mixerKey(id)); // 音量の設定もいっしょに消す（ステップ12-3）
     const list = readList().filter((item) => item.id !== id);
     writeList(list);
     return true;
   } catch (error) {
     console.error("楽譜を削除できませんでした", error);
     return false;
+  }
+}
+
+// ==========================================================
+// ここから下は、楽譜ごとの音量の設定（ステップ12-3）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：mixerKey
+// 音量の設定を入れる場所の名前を作る
+// 例："abc123" → "string-score:mixer:abc123"
+// ----------------------------------------------------------
+function mixerKey(id) {
+  return "string-score:mixer:" + id;
+}
+
+// ----------------------------------------------------------
+// 関数：loadMixer
+// 楽譜の音量の設定を読み込む
+//   id … 楽譜の id
+// 戻り値：音量の設定（まだ保存していない・読めないときは空の {}）
+// ----------------------------------------------------------
+export function loadMixer(id) {
+  try {
+    const text = localStorage.getItem(mixerKey(id));
+    if (!text) return {};
+    const mixer = JSON.parse(text);
+    // ふつうのオブジェクトでなければ（壊れていたら）空にする
+    return mixer && typeof mixer === "object" ? mixer : {};
+  } catch (error) {
+    console.error("音量の設定を読み込めませんでした", error);
+    return {};
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：saveMixer
+// 楽譜の音量の設定を保存する（楽譜の更新日時は変えない）
+//   id    … 楽譜の id
+//   mixer … 音量の設定
+// ----------------------------------------------------------
+export function saveMixer(id, mixer) {
+  try {
+    localStorage.setItem(mixerKey(id), JSON.stringify(mixer));
+  } catch (error) {
+    // 保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
+    console.error("音量の設定を保存できませんでした", error);
   }
 }
 

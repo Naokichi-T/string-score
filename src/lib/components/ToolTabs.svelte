@@ -15,6 +15,7 @@
   // （ステップ5-7：「音符」タブにコピー・切り取り・貼り付けのボタンを追加）
   // （ステップ10-2：「音符」タブに［3連符］のボタンを追加）
   // （ステップ11-2：「奏法」タブを追加。中身は TechniqueTools）
+  // （ステップ12-3：「再生」タブを追加。中身は PlaybackTools）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -24,6 +25,7 @@
   import ScoreSettings from "./ScoreSettings.svelte";
   import MeasureTools from "./MeasureTools.svelte";
   import PartTools from "./PartTools.svelte";
+  import PlaybackTools from "./PlaybackTools.svelte";
 
   // 親から受け取るもの
   //   duration     … 今の長さ（'quarter' など）
@@ -68,7 +70,11 @@
   //   ontuplet     … 連符のボタンが押されたときに呼ぶ関数（連符の数字を渡す）（ステップ10-2）
   //   inTuplet     … 選んでいる音が連符の中か（true なら［連符を解除］のボタンを出す）（ステップ10-3）
   //   onremovetuplet … ［連符を解除］が押されたときに呼ぶ関数（ステップ10-3）
+  //   mixer        … パートごとの音量の設定（「再生」タブで使う）（ステップ12-3）
+  //   onmixer      … 音量の設定が変わったときに呼ぶ関数（「再生」タブで使う）（ステップ12-3）
   let {
+    mixer = {},
+    onmixer = () => {},
     canTuplet = false,
     ontuplet = () => {},
     inTuplet = false,
@@ -120,6 +126,7 @@
     { id: "technique", label: "奏法" }, // ステップ11-2
     { id: "measure", label: "小節" },
     { id: "part", label: "パート" },
+    { id: "playback", label: "再生" }, // ステップ12-3
     { id: "settings", label: "楽譜の設定" },
   ];
 
@@ -278,6 +285,8 @@
       <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} />
+    {:else if activeTab === "playback"}
+      <PlaybackTools parts={score.parts} {mixer} {onmixer} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} {focusTitle} />
     {/if}
