@@ -9,24 +9,25 @@
 //   ・貼り付けた所の後ろ … そのまま（音の途中で切れたら、残りは休符）
 // にしてから、小節ごとに分け直す。
 // 小節線をまたぐ音は、小節線で分けてタイでつなぐ（休符は分けるだけ）
-// （ティック = 16分音符いくつ分か）
+// （ティック = 長さの単位。16分音符1つ = TICKS_PER_16TH ティック。model.js を参照）
 // ==========================================================
 
-import { noteTicks, timeAt, measureTicks, restsForSpan } from "./model.js";
+import { noteTicks, durationToTicks, timeAt, measureTicks, restsForSpan } from "./model.js";
 import { cloneScore, appendMeasure, cleanSpanners } from "./edit.js";
 import { positionsInRange } from "./selection.js";
 
 // 1つの音符で書ける長さ（長い順）。分けた長さを、これを組み合わせて表す
+// ticks は、長さの名前と付点の数から計算する（ステップ10-1：ティックの細かさを変えたため）
 const NOTE_VALUES = [
-  { ticks: 16, duration: "whole", dots: 0 },
-  { ticks: 12, duration: "half", dots: 1 },
-  { ticks: 8, duration: "half", dots: 0 },
-  { ticks: 6, duration: "quarter", dots: 1 },
-  { ticks: 4, duration: "quarter", dots: 0 },
-  { ticks: 3, duration: "eighth", dots: 1 },
-  { ticks: 2, duration: "eighth", dots: 0 },
-  { ticks: 1, duration: "16th", dots: 0 },
-];
+  { duration: "whole", dots: 0 }, // 全音符
+  { duration: "half", dots: 1 }, // 付点2分音符
+  { duration: "half", dots: 0 }, // 2分音符
+  { duration: "quarter", dots: 1 }, // 付点4分音符
+  { duration: "quarter", dots: 0 }, // 4分音符
+  { duration: "eighth", dots: 1 }, // 付点8分音符
+  { duration: "eighth", dots: 0 }, // 8分音符
+  { duration: "16th", dots: 0 }, // 16分音符
+].map((value) => ({ ...value, ticks: durationToTicks(value.duration, value.dots) }));
 
 // ----------------------------------------------------------
 // 関数：copyNotes
@@ -60,7 +61,7 @@ export function copyNotes(score, range, selection) {
 // ----------------------------------------------------------
 // 関数：measureStartTicks
 // 各小節が、曲の頭から何ティック目に始まるかの配列を返す（最後に、曲全体の長さも付ける）
-// 例：4分の4拍子が3小節 → [0, 16, 32, 48]
+// 例：4分の4拍子が3小節 → [0, 1小節分, 2小節分, 3小節分]（ティック）
 // ----------------------------------------------------------
 function measureStartTicks(score) {
   const starts = [0];
@@ -73,7 +74,7 @@ function measureStartTicks(score) {
 // ----------------------------------------------------------
 // 関数：splitTicks
 // 長さを、1つの音符で書ける長さの組み合わせに分ける（長いものから順に使う）
-// 例：5 → [4, 1]（4分音符＋16分音符）、7 → [6, 1]（付点4分音符＋16分音符）
+// 例：16分音符5個分 → 4分音符＋16分音符、16分音符7個分 → 付点4分音符＋16分音符
 // 戻り値：NOTE_VALUES の中身の配列
 // ----------------------------------------------------------
 function splitTicks(length) {

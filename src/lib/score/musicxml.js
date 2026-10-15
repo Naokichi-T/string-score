@@ -21,11 +21,11 @@
 //
 // 【長さの書き方】
 //   MusicXML では「4分音符をいくつに分けるか（divisions）」を先に決めて、
-//   音の長さをその数で書く。divisions を 4 にすると 16分音符＝1 になり、
-//   このアプリのティック（16分音符＝1）をそのまま使える
+//   音の長さをその数で書く。divisions を 4 にすると 16分音符＝1 になる
+//   このアプリのティックは 16分音符＝TICKS_PER_16TH なので、その数で割って書く（ステップ10-1）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -215,8 +215,8 @@ function noteXml(note, accidental, tieStop) {
     lines.push("        </pitch>");
   }
 
-  // 長さ（16分音符＝1 のティックをそのまま書ける。divisions を 4 にしているため）
-  lines.push(`        <duration>${noteTicks(note)}</duration>`);
+  // 長さ（divisions を 4 にしているので、16分音符＝1 になるように TICKS_PER_16TH で割る）（ステップ10-1）
+  lines.push(`        <duration>${noteTicks(note) / TICKS_PER_16TH}</duration>`);
 
   // タイ（再生用の <tie>）。前からの「ここまで」を先に、次への「ここから」をあとに書く
   const tieStart = !note.rest && note.tie;

@@ -12,7 +12,8 @@
 // 【長さの直し方】
 //   MusicXML の長さは「4分音符を divisions 個に分けたうちのいくつか」で書いてある
 //   divisions はファイルによって違う（このアプリは 4、MuseScore は 480 など）
-//   → 長さ × 4 ÷ divisions で、このアプリのティック（16分音符＝1）に直す
+//   → 長さ × 4 ÷ divisions で「16分音符いくつ分か」に直して、長さの名前を表から探す
+//   → そのあと TICKS_PER_16TH を掛けて、このアプリのティックにする（ステップ10-1）
 //
 // 【このアプリで扱えないもの】（ステップ8-4b）
 //   読めない長さの音（連符・32分音符など）がある小節 … 小節ごと休符にする
@@ -30,12 +31,12 @@
 // ==========================================================
 
 import { unzipSync } from "fflate";
-import { INSTRUMENTS, measureTicks, restsForSpan, renameParts } from "./model.js";
+import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH } from "./model.js";
 import { BOWINGS, ARTICULATIONS, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
-// ティック（16分音符＝1）→ 音の長さの名前と付点の数の表
+// 16分音符いくつ分か → 音の長さの名前と付点の数の表
 // このアプリで使える長さは、この8つだけ
 // ----------------------------------------------------------
 const TICKS_TO_DURATION = {
@@ -364,10 +365,11 @@ function readTempo(firstMeasure) {
 // 戻り値：{ note: データ, ticks: 長さ }（このアプリで扱えない長さなら note は null）
 // ----------------------------------------------------------
 function readNote(noteElement, divisions) {
-  // 長さ：MusicXML の長さ → ティック（16分音符＝1）
+  // 長さ：MusicXML の長さ → 16分音符いくつ分か → ティック（ステップ10-1）
   const rawDuration = Number(childText(noteElement, "duration"));
-  const ticks = (rawDuration * 4) / divisions;
-  const shape = TICKS_TO_DURATION[ticks]; // 整数でない・表にない長さは undefined
+  const sixteenths = (rawDuration * 4) / divisions; // 16分音符いくつ分か
+  const ticks = sixteenths * TICKS_PER_16TH; // このアプリのティック
+  const shape = TICKS_TO_DURATION[sixteenths]; // 整数でない・表にない長さは undefined
   if (!shape) return { note: null, ticks: ticks };
 
   // 休符
@@ -642,8 +644,9 @@ function readPart(partElement, counter, skipped) {
       if (element.nodeName === "forward") {
         const voice = childText(element, "voice");
         if (voice !== null && voice === mainVoice) {
-          const ticks = (Number(childText(element, "duration")) * 4) / divisions;
-          const shape = TICKS_TO_DURATION[ticks];
+          const sixteenths = (Number(childText(element, "duration")) * 4) / divisions; // 16分音符いくつ分か
+          const ticks = sixteenths * TICKS_PER_16TH; // このアプリのティック（ステップ10-1）
+          const shape = TICKS_TO_DURATION[sixteenths];
           if (shape) measure.notes.push({ rest: true, duration: shape.duration, dots: shape.dots });
           else measure.readable = false;
           measure.ticks = measure.ticks + ticks;
