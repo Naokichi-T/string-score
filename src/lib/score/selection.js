@@ -92,7 +92,9 @@ export function describeSelection(score, selection) {
 
   const partName = score.parts[selection.part].name;
   const where = `${partName}　${selection.measure + 1}小節目　${selection.note + 1}つ目`;
-  const length = durationToJapanese(note.duration, note.dots ?? 0, note.rest);
+  // 連符の中の音なら「3連符の」を前に付ける（ステップ10-2）
+  const tupletText = note.tuplet ? `${note.tuplet.actual}連符の` : "";
+  const length = tupletText + durationToJapanese(note.duration, note.dots ?? 0, note.rest);
 
   if (note.rest) {
     return `${where}　${length}`;

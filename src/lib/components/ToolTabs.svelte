@@ -13,6 +13,7 @@
   // （ステップ5-2：「小節」タブの中身を MeasureTools として追加）
   // （ステップ5-6：「パート」タブを追加。中身は PartTools）
   // （ステップ5-7：「音符」タブにコピー・切り取り・貼り付けのボタンを追加）
+  // （ステップ10-2：「音符」タブに［3連符］のボタンを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -61,7 +62,11 @@
   //   canPaste     … 貼り付けができるか（コピーした音があって、場所を選んでいるか）
   //   onclipboard  … コピー・切り取り・貼り付けのボタンが押されたときに呼ぶ関数（"copy"・"cut"・"paste" を渡す）
   //   isNew        … 新しく作った楽譜か（true なら「楽譜の設定」タブで始めて、タイトルの入力欄にカーソルを入れる）（ステップ7-3）
+  //   canTuplet    … 連符のボタンを押せるか（音か休符を選んでいるか）（ステップ10-2）
+  //   ontuplet     … 連符のボタンが押されたときに呼ぶ関数（連符の数字を渡す）（ステップ10-2）
   let {
+    canTuplet = false,
+    ontuplet = () => {},
     isNew = false,
     score,
     onsettings = () => {},
@@ -198,6 +203,11 @@
         <button class="tool" disabled={!canRest} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
           <span class="icon flat">{REST_ICON}</span>
         </button>
+      </div>
+
+      <!-- 連符（音か休符を選んでいるときだけ押せる）（ステップ10-2） -->
+      <div class="group">
+        <button class="tool text wide" disabled={!canTuplet} onclick={() => ontuplet(3)} title="選んでいる音の長さで3連符を作る（例：8分音符を選んで押すと、8分音符2つ分に3つ入る）"> 3連符 </button>
       </div>
 
       <!-- 臨時記号（音符を選んでいるときだけ押せる） -->

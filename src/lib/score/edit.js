@@ -10,7 +10,7 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups } from "./model.js";
 import { TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -49,6 +49,9 @@ export function canFit(score, selection, duration, dots) {
   if (duration === "16th" && dots > 0) return false;
 
   const notes = score.parts[selection.part].measures[selection.measure].notes;
+  // 連符の中の音は、長さを変えずに高さだけ入れ替えるので、いつでも置ける（ステップ10-2）
+  if (notes[selection.note].tuplet) return true;
+
   const total = measureTicks(timeAt(score, selection.measure)); // 1小節の長さ
   const start = noteStart(notes, selection.note); // 選んでいる音の始まり
   return start + durationToTicks(duration, dots) <= total;
@@ -59,37 +62,68 @@ export function canFit(score, selection, duration, dots) {
 // 選んでいる場所に新しい音（休符）を置く（上書き）
 //   ・新しい音が前より短い → 余った分を休符で埋める
 //   ・新しい音が前より長い → 後ろの音を上書きする（上書きしきれなかった分は休符になる）
+//   ・選んでいる音が連符の中 → 長さと連符はそのままで、高さ（音符か休符か）だけ入れ替える（ステップ10-2）
 // 置ける長さかどうかは、先に canFit で調べておくこと
 // 戻り値：新しい楽譜データ
 // ----------------------------------------------------------
 export function replaceAt(score, selection, newNote) {
+  const old = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+
+  // 連符の中の音：長さ・付点・連符は前の音のまま（ステップ10-2）
+  if (old.tuplet) {
+    const newScore = cloneScore(score);
+    const notes = newScore.parts[selection.part].measures[selection.measure].notes;
+    notes[selection.note] = { ...newNote, duration: old.duration, dots: 0, tuplet: { ...old.tuplet } };
+    return newScore;
+  }
+
+  return replaceWith(score, selection, [newNote]);
+}
+
+// ----------------------------------------------------------
+// 関数：replaceWith
+// 選んでいる音の頭から、いくつかの音（休符）を並べて置く（上書き）（ステップ10-2：replaceAt から分けた）
+//   newNotes … 置く音の配列（連符を作るときは、連符の音を全部まとめて渡す）
+//   ・置いた音の終わりから、残す音の始まりまでを休符で埋める
+//   ・置いた音が連符の途中までかかったときは、その連符を丸ごと休符にする
+//     （連符の一部だけが残ると、連符の数がそろわなくなるため）
+// 置ける長さかどうかは、先に調べておくこと
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function replaceWith(score, selection, newNotes) {
   const newScore = cloneScore(score);
   const measure = newScore.parts[selection.part].measures[selection.measure];
   const notes = measure.notes;
   const total = measureTicks(timeAt(newScore, selection.measure));
 
-  const start = noteStart(notes, selection.note); // 新しい音の始まり
-  const end = start + noteTicks(newNote); // 新しい音の終わり
+  const start = noteStart(notes, selection.note); // 置く音の始まり
+  const length = newNotes.reduce((sum, note) => sum + noteTicks(note), 0); // 置く音の長さの合計
+  const end = start + length; // 置く音の終わり
 
   // 新しい音より前の音は、そのまま残す
   const before = notes.slice(0, selection.note);
 
-  // 新しい音の終わりより後ろで始まる音は、そのまま残す
+  // 置く音の終わりより後ろで始まる音は、そのまま残す
+  // ただし、置く音にかかった連符の残りの音は残さない
+  const groups = tupletGroups(notes);
   const after = [];
   let firstAfterStart = total; // 残す音のうち、一番前の音の始まり（なければ小節の終わり）
   let position = 0;
-  notes.forEach((note) => {
-    if (position >= end) {
+  notes.forEach((note, j) => {
+    // この音が入っている連符の最初の音が、置く音の終わりより前に始まっているか
+    const group = groups.find((g) => g.start <= j && j <= g.end);
+    const cutTuplet = group && noteStart(notes, group.start) < end;
+    if (position >= end && !cutTuplet) {
       if (after.length === 0) firstAfterStart = position;
       after.push(note);
     }
     position = position + noteTicks(note);
   });
 
-  // 新しい音の終わりから、残す音の始まりまでのすき間を休符で埋める
+  // 置く音の終わりから、残す音の始まりまでのすき間を休符で埋める
   const fill = restsForSpan(end, firstAfterStart - end, timeAt(newScore, selection.measure));
 
-  measure.notes = [...before, newNote, ...fill, ...after];
+  measure.notes = [...before, ...newNotes, ...fill, ...after];
   return newScore;
 }
 
@@ -410,6 +444,8 @@ export function canInsert(score, selection, duration, dots) {
   if (!selection) return false;
   if (duration === "16th" && dots > 0) return false;
   const notes = score.parts[selection.part].measures[selection.measure].notes;
+  // 連符の中には挿入できない（連符の数がそろわなくなるため）（ステップ10-2）
+  if (notes[selection.note].tuplet) return false;
   const newNote = { rest: true, duration: duration, dots: dots }; // 長さを調べるだけなので休符で代用
   const contents = insertedContents(notes, selection.note, newNote);
   return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;
@@ -423,6 +459,8 @@ export function canResize(score, selection, duration, dots) {
   if (!selection) return false;
   if (duration === "16th" && dots > 0) return false;
   const notes = score.parts[selection.part].measures[selection.measure].notes;
+  // 連符の中の音の長さは変えられない（ステップ10-2）
+  if (notes[selection.note].tuplet) return false;
   const newNote = { ...notes[selection.note], duration: duration, dots: dots };
   const contents = resizedContents(notes, selection.note, newNote);
   return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;

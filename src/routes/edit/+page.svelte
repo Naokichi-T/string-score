@@ -63,6 +63,7 @@
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
+  import { tupletError, makeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
@@ -584,6 +585,25 @@
   // ----------------------------------------------------------
   function handleRest() {
     putNote({ rest: true, duration: duration, dots: dotted ? 1 : 0 });
+  }
+
+  // 連符のボタンを押せるか（音か休符を1つ選んでいるとき）（ステップ10-2）
+  let canTuplet = $derived(selection !== null);
+
+  // ----------------------------------------------------------
+  // 関数：handleTuplet
+  // 連符のボタンが押されたとき：選んでいる音を連符の1つ目にする（ステップ10-2）
+  //   actual … 連符の数字（3連符なら 3）
+  // 作ったあとも、連符の1つ目を選んだままにする（続けて鍵盤で入れられるように）
+  // ----------------------------------------------------------
+  function handleTuplet(actual) {
+    const error = tupletError(score, selection, actual);
+    if (error) {
+      message = error;
+      return;
+    }
+    message = "";
+    commit(makeTuplet(score, selection, actual));
   }
 
   // ----------------------------------------------------------
@@ -1229,6 +1249,8 @@
       ondot={handleDot}
       onrest={handleRest}
       {canRest}
+      {canTuplet}
+      ontuplet={handleTuplet}
       {noteSelected}
       onaccidental={handleAccidental}
       onstep={handleTranspose}

@@ -22,7 +22,10 @@
 //           clef: 'treble',          // 音部記号が変わる小節だけ書く
 //           notes: [                 // 音符・休符の並び
 //             { pitch: { step: 'C', alter: 0, octave: 4 }, duration: 'quarter', dots: 0, tie: false },
-//             { rest: true, duration: 'quarter', dots: 0 }
+//             { rest: true, duration: 'quarter', dots: 0 },
+//             // 連符の中の音には tuplet を付ける（ステップ10-2）
+//             // 例：8分音符の3連符 = 「8分音符2つ分の長さに、8分音符を3つ入れる」
+//             { pitch: { step: 'D', alter: 0, octave: 4 }, duration: 'eighth', dots: 0, tie: false, tuplet: { actual: 3, normal: 2 } }
 //           ]
 //         }
 //       ]
@@ -150,9 +153,70 @@ export function durationToTicks(duration, dots = 0) {
 // ----------------------------------------------------------
 // 関数：noteTicks
 // 音符・休符1つ分のデータの長さを、ティックにする
+// 連符の中の音は「normal 個分の長さに actual 個入れる」ので、normal ÷ actual 倍にする（ステップ10-2）
+//   例：8分音符の3連符の1つ分 → 8分音符 × 2 ÷ 3
 // ----------------------------------------------------------
 export function noteTicks(note) {
-  return durationToTicks(note.duration, note.dots ?? 0);
+  const ticks = durationToTicks(note.duration, note.dots ?? 0);
+  if (note.tuplet) return (ticks * note.tuplet.normal) / note.tuplet.actual;
+  return ticks;
+}
+
+// ==========================================================
+// ここから下は、連符の関数（ステップ10-2）
+// 【連符のデータの決まり】
+//   ・連符の中の音（休符も）には、全部に tuplet: { actual, normal } を付ける
+//       actual … 連符の数字（3連符なら 3）
+//       normal … 何個分の長さに入れるか（3連符なら 2）
+//   ・1つの連符の中の音は、全部同じ長さ（付点なし）
+//   ・連符の音は小節の中で順に並び、actual 個ずつで1つの連符になる
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：tupletNormal
+// 連符の数字から「何個分の長さに入れるか」を決める（ふつうの決まり）
+//   2連符 → 3個分（8分の6拍子などで使う）
+//   4連符 → 3個分（8分の6拍子などで使う）
+//   それ以外 → 連符の数字より小さい、一番大きい 2・4・8 のどれか
+//     例：3連符 → 2、5〜7連符 → 4、9〜12連符 → 8
+// ----------------------------------------------------------
+export function tupletNormal(actual) {
+  if (actual === 2 || actual === 4) return 3;
+  let normal = 2;
+  while (normal * 2 < actual) {
+    normal = normal * 2;
+  }
+  return normal;
+}
+
+// ----------------------------------------------------------
+// 関数：tupletGroups
+// 小節の音の並びから、連符のまとまりを探す
+//   notes … 小節の音の並び
+// 戻り値：[{ start: 最初の音の番号, end: 最後の音の番号, actual, normal, duration: 1つ分の長さの名前 }, ...]
+// tuplet の付いた音が続く所を、actual 個ずつに区切る
+// （数字や長さが変わったら、そこから新しい連符にする）
+// ----------------------------------------------------------
+export function tupletGroups(notes) {
+  const groups = [];
+  let current = null; // 今まとめている連符
+  notes.forEach((note, j) => {
+    // 連符でない音：まとめるのをやめる
+    if (!note.tuplet) {
+      current = null;
+      return;
+    }
+    // 今の連符の続きにできるか（同じ数字・同じ長さで、まだ actual 個そろっていない）
+    const canContinue = current && current.actual === note.tuplet.actual && current.normal === note.tuplet.normal && current.duration === note.duration && j - current.start < current.actual;
+    if (canContinue) {
+      current.end = j;
+    } else {
+      // 新しい連符を始める
+      current = { start: j, end: j, actual: note.tuplet.actual, normal: note.tuplet.normal, duration: note.duration };
+      groups.push(current);
+    }
+  });
+  return groups;
 }
 
 // ----------------------------------------------------------

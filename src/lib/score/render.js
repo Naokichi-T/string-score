@@ -14,7 +14,6 @@
 // ==========================================================
 
 import { computeAccidentals } from "./accidentals.js";
-import { timeToString } from "./render/helpers.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
@@ -23,6 +22,7 @@ import { drawTie } from "./render/ties.js";
 import { drawSpanners } from "./render/spanners.js";
 import { measureExtents, computePositions } from "./render/spacing.js";
 import { isInRange } from "./selection.js";
+import { createTuplets, createBeams, placeTuplets } from "./render/tuplets.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -284,6 +284,7 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       // --- パートごとに音符を作る ---
       const voices = [];
       const beamsList = [];
+      const tupletsList = []; // パートごとの連符の一覧（ステップ10-2）
       score.parts.forEach((part, p) => {
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
@@ -301,16 +302,21 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
           return staveNote;
         });
 
+        // 連符を作る（声部に入れる前に作る。くわしくは render/tuplets.js）（ステップ10-2）
+        const tuplets = createTuplets(VF, measure.notes, notes);
+        tupletsList.push(tuplets);
+
         // 音符を1小節分まとめる「声部（Voice）」を作る
         const voice = new VF.Voice({ numBeats: state.time.beats, beatValue: state.time.beatType });
         voice.addTickables(notes);
         voices.push(voice);
 
-        // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて自動で作る
-        const beams = VF.Beam.generateBeams(notes, {
-          groups: VF.Beam.getDefaultBeamGroups(timeToString(state.time)),
-        });
+        // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて作る（連符の中は切らずにつなぐ）（ステップ10-2）
+        const beams = createBeams(VF, measure.notes, notes, state.time);
         beamsList.push(beams);
+
+        // 連符の数字を置く側と括弧を決める（連桁ができてから決める）（ステップ10-2）
+        placeTuplets(VF, tuplets);
       });
 
       // --- 全パートの音符の横の位置をそろえて並べる ---
@@ -320,9 +326,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - NOTE_END_PADDING;
       formatter.format(voices, noteAreaWidth);
 
-      // 音符と連桁を描く
+      // 音符と連桁と連符の数字を描く
       voices.forEach((voice, p) => voice.draw(context, staves[p]));
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
+      tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
       // 強弱を描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）
       score.parts.forEach((part, p) => {
