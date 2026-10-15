@@ -61,10 +61,23 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：isComposing
+  // 日本語入力の変換中に押されたキーかどうかを調べる
+  // （変換を確定するための Enter を、入力欄の確定と取り違えないようにするため）
+  //   event.isComposing … 変換中なら true
+  //   event.keyCode 229 … 変換中のキーに付く番号（Safari では isComposing が false になることがあるので、こちらも見る）
+  // ----------------------------------------------------------
+  function isComposing(event) {
+    return event.isComposing || event.keyCode === 229;
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleKeydown
   // 入力欄で Enter が押されたら、入力欄から離れて確定する
+  // （日本語入力の変換を確定する Enter は、何もしない）
   // ----------------------------------------------------------
   function handleKeydown(event) {
+    if (isComposing(event)) return;
     if (event.key === "Enter") event.target.blur();
   }
 
@@ -108,6 +121,8 @@
   //   Esc   … 候補の一覧を閉じる
   // ----------------------------------------------------------
   function handleTempoTextKeydown(event) {
+    // 日本語入力の変換中に押されたキーは、何もしない（変換の確定の Enter などを取り違えないため）
+    if (isComposing(event)) return;
     const input = event.target;
     if (event.key === "ArrowDown" && showSuggestions && suggestions.length > 0) {
       activeIndex = (activeIndex + 1) % suggestions.length; // 最後の次は最初に戻る
