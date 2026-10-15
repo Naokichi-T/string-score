@@ -143,28 +143,31 @@ function nextPizz(note, current) {
   return current;
 }
 
-// トリルで行き来する1回分の長さ（ティック）：32分音符（ステップ11-3a）
+// 装飾で行き来する1回分の長さ（ティック）：32分音符（ステップ11-3a）
 const TRILL_STEP = TICKS_PER_16TH / 2;
 
-// 音名の並び（1つ上の音を決めるのに使う）（ステップ11-3a）
+// 音名の並び（1つ上・1つ下の音を決めるのに使う）（ステップ11-3a）
 const STEP_NAMES = ["C", "D", "E", "F", "G", "A", "B"];
 
 // ----------------------------------------------------------
-// 関数：upperNeighbor
-// 音符の「1つ上の音」を返す（トリルで行き来する音）（ステップ11-3a）
+// 関数：neighborPitch
+// 音符の「1つ上の音」か「1つ下の音」を返す（装飾で行き来する音）（ステップ11-3a。1つ下はステップ11-3b）
 // ♯♭は、調号と、同じ小節でその音より前に出てきた同じ高さの音に合わせる
-// （例：ト長調のミ → ファ♯。同じ小節の前にファ♮があれば → ファ♮）
-//   score … 楽譜データ
-//   part  … パートのデータ
-//   i     … 何小節目か（0 から）
-//   j     … 小節の中で何番目の音か（0 から）
+// （例：ト長調のミの1つ上 → ファ♯。同じ小節の前にファ♮があれば → ファ♮）
+//   score     … 楽譜データ
+//   part      … パートのデータ
+//   i         … 何小節目か（0 から）
+//   j         … 小節の中で何番目の音か（0 から）
+//   direction … 1 なら1つ上、-1 なら1つ下
 // 戻り値：音の高さ { step, octave, alter }
 // ----------------------------------------------------------
-function upperNeighbor(score, part, i, j) {
+function neighborPitch(score, part, i, j, direction) {
   const pitch = part.measures[i].notes[j].pitch;
   const index = STEP_NAMES.indexOf(pitch.step);
-  const step = STEP_NAMES[(index + 1) % 7]; // シの1つ上はド
-  const octave = index === 6 ? pitch.octave + 1 : pitch.octave; // シからドに上がるときはオクターブも上がる
+  const step = STEP_NAMES[(index + direction + 7) % 7]; // シの1つ上はド、ドの1つ下はシ
+  let octave = pitch.octave;
+  if (direction === 1 && index === 6) octave = octave + 1; // シからドに上がるときはオクターブも上がる
+  if (direction === -1 && index === 0) octave = octave - 1; // ドからシに下がるときはオクターブも下がる
 
   // まず調号の ♯♭
   let alter = keyAlters(keyAt(score, i))[step];
@@ -176,32 +179,70 @@ function upperNeighbor(score, part, i, j) {
 }
 
 // ----------------------------------------------------------
-// 関数：trillPieces
-// トリルの音を、主の音と1つ上の音を 32分音符ずつ行き来する音に分ける（ステップ11-3a）
-// 最後が主の音になるように、かけらの数が偶数なら上の音から始める
-//   event … 鳴らす音（trillUpper に1つ上の音が入っているもの）
+// 関数：ornamentPitches
+// 装飾の付いた音について、すばやく鳴らす音の並びを決める（ステップ11-3b）
+// （最後に主の音を残りの長さぶん鳴らすので、ここにはその前の音だけを入れる）
+//   event … 鳴らす音（ornament・upper・lower が入っているもの）
+// 戻り値：音の高さの並び
+//   プラルトリラー … 主の音 → 上の音（→ 主の音）
+//   モルデント     … 主の音 → 下の音（→ 主の音）
+//   ターン         … 上の音 → 主の音 → 下の音（→ 主の音）
+// ----------------------------------------------------------
+function ornamentPitches(event) {
+  if (event.ornament === "prall") return [event.pitch, event.upper];
+  if (event.ornament === "mordent") return [event.pitch, event.lower];
+  if (event.ornament === "turn") return [event.upper, event.pitch, event.lower];
+  return [];
+}
+
+// ----------------------------------------------------------
+// 関数：ornamentPieces
+// 装飾の付いた音を、すばやく行き来する短い音（かけら）に分ける（ステップ11-3a。トリル以外はステップ11-3b）
+//   トリル：主の音と1つ上の音を 32分音符ずつ行き来する
+//           最後が主の音になるように、かけらの数が偶数なら上の音から始める
+//   プラルトリラー・モルデント・ターン：始めに 32分音符ずつすばやく鳴らして、残りは主の音をのばす
+//           （音が短くて入りきらないときは、かけらを短くして収める）
+//   event … 鳴らす音（ornament に装飾の名前が入っているもの）
 // 戻り値：分けた音の一覧
 // ----------------------------------------------------------
-function trillPieces(event) {
+function ornamentPieces(event) {
   const total = event.soundTicks; // 音を出す長さ全体（フェルマータでのびたぶんも入っている）
-  const count = Math.max(1, Math.floor(total / TRILL_STEP)); // かけらの数
+
+  // かけらの音の高さと長さの並び { pitch, length } を作る
+  const parts = [];
+  if (event.ornament === "trill") {
+    const count = Math.max(1, Math.floor(total / TRILL_STEP)); // かけらの数
+    for (let k = 0; k < count; k++) {
+      const isLast = k === count - 1;
+      // 最後から数えて偶数番目（最後・最後から3つ目…）が主の音
+      const isMain = (count - 1 - k) % 2 === 0;
+      // 最後のかけらは、残りの長さを全部鳴らす
+      parts.push({ pitch: isMain ? event.pitch : event.upper, length: isLast ? total - k * TRILL_STEP : TRILL_STEP });
+    }
+  } else {
+    const quick = ornamentPitches(event);
+    // 1つ分の長さ：32分音符。入りきらないときは「すばやい音＋最後の主の音」で等分する
+    const step = Math.min(TRILL_STEP, total / (quick.length + 1));
+    quick.forEach((pitch) => parts.push({ pitch: pitch, length: step }));
+    parts.push({ pitch: event.pitch, length: total - step * quick.length }); // 残りは主の音
+  }
+
+  // かけらを、鳴らす音の形にする
   const pieces = [];
-  for (let k = 0; k < count; k++) {
-    const isLast = k === count - 1;
-    // 最後のかけらは、残りの長さを全部鳴らす
-    const length = isLast ? total - k * TRILL_STEP : TRILL_STEP;
-    // 最後から数えて偶数番目（最後・最後から3つ目…）が主の音
-    const isMain = (count - 1 - k) % 2 === 0;
+  let start = event.startTick;
+  parts.forEach((part, k) => {
+    const isLast = k === parts.length - 1;
     pieces.push({
       ...event,
-      pitch: isMain ? event.pitch : event.trillUpper,
-      startTick: event.startTick + k * TRILL_STEP,
-      ticks: length,
-      soundTicks: length,
+      pitch: part.pitch,
+      startTick: start,
+      ticks: part.length,
+      soundTicks: part.length,
       connected: isLast ? event.connected : false, // 最後のかけら以外は、次のかけらと重ねずに切る
       ornamentPiece: true, // 装飾で分けたかけら（sound.js で、余韻を短くして重ならないようにする）
     });
-  }
+    start = start + part.length;
+  });
   return pieces;
 }
 
@@ -460,7 +501,9 @@ export function buildEvents(score, startMeasure, partIndex) {
             pizz: plucked, // ピチカートで鳴らすか（ステップ6-3c。左手・バルトーク・ピチカートはステップ11-1b）
             velocity: velocity,
             fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
-            trillUpper: note.ornament === "trill" ? upperNeighbor(score, part, i, j) : null, // トリルで行き来する1つ上の音（ステップ11-3a）
+            ornament: note.ornament ?? null, // 装飾（トリルなど）の名前（ステップ11-3a）
+            upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
+            lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
           };
           events.push(event);
           tiedEvent = event;
@@ -510,11 +553,11 @@ export function buildEvents(score, startMeasure, partIndex) {
     totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
   });
 
-  // トリルの音を、主の音と1つ上の音を行き来する音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a）
+  // 装飾の付いた音を、すばやく行き来する短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b）
   const played = [];
   events.forEach((event) => {
-    if (event.trillUpper) {
-      played.push(...trillPieces(event));
+    if (event.ornament) {
+      played.push(...ornamentPieces(event));
     } else {
       played.push(event);
     }

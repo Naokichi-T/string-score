@@ -57,11 +57,20 @@ export const BREATHS = {
 
 // ----------------------------------------------------------
 // 装飾（データの ornament に入れる。1つの音に1つだけ）（ステップ11-3a）
-//   trill … トリル（tr）：1つ上の音とすばやく行き来する
-//           次の音にタイでつながっているときは、tr の右に波線をのばす
+//   trill   … トリル（tr）：1つ上の音とすばやく行き来する
+//             次の音にタイでつながっているときは、tr の右に波線をのばす
+//   prall   … プラルトリラー（短いギザギザ）：主の音 → 上の音 → 主の音（ステップ11-3b）
+//   mordent … モルデント（ギザギザに縦線）：主の音 → 下の音 → 主の音（ステップ11-3b）
+//   turn    … ターン（∽）：上の音 → 主の音 → 下の音 → 主の音（ステップ11-3b）
+// （VexFlow と MusicXML では、名前の付け方が逆になっている所があるので注意
+//   ・VexFlow の "mordent" は縦線なし（＝プラルトリラー）、"mordentInverted" は縦線あり（＝モルデント）
+//   ・MusicXML の "inverted-mordent" がプラルトリラー、"mordent" がモルデント）
 // ----------------------------------------------------------
 export const ORNAMENTS = {
   trill: { label: "トリル", vf: "tr", musicxml: "trill-mark", icon: "\uE566" },
+  prall: { label: "プラルトリラー（上の音へ1回）", vf: "mordent", musicxml: "inverted-mordent", icon: "\uE56C" },
+  mordent: { label: "モルデント（下の音へ1回）", vf: "mordentInverted", musicxml: "mordent", icon: "\uE56D" },
+  turn: { label: "ターン", vf: "turn", musicxml: "turn", icon: "\uE567" },
 };
 
 // ----------------------------------------------------------
