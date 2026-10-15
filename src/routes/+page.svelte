@@ -52,8 +52,6 @@
       const text = await readMusicXMLFile(file);
       // MusicXML の文字 → 楽譜データ（タイトルがなければファイルの名前を使う）
       const { score, warnings } = musicXMLToScore(text, titleFromFileName(file.name));
-      // 知らせることは、今はブラウザの開発者ツールに出すだけ（画面に出すのはステップ8-4で）
-      if (warnings.length > 0) console.warn("MusicXML の読み込みで知らせること", warnings);
 
       // 一覧に新しい楽譜として保存する
       const id = createScore(score);
@@ -62,7 +60,8 @@
         return;
       }
       // 編集ページで開く（新しく作ったときと違って、「楽譜の設定」タブではなく「音符」タブで始める）
-      goto(`/edit?id=${id}`);
+      // state：知らせることを URL に出さずに渡す（編集ページの上に黄色い枠で出る）（ステップ8-4c）
+      goto(`/edit?id=${id}`, { state: { importWarnings: warnings } });
     } catch (error) {
       // 読めなかったとき：理由を赤い字で出す
       console.error(error);

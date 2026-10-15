@@ -14,6 +14,7 @@
   // （ステップ6-1：録音した楽器の音で再生する（全体・パート別）、鍵盤の音も楽器の音にする）
   // （ステップ6-2：再生中に鳴っている音符を緑にする）
   // （ステップ7-1：URL の id の楽譜を読み込み、変えるたびに自動で保存する）
+  // （ステップ8-4c：MusicXML を読み込んだときに、知らせることを黄色い枠で出す）
   // （ステップ8-1：MusicXML の書き出し）
   // ==========================================================
   import { onMount } from "svelte";
@@ -24,6 +25,7 @@
   import SelectionInfo from "#lib/components/SelectionInfo.svelte";
   import ScoreView from "#lib/components/ScoreView.svelte";
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
+  import ImportNotice from "#lib/components/ImportNotice.svelte";
   import { createEmptyScore, keyAt, timeAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
@@ -1244,6 +1246,8 @@
       onclipboard={handleClipboard}
     />
     <SelectionInfo {score} {selection} {range} {message} />
+    <!-- MusicXML を読み込んだときに知らせること（なければ何も出ない）（ステップ8-4c） -->
+    <ImportNotice />
 
     <!-- 五線譜の部分だけスクロールする -->
     <main class="score-area">

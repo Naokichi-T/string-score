@@ -829,7 +829,7 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   }
 
   // ⑥ パートのデータを作る
-  const problemTexts = [];
+  const problemMeasures = new Set(); // 休符にした小節の番号（1 から。同じ小節は1回だけ）（ステップ8-4c）
   const parts = readParts.map((read, p) => {
     const id = partElements[p].getAttribute("id");
     const info = partInfo[id] ?? { name: "", sound: "", instrumentName: "" };
@@ -848,7 +848,7 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     for (let i = 0; i < measureCount; i++) {
       const readMeasure = read.measures[i] ?? { notes: [], ticks: 0, readable: true };
       const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup);
-      if (!fitted.ok) problemTexts.push(`${i + 1}小節目の ${info.name || `${p + 1}番目のパート`}`);
+      if (!fitted.ok) problemMeasures.add(i + 1);
 
       const measure = { notes: fitted.notes };
       // 音部記号：1小節目は必ず書く。途中は変わったときだけ
@@ -885,8 +885,11 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   // パート名は、このアプリの決まりで付け直す（Violin I・Violin II…）
   renameParts(parts);
 
-  if (problemTexts.length > 0) {
-    warnings.push(`読めない音があったので、休符にしました：${problemTexts.join("、")}`);
+  // 休符にした小節を「12か所（12・36・53・120・122 小節目 …）」の形で知らせる（6つ目からは「…」）（ステップ8-4c）
+  if (problemMeasures.size > 0) {
+    const numbers = [...problemMeasures].sort((a, b) => a - b);
+    const shown = numbers.slice(0, 5).join("・") + (numbers.length > 5 ? " 小節目 …" : " 小節目");
+    warnings.push(`連符などの読めない音があったので、休符にした小節：${numbers.length}か所（${shown}）`);
   }
 
   // 使わなかった音を、多い順に知らせる（ステップ8-4b）
