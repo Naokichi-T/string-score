@@ -142,6 +142,23 @@ function nextPizz(note, current) {
   return current;
 }
 
+// 弱音器（con sord.）を付けている間の音の強さの割合（ステップ11-2）
+const MUTE_RATE = 0.75;
+
+// ----------------------------------------------------------
+// 関数：nextMute
+// 音符に付いている奏法（con sord.・senza sord.）から、この音符から弱音器を付けているかを決める（ステップ11-2）
+//   note    … 音符のデータ
+//   current … 前の音符まで弱音器を付けていたか
+// 戻り値：この音符（と、このあと senza sord. が出てくるまで）が弱音器付きなら true
+// ----------------------------------------------------------
+function nextMute(note, current) {
+  const techniques = note.techniques ?? [];
+  if (techniques.includes("con sord.")) return true;
+  if (techniques.includes("senza sord.")) return false;
+  return current;
+}
+
 // ----------------------------------------------------------
 // 関数：isPizzAt
 // 楽譜のある場所の音が、ピチカートの範囲かどうかを調べる（鍵盤を押したときの音を決めるのに使う）（ステップ6-3c）
@@ -288,6 +305,7 @@ export function buildEvents(score, startMeasure, partIndex) {
     let tiedEvent = null; // 前の音からタイでつながっているときの、その音（まとめる先）
     let inSlur = false; // 今スラーの中か（スラーの始まりの音から、終わりの音の1つ前まで true）
     let pizz = false; // 今ピチカートか（pizz. の付いた音から、arco の付いた音の1つ前まで true）
+    let muted = false; // 今弱音器を付けているか（con sord. の付いた音から、senza sord. の付いた音の1つ前まで true）（ステップ11-2）
     const wedges = computeWedges(part); // 松葉の中の音の強さ（ステップ6-3d）
 
     part.measures.forEach((measure, i) => {
@@ -328,6 +346,9 @@ export function buildEvents(score, startMeasure, partIndex) {
         // ピチカートかどうかを進める（鳴らさない小節でも数えておく）
         pizz = nextPizz(note, pizz);
 
+        // 弱音器を付けているかを進める（鳴らさない小節でも数えておく）（ステップ11-2）
+        muted = nextMute(note, muted);
+
         if (!playing) return;
 
         // 左手ピチカート・バルトーク・ピチカートの音は、その音だけピチカートで鳴らす（ステップ11-1b）
@@ -350,7 +371,9 @@ export function buildEvents(score, startMeasure, partIndex) {
         if (articulations.includes("marcato")) boost = MARCATO_BOOST;
         // バルトーク・ピチカートは強くはじくので、アクセントと同じだけ強くする（ステップ11-1b）
         if (stringMarks.includes("snappizz")) boost = Math.max(boost, ACCENT_BOOST);
-        const velocity = Math.min(127, baseVelocity + boost);
+        let velocity = Math.min(127, baseVelocity + boost);
+        // 弱音器を付けている間は、少し小さくする（ステップ11-2）
+        if (muted) velocity = Math.round(velocity * MUTE_RATE);
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
           // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）

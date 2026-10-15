@@ -14,11 +14,13 @@
   // （ステップ5-6：「パート」タブを追加。中身は PartTools）
   // （ステップ5-7：「音符」タブにコピー・切り取り・貼り付けのボタンを追加）
   // （ステップ10-2：「音符」タブに［3連符］のボタンを追加）
+  // （ステップ11-2：「奏法」タブを追加。中身は TechniqueTools）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
   import { DURATION_ORDER } from "#lib/score/model.js";
   import SymbolTools from "./SymbolTools.svelte";
+  import TechniqueTools from "./TechniqueTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
   import MeasureTools from "./MeasureTools.svelte";
   import PartTools from "./PartTools.svelte";
@@ -115,6 +117,7 @@
   const TABS = [
     { id: "note", label: "音符" },
     { id: "symbol", label: "記号" },
+    { id: "technique", label: "奏法" }, // ステップ11-2
     { id: "measure", label: "小節" },
     { id: "part", label: "パート" },
     { id: "settings", label: "楽譜の設定" },
@@ -268,6 +271,9 @@
       </div>
     {:else if activeTab === "symbol"}
       <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
+    {:else if activeTab === "technique"}
+      <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
+      <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />
     {:else if activeTab === "measure"}
       <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
     {:else if activeTab === "part"}

@@ -72,9 +72,10 @@ export const CLEFS = {
 //   label          … ボタンに出す日本語の名前
 // （ステップ5-6：name・abbreviation・label を追加）
 export const INSTRUMENTS = {
-  violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン" }, // バイオリン（ド4〜ド7）
-  viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ" }, // ビオラ（ド3〜ド6）
-  cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ" }, // チェロ（ド2〜ド5）
+  // strings … 弦の名前（低い弦から順に）（「奏法」タブの弦の指定で使う）（ステップ11-2）
+  violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン", strings: ["G", "D", "A", "E"] }, // バイオリン（ド4〜ド7）
+  viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ", strings: ["C", "G", "D", "A"] }, // ビオラ（ド3〜ド6）
+  cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ", strings: ["C", "G", "D", "A"] }, // チェロ（ド2〜ド5）
 };
 
 // ----------------------------------------------------------

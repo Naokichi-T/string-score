@@ -68,14 +68,58 @@ export const FINGERINGS = [0, 1, 2, 3, 4];
 
 // ----------------------------------------------------------
 // 奏法の文字（データの techniques に名前の並びを入れる。いくつでも付けられる）
-//   text  … 楽譜に書く文字
-//   group … 同じ group の奏法は反対の意味なので、1つの音に1つだけ
-//           （例：pizz. を付けると arco は外れる）
+//   text    … 楽譜に書く文字
+//   group   … 同じ group の奏法は1つの音に1つだけ（例：pizz. を付けると arco は外れる）
+//   aliases … MusicXML を読み込むとき、この奏法とみなす書き方（ステップ11-2）
+//             （小文字にして「.」を取りのぞいてから比べるので、ここも「.」なしで書く）
+//   string  … 弦の指定のときだけ：どの弦か（楽器にない弦のボタンは押せない）
+// （ステップ11-2：pizz.・arco のほかに、弾く場所・弱音器・ビブラート・スピッカート・弦の指定を追加）
 // ----------------------------------------------------------
 export const TECHNIQUES = {
-  "pizz.": { label: "ピチカート", text: "pizz.", musicxml: "pizz.", group: "pluck" },
-  arco: { label: "アルコ", text: "arco", musicxml: "arco", group: "pluck" },
+  // はじく・弓で弾く
+  "pizz.": { label: "ピチカート（はじく）", text: "pizz.", musicxml: "pizz.", group: "pluck", aliases: ["pizz", "pizzicato"] },
+  arco: { label: "アルコ（弓で弾く）", text: "arco", musicxml: "arco", group: "pluck", aliases: ["arco"] },
+  // 弾く場所・音色
+  "sul pont.": { label: "スル・ポンティチェロ（駒の近くで弾く）", text: "sul pont.", musicxml: "sul pont.", group: "place", aliases: ["sul pont", "sul ponticello", "sp", "pont"] },
+  "sul tasto": { label: "スル・タスト（指板の上で弾く）", text: "sul tasto", musicxml: "sul tasto", group: "place", aliases: ["sul tasto", "st", "tasto"] },
+  "flaut.": { label: "フラウタンド（軽く、笛のような音で）", text: "flaut.", musicxml: "flaut.", group: "place", aliases: ["flaut", "flautando"] },
+  "col legno": { label: "コル・レーニョ（弓の木の部分で弾く）", text: "col legno", musicxml: "col legno", group: "place", aliases: ["col legno", "col legno battuto", "col legno tratto"] },
+  "ord.": { label: "オルディナリオ（ふつうの弾き方に戻す）", text: "ord.", musicxml: "ord.", group: "place", aliases: ["ord", "ordinario", "nat", "naturale", "normale"] },
+  // 弱音器
+  "con sord.": { label: "コン・ソルディーノ（弱音器を付ける）", text: "con sord.", musicxml: "con sord.", group: "mute", aliases: ["con sord", "con sordino", "con sordini", "mit dämpfer"] },
+  "senza sord.": {
+    label: "センツァ・ソルディーノ（弱音器を外す）",
+    text: "senza sord.",
+    musicxml: "senza sord.",
+    group: "mute",
+    aliases: ["senza sord", "senza sordino", "senza sordini", "via sord", "via sordini", "ohne dämpfer"],
+  },
+  // ビブラート
+  "vib.": { label: "ビブラートあり", text: "vib.", musicxml: "vib.", group: "vibrato", aliases: ["vib", "vibrato", "molto vib"] },
+  "non vib.": { label: "ノン・ビブラート（ビブラートなし）", text: "non vib.", musicxml: "non vib.", group: "vibrato", aliases: ["non vib", "non vibrato", "senza vib", "senza vibrato", "nv"] },
+  // スピッカート
+  "spicc.": { label: "スピッカート（弓を弾ませる）", text: "spicc.", musicxml: "spicc.", group: "spiccato", aliases: ["spicc", "spiccato"] },
+  // 弦の指定
+  "sul C": { label: "C線で弾く", text: "sul C", musicxml: "sul C", group: "string", string: "C", aliases: ["sul c"] },
+  "sul G": { label: "G線で弾く", text: "sul G", musicxml: "sul G", group: "string", string: "G", aliases: ["sul g"] },
+  "sul D": { label: "D線で弾く", text: "sul D", musicxml: "sul D", group: "string", string: "D", aliases: ["sul d"] },
+  "sul A": { label: "A線で弾く", text: "sul A", musicxml: "sul A", group: "string", string: "A", aliases: ["sul a"] },
+  "sul E": { label: "E線で弾く", text: "sul E", musicxml: "sul E", group: "string", string: "E", aliases: ["sul e"] },
 };
+
+// ----------------------------------------------------------
+// 奏法の組（「奏法」タブで、この順番に組ごとに並べる）（ステップ11-2）
+//   id    … TECHNIQUES の group と同じ名前
+//   label … 組の名前（ボタンの組にマウスを乗せたときに出す）
+// ----------------------------------------------------------
+export const TECHNIQUE_GROUPS = [
+  { id: "pluck", label: "はじく・弓で弾く" },
+  { id: "place", label: "弾く場所・音色" },
+  { id: "mute", label: "弱音器" },
+  { id: "vibrato", label: "ビブラート" },
+  { id: "spiccato", label: "スピッカート" },
+  { id: "string", label: "弦の指定" },
+];
 
 // ----------------------------------------------------------
 // 強弱（データの dynamic に入れる。1つの音に1つだけ）

@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, FINGERINGS, TECHNIQUES, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -66,15 +66,6 @@
     {#each Object.entries(BREATHS) as [name, symbol] (name)}
       <button class="tool" class:on={note?.breath === name} {disabled} onclick={() => onsymbol("breath", name)} title={symbol.label} aria-label={symbol.label}>
         <span class="icon breath">{symbol.icon}</span>
-      </button>
-    {/each}
-  </div>
-
-  <!-- 奏法 -->
-  <div class="group">
-    {#each Object.entries(TECHNIQUES) as [name, symbol] (name)}
-      <button class="tool text wide" class:on={(note?.techniques ?? []).includes(name)} {disabled} onclick={() => onsymbol("technique", name)} title={symbol.label} aria-label={symbol.label}>
-        <i>{symbol.text}</i>
       </button>
     {/each}
   </div>

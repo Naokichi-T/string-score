@@ -38,7 +38,7 @@
 
 import { unzipSync } from "fflate";
 import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
@@ -554,11 +554,42 @@ function readDynamics(dynamics, target, counter) {
 }
 
 // ----------------------------------------------------------
+// 関数：normalizeWords
+// 文字の指示を比べやすい形にする（小文字にして「.」を取り、まわりと間の空白を1つにそろえる）（ステップ11-2）
+// 例："Sul Pont." → "sul pont"、"s.p." → "sp"
+// ----------------------------------------------------------
+function normalizeWords(text) {
+  return text.toLowerCase().replaceAll(".", "").replace(/\s+/g, " ").trim();
+}
+
+// 文字の指示（normalizeWords したもの） → 奏法の名前 の表（ステップ11-2）
+// 例："sul ponticello" → "sul pont."
+const WORDS_TO_TECHNIQUE = {};
+Object.entries(TECHNIQUES).forEach(([name, info]) => {
+  info.aliases.forEach((alias) => {
+    WORDS_TO_TECHNIQUE[normalizeWords(alias)] = name;
+  });
+});
+
+// ----------------------------------------------------------
+// 関数：addTechnique
+// 奏法の名前の並びに、奏法を1つ足す（同じ group のものがあれば入れ替える）（ステップ11-2）
+//   list … 今の並び（なければ undefined）
+//   name … 足す奏法の名前
+// 戻り値：新しい並び
+// ----------------------------------------------------------
+function addTechnique(list, name) {
+  const group = TECHNIQUES[name].group;
+  const others = (list ?? []).filter((other) => TECHNIQUES[other].group !== group);
+  return [...others, name];
+}
+
+// ----------------------------------------------------------
 // 関数：readDirection
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
 //   direction … <direction>
 //   state     … パートごとの読みかけの情報
-//                pending … 次の音符に付ける記号 { dynamic, technique, wedge }
+//                pending … 次の音符に付ける記号 { dynamic, techniques, wedge }（techniques は奏法の名前の並び。ステップ11-2）
 //                lastNote … ここまでに読んだ最後の音符（松葉の終わりを付ける）
 //   counter   … 使えなかった記号を数える表
 // ----------------------------------------------------------
@@ -574,12 +605,12 @@ function readDirection(direction, state, counter) {
       readDynamics(dynamics, state.pending, counter);
     });
 
-    // 文字：pizz.・arco だけ使う（ほかの文字は数える）
+    // 文字：奏法の文字（pizz.・sul pont. など）だけ使う（ほかの文字は数える）（ステップ11-2：pizz.・arco 以外も読む）
     childElements(type, "words").forEach((words) => {
-      const text = words.textContent.trim().toLowerCase();
+      const text = normalizeWords(words.textContent);
       if (text === "") return;
-      if (/^pizz\.?$/.test(text)) state.pending.technique = "pizz.";
-      else if (/^arco\.?$/.test(text)) state.pending.technique = "arco";
+      const name = WORDS_TO_TECHNIQUE[text];
+      if (name) state.pending.techniques = addTechnique(state.pending.techniques, name);
       else report(counter, "文字の指示（dolce・cresc. など）");
     });
 
@@ -607,7 +638,7 @@ function applyPending(note, state, counter) {
   if (note.rest) return;
   const pending = state.pending;
   if (pending.dynamic) note.dynamic = pending.dynamic;
-  if (pending.technique) note.techniques = [pending.technique];
+  if (pending.techniques) note.techniques = pending.techniques;
   if (pending.wedge) {
     // 同じ音符で前の松葉が終わっていたら、このアプリでは付けられない
     if (note.wedge === undefined) note.wedge = pending.wedge;

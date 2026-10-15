@@ -384,14 +384,17 @@ function directionsBeforeXml(note) {
     lines.push("      </direction>");
   }
 
-  // 奏法の文字（pizz.・arco）：五線の上に文字で書き、再生用に「はじく・弓で弾く」の印も付ける
+  // 奏法の文字（pizz.・sul pont. など）：五線の上に文字で書く
+  // pizz.・arco だけは、再生用に「はじく・弓で弾く」の印も付ける（ほかの文字は MusicXML に再生用の印がない）（ステップ11-2）
   (note.techniques ?? []).forEach((name) => {
-    const pizzicato = name === "pizz." ? "yes" : "no";
     lines.push(`      <direction placement="above">`);
     lines.push("        <direction-type>");
     lines.push(`          <words>${escapeXml(TECHNIQUES[name].musicxml)}</words>`);
     lines.push("        </direction-type>");
-    lines.push(`        <sound pizzicato="${pizzicato}"/>`);
+    if (name === "pizz." || name === "arco") {
+      const pizzicato = name === "pizz." ? "yes" : "no";
+      lines.push(`        <sound pizzicato="${pizzicato}"/>`);
+    }
     lines.push("      </direction>");
   });
 
