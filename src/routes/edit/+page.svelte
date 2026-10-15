@@ -158,12 +158,35 @@
   function handleMixer(partId, changes, final = true) {
     mixer = { ...mixer, [partId]: { ...mixerOf(mixer, partId), ...changes } };
     saveMixer(scoreId, mixer);
+    if (final) replayIfPlaying();
+  }
 
-    if (final && playing) {
-      const measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
-      handleStop();
-      playFrom(measure);
-    }
+  // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100 }（ステップ12-4a）
+  // アプリ全体で1つ（音の種類と同じく、設定として保存する）。ページを開いたときに読み込む
+  let metronome = $state({ on: false, volume: 70 });
+
+  // ----------------------------------------------------------
+  // 関数：handleMetronome
+  // 「再生」タブでメトロノームの設定が変わったとき（ステップ12-4a）
+  //   changes … 変えた項目（例：{ on: true }、{ volume: 50 }）
+  //   final   … 変え終わったか（つまみを動かしている途中は false）
+  // 設定を保存し、再生中に変え終わったら、今の小節の頭から鳴らし直す
+  // ----------------------------------------------------------
+  function handleMetronome(changes, final = true) {
+    metronome = { ...metronome, ...changes };
+    saveSetting("metronome", $state.snapshot(metronome));
+    if (final) replayIfPlaying();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：replayIfPlaying
+  // 再生中なら、今鳴っている小節の頭から、新しい設定で鳴らし直す（ステップ12-4a：handleMixer から分けた）
+  // ----------------------------------------------------------
+  function replayIfPlaying() {
+    if (!playing) return;
+    const measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
+    handleStop();
+    playFrom(measure);
   }
 
   // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
@@ -280,6 +303,12 @@
     if (savedType === "instrument" || savedType === "instrumentB" || savedType === "synth") {
       soundType = savedType;
       setSoundType(savedType); // 鳴らす仕組み（sound.js）にも知らせる
+    }
+
+    // 前に決めたメトロノームの設定を読み込む（保存していなければ、切・音量70 のまま）（ステップ12-4a）
+    const savedMetronome = loadSettings().metronome;
+    if (savedMetronome && typeof savedMetronome === "object") {
+      metronome = { ...metronome, ...savedMetronome };
     }
 
     // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
@@ -1047,7 +1076,10 @@
 
     // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す）
     const result = buildEvents(score, startMeasure, mixer);
-    if (result.events.length === 0) {
+    // メトロノームのクリック（切のときは鳴らさない）（ステップ12-4a）
+    const clicks = metronome.on ? result.clicks : [];
+    // 楽器の音もクリックもないときだけ、鳴らさない（クリックだけでも鳴らす）
+    if (result.events.length === 0 && clicks.length === 0) {
       message = "鳴らす音がありません（休符だけか、全部のパートが鳴らない設定です）";
       return;
     }
@@ -1055,10 +1087,11 @@
 
     // まとめて予約して鳴らす（最後まで行ったら、再生中をやめて緑を消す）
     const tickSeconds = secondsPerTick(score.tempo);
-    const started = playEvents(result.events, result.totalTicks, tickSeconds, () => {
+    const onend = () => {
       playing = false;
       clearHighlight();
-    });
+    };
+    const started = playEvents(result.events, result.totalTicks, tickSeconds, onend, clicks, metronome.volume);
     playing = started;
 
     // 鳴っている音符を緑にし始める
@@ -1379,6 +1412,8 @@
       ondeletepart={handleDeletePart}
       {mixer}
       onmixer={handleMixer}
+      {metronome}
+      onmetronome={handleMetronome}
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}

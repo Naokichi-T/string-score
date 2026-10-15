@@ -316,10 +316,12 @@ export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = f
 //   totalTicks … 最後までの長さ（ティック）
 //   tickSeconds … 1ティックが何秒か
 //   onend      … 最後まで鳴り終わったときに呼ぶ関数
+//   clicks     … メトロノームのクリックの一覧 [{ startTick, strong }, ...]（鳴らさないときは空の配列）（ステップ12-4a）
+//   clickVolume … クリックの音量（0〜100）（ステップ12-4a）
 // 楽器の音を選んでいて、読み込みが終わっていないときは、何もせずに false を返す
 // （電子音を選んでいるときは、読み込みが終わっていなくても鳴らせる）
 // ----------------------------------------------------------
-export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
+export function playEvents(events, totalTicks, tickSeconds, onend = () => {}, clicks = [], clickVolume = 70) {
   // 今選んでいる楽器の音（電子音のとき・読み込みが終わっていないときは null）（ステップ12-2）
   const instruments = currentInstruments();
   if (soundType !== "synth" && !instruments) return false;
@@ -368,6 +370,12 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
     stopFunctions.push(stop);
   });
 
+  // メトロノームのクリックを予約する（ステップ12-4a）
+  clicks.forEach((click) => {
+    const time = startTime + click.startTick * tickSeconds;
+    stopFunctions.push(playClick(time, click.strong, clickVolume));
+  });
+
   // 最後まで行ったら知らせる（音の余韻のぶん、0.3秒だけ待つ）
   const totalSeconds = 0.1 + totalTicks * tickSeconds + 0.3;
   endTimer = setTimeout(() => {
@@ -378,6 +386,47 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
   }, totalSeconds * 1000);
 
   return true;
+}
+
+// ----------------------------------------------------------
+// 関数：playClick
+// メトロノームのクリックを1つ鳴らす（ステップ12-4a）
+// 楽器の音・電子音のどちらを選んでいても、いつもこの音で鳴らす
+//   time   … 鳴らす時刻（AudioContext の時計で）
+//   strong … true なら1拍目の高い音、false ならほかの拍の低い音
+//   volume … 音量（0〜100）
+// 戻り値：途中で止めるための関数
+// ----------------------------------------------------------
+function playClick(time, strong, volume) {
+  const ctx = resumeAudio();
+  const length = 0.05; // 鳴らす長さ（秒）。短い「ピッ」
+
+  // 音のもと（なめらかな波）。1拍目は高く、ほかは低く
+  const oscillator = ctx.createOscillator();
+  oscillator.type = "sine";
+  oscillator.frequency.value = strong ? 1760 : 1320;
+
+  // 音量：一瞬で大きくなって、すぐに小さくなる（音量 100 のときに 0.5）
+  const gain = ctx.createGain();
+  const peak = 0.5 * (volume / 100);
+  gain.gain.setValueAtTime(0, time);
+  gain.gain.linearRampToValueAtTime(peak, time + 0.002);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + length); // 0 にはできないので、とても小さい数まで下げる
+
+  // つなぐ：音のもと → 音量 → スピーカー
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(time);
+  oscillator.stop(time + length);
+
+  // 途中で止めるための関数（停止ボタン用。鳴り終わったあとに呼ばれてもエラーにしない）
+  return () => {
+    try {
+      oscillator.stop();
+    } catch (error) {
+      // すでに止まっていたら何もしない
+    }
+  };
 }
 
 // ----------------------------------------------------------

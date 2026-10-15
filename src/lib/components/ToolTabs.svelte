@@ -72,9 +72,13 @@
   //   onremovetuplet … ［連符を解除］が押されたときに呼ぶ関数（ステップ10-3）
   //   mixer        … パートごとの音量の設定（「再生」タブで使う）（ステップ12-3）
   //   onmixer      … 音量の設定が変わったときに呼ぶ関数（「再生」タブで使う）（ステップ12-3）
+  //   metronome    … メトロノームの設定（「再生」タブで使う）（ステップ12-4a）
+  //   onmetronome  … メトロノームの設定が変わったときに呼ぶ関数（「再生」タブで使う）（ステップ12-4a）
   let {
     mixer = {},
     onmixer = () => {},
+    metronome = { on: false, volume: 70 },
+    onmetronome = () => {},
     canTuplet = false,
     ontuplet = () => {},
     inTuplet = false,
@@ -286,7 +290,7 @@
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} />
     {:else if activeTab === "playback"}
-      <PlaybackTools parts={score.parts} {mixer} {onmixer} />
+      <PlaybackTools parts={score.parts} {mixer} {onmixer} {metronome} {onmetronome} />
     {:else if activeTab === "settings"}
       <ScoreSettings {score} {onsettings} {focusTitle} />
     {/if}

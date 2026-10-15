@@ -417,6 +417,7 @@ function computeWedges(part) {
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
 //   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
 //   measureStarts の1つ分：{ measure, startTick }（再生中に、今何小節目かを調べるのに使う。フェルマータのぶんもずらしてある）（ステップ12-3b）
+//   clicks の1つ分：{ startTick, strong }（メトロノームのクリック。strong は1拍目なら true。フェルマータのぶんもずらしてある）（ステップ12-4a）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
@@ -591,11 +592,20 @@ export function buildEvents(score, startMeasure, mixer = {}) {
   });
 
   // 小節ごとの始まりの時刻（フェルマータのぶんもずらす）（ステップ12-3b）
+  // メトロノームのクリックの時刻も、ここでいっしょに作る（ステップ12-4a）
   const measureStarts = [];
+  const clicks = [];
   let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
   for (let i = startMeasure; i < score.measures.length; i++) {
     measureStarts.push({ measure: i, startTick: measureTick + shiftBefore(points, measureTick, true) });
-    measureTick = measureTick + measureTicks(timeAt(score, i));
+    // この小節の拍の頭ごとにクリックを1つ（1拍目は strong）
+    const time = timeAt(score, i);
+    const beat = beatTicks(time); // 1拍の長さ
+    for (let b = 0; b < measureTicks(time); b = b + beat) {
+      const t = measureTick + b;
+      clicks.push({ startTick: t + shiftBefore(points, t, true), strong: b === 0 });
+    }
+    measureTick = measureTick + measureTicks(time);
   }
 
   // 装飾・トレモロの付いた音を、短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b・11-4）
@@ -611,7 +621,23 @@ export function buildEvents(score, startMeasure, mixer = {}) {
   // 鳴り始める順に並べる（同じ時間なら上のパートから）
   played.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
 
-  return { events: played, totalTicks: totalTicks, highlights: highlights, measureStarts: measureStarts };
+  return { events: played, totalTicks: totalTicks, highlights: highlights, measureStarts: measureStarts, clicks: clicks };
+}
+
+// ----------------------------------------------------------
+// 関数：beatTicks
+// メトロノームの1拍の長さ（ティック）を、拍子から決める（ステップ12-4a）
+//   time … 拍子 { beats, beatType }
+//   ・ふつうは、拍子の下の数字の音符1つ分（4/4 → 4分音符、2/2 → 2分音符、3/8 → 8分音符）
+//   ・6/8・9/8・12/8 のように、下が 8 で上が 6 以上の 3 の倍数のときは、付点4分音符1つ分
+//     （6/8 は「8分音符3つ」を1拍として2拍で数えるため）
+// ----------------------------------------------------------
+function beatTicks(time) {
+  const unit = (16 * TICKS_PER_16TH) / time.beatType; // 拍子の下の数字の音符1つ分
+  if (time.beatType === 8 && time.beats >= 6 && time.beats % 3 === 0) {
+    return unit * 3; // 付点4分音符1つ分
+  }
+  return unit;
 }
 
 // ----------------------------------------------------------
