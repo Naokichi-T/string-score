@@ -3,6 +3,7 @@
 // MusicXML のファイルを読み込んで、このアプリの楽譜データにする
 // （ステップ8-3：読み込みの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
 // （ステップ8-4a：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
+// （ステップ8-4b：重音・2つ目の声部・装飾音・アウフタクト）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -13,9 +14,12 @@
 //   divisions はファイルによって違う（このアプリは 4、MuseScore は 480 など）
 //   → 長さ × 4 ÷ divisions で、このアプリのティック（16分音符＝1）に直す
 //
-// 【読めないもの】
-//   この版では、読めない音（連符・32分音符など）がある小節は、休符で埋めて知らせる
-//   （重音・2つ目の声部はステップ8-4bで）
+// 【このアプリで扱えないもの】（ステップ8-4b）
+//   読めない長さの音（連符・32分音符など）がある小節 … 小節ごと休符にする
+//   重音 … 一番上の音だけ残す（ほかの音に付いていた記号は、残した音にまとめる）
+//   2つ目の声部・装飾音 … 使わない
+//   アウフタクト（1小節目が拍子より短い）… 1小節目の前を休符で埋める
+//   どれも、最後にまとめて知らせる
 //
 // 【記号の読み方】（ステップ8-4a）
 //   音符の中の <notations> … スラー・スタッカートなど・弓・指番号・フェルマータ → その音符に付ける
@@ -44,6 +48,9 @@ const TICKS_TO_DURATION = {
   2: { duration: "eighth", dots: 0 }, // 8分音符
   1: { duration: "16th", dots: 0 }, // 16分音符
 };
+
+// ドレミファソラシの、ドからの半音の数（重音でどの音が一番上かを比べるのに使う）（ステップ8-4b）
+const STEP_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 // ----------------------------------------------------------
 // パート名から楽器を決めるための言葉（小文字で比べる）
@@ -383,6 +390,15 @@ function readNote(noteElement, divisions) {
 }
 
 // ----------------------------------------------------------
+// 関数：pitchNumber
+// 音の高さを、比べられる1つの数にする（半音1つで 1 ちがう）（ステップ8-4b）
+// 例：ド4 → 48、ド♯4 → 49、レ4 → 50
+// ----------------------------------------------------------
+function pitchNumber(pitch) {
+  return pitch.octave * 12 + STEP_SEMITONES[pitch.step] + (pitch.alter ?? 0);
+}
+
+// ----------------------------------------------------------
 // 関数：readNotations
 // 音符の中の <notations> を読んで、記号を音符のデータに付ける（ステップ8-4a）
 //   noteElement … <note>
@@ -560,6 +576,8 @@ function applyPending(note, state, counter) {
 // 関数：readPart
 // <part> 1つ分の小節を読む
 //   partElement … <part>
+//   counter     … 使えなかった記号を数える表（ステップ8-4a）
+//   skipped     … 使わなかった音を数える表（ステップ8-4b）
 // 戻り値：{
 //   measures: [{ notes, clef?, time?, key?, readable }]（小節ごと）
 //   firstClef: 最初の音部記号
@@ -567,7 +585,7 @@ function applyPending(note, state, counter) {
 // }
 // time・key は「この小節で書いてあったもの」（変わったかどうかは、あとで全体で決める）
 // ----------------------------------------------------------
-function readPart(partElement, counter) {
+function readPart(partElement, counter, skipped) {
   // 読みかけの記号の情報（ステップ8-4a）
   //   slurNumber … 開いているスラーの番号（開いていなければ null）
   //   pending    … <direction> で読んで、次の音符に付ける記号
@@ -577,6 +595,7 @@ function readPart(partElement, counter) {
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
   let mainVoice = null; // このパートで使う声部（最初の音の声部）
+  let countedChord = null; // 重音として数えた最後の音（同じ重音を2回数えないため）（ステップ8-4b）
   const measures = [];
   const problems = [];
 
@@ -619,15 +638,55 @@ function readPart(partElement, counter) {
         continue;
       }
 
+      // 声部を進める印（見えない休符）：使っている声部のものだけ、休符にする（ステップ8-4b）
+      if (element.nodeName === "forward") {
+        const voice = childText(element, "voice");
+        if (voice !== null && voice === mainVoice) {
+          const ticks = (Number(childText(element, "duration")) * 4) / divisions;
+          const shape = TICKS_TO_DURATION[ticks];
+          if (shape) measure.notes.push({ rest: true, duration: shape.duration, dots: shape.dots });
+          else measure.readable = false;
+          measure.ticks = measure.ticks + ticks;
+        }
+        continue;
+      }
+
       // 音符・休符
       if (element.nodeName === "note") {
-        // 装飾音（大きさのない音）は飛ばす
-        if (childElement(element, "grace")) continue;
-        // 重音の2つ目以降と、2つ目の声部は、この版では飛ばす（ステップ8-4bで扱う）
-        if (childElement(element, "chord")) continue;
+        // 装飾音（大きさのない音）は使わない（ステップ8-4b：数を知らせる）
+        if (childElement(element, "grace")) {
+          report(skipped, "装飾音");
+          continue;
+        }
+
+        // 2つ目の声部は使わない（ステップ8-4b：音符の数を知らせる。休符は数えない）
         const voice = childText(element, "voice") ?? "1";
         if (mainVoice === null) mainVoice = voice;
-        if (voice !== mainVoice) continue;
+        if (voice !== mainVoice) {
+          if (!childElement(element, "rest")) report(skipped, "2つ目の声部の音");
+          continue;
+        }
+
+        // 重音の2つ目以降：一番上の音だけ残す（ステップ8-4b）
+        if (childElement(element, "chord")) {
+          const base = measure.notes[measure.notes.length - 1]; // 重音の1つ目の音（もう読んである）
+          if (!base || base.rest || !measure.readable) continue;
+          const member = readNote(element, divisions).note;
+          if (!member || member.rest) continue;
+          if (pitchNumber(member.pitch) > pitchNumber(base.pitch)) {
+            // こちらのほうが高い：高さとタイを入れ替える
+            base.pitch = member.pitch;
+            base.tie = member.tie;
+          }
+          // この音に付いていた記号（スラーなど）は、残した音にまとめる
+          readNotations(element, base, state, counter);
+          // 重音1つにつき1回だけ数える（3つ以上の音の重音でも1回）
+          if (countedChord !== base) {
+            report(skipped, "重音（一番上の音だけ残した）");
+            countedChord = base;
+          }
+          continue;
+        }
 
         const { note, ticks } = readNote(element, divisions);
         if (note) {
@@ -641,7 +700,7 @@ function readPart(partElement, counter) {
         }
         measure.ticks = measure.ticks + ticks;
       }
-      // <backup>・<forward>（声部を行き来する印）は、この版では見ない
+      // <backup>（声部をさかのぼる印）は見ない（2つ目の声部は使わないため）
     }
 
     if (!measure.readable) problems.push(index + 1);
@@ -655,13 +714,21 @@ function readPart(partElement, counter) {
 // 関数：fitMeasure
 // 読んだ音を、小節の長さに合わせる
 //   ・足りないとき … 残りを1拍ずつの休符で埋める
+//                    （アウフタクトの1小節目は前を、それ以外は後ろを埋める）（ステップ8-4b）
 //   ・多すぎる・読めない音があるとき … 小節を全部休符にする（読めなかったと知らせる）
+//   read     … readPart で読んだ1小節分
+//   time     … その小節の拍子
+//   isPickup … アウフタクトの1小節目か
 // 戻り値：{ notes: 音符・休符の配列, ok: そのまま使えたか }
 // ----------------------------------------------------------
-function fitMeasure(read, time) {
+function fitMeasure(read, time, isPickup = false) {
   const total = measureTicks(time);
   if (!read.readable || read.ticks > total) {
     return { notes: restsForSpan(0, total, time), ok: false };
+  }
+  // アウフタクト：足りない分の休符を前に置いてから、読んだ音を並べる
+  if (isPickup && read.ticks < total) {
+    return { notes: [...restsForSpan(0, total - read.ticks, time), ...read.notes], ok: true };
   }
   const notes = [...read.notes];
   if (read.ticks < total) {
@@ -719,7 +786,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   const partElements = childElements(root, "part");
   if (partElements.length === 0) throw new Error("ファイルの中にパートが見つかりませんでした");
   const counter = {}; // このアプリで使えなかった記号などの数（ステップ8-4a）
-  const readParts = partElements.map((partElement) => readPart(partElement, counter));
+  const skipped = {}; // 使わなかった音の数（ステップ8-4b）
+  const readParts = partElements.map((partElement) => readPart(partElement, counter, skipped));
 
   // 小節の数は、一番多いパートに合わせる（最低1小節）
   const measureCount = Math.max(1, ...readParts.map((read) => read.measures.length));
@@ -750,6 +818,16 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     measures.push(info);
   }
 
+  // アウフタクトか調べる（ステップ8-4b）
+  // 1小節目で、どのパートも拍子より短い（読めた音の長さが一番長いパートでも足りない）ならアウフタクト
+  const firstTotal = measureTicks(times[0]);
+  const firstLengths = readParts.map((read) => (read.measures[0] && read.measures[0].readable ? read.measures[0].ticks : 0));
+  const longestFirst = Math.max(...firstLengths);
+  const isPickup = longestFirst > 0 && longestFirst < firstTotal;
+  if (isPickup) {
+    warnings.push("1小節目が短い（アウフタクト）ので、前を休符で埋めて拍子どおりの長さにしました");
+  }
+
   // ⑥ パートのデータを作る
   const problemTexts = [];
   const parts = readParts.map((read, p) => {
@@ -769,7 +847,7 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const partMeasures = [];
     for (let i = 0; i < measureCount; i++) {
       const readMeasure = read.measures[i] ?? { notes: [], ticks: 0, readable: true };
-      const fitted = fitMeasure(readMeasure, times[i]);
+      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup);
       if (!fitted.ok) problemTexts.push(`${i + 1}小節目の ${info.name || `${p + 1}番目のパート`}`);
 
       const measure = { notes: fitted.notes };
@@ -809,6 +887,12 @@ export function musicXMLToScore(text, fallbackTitle = "") {
 
   if (problemTexts.length > 0) {
     warnings.push(`読めない音があったので、休符にしました：${problemTexts.join("、")}`);
+  }
+
+  // 使わなかった音を、多い順に知らせる（ステップ8-4b）
+  const skippedList = Object.entries(skipped).sort((a, b) => b[1] - a[1]);
+  if (skippedList.length > 0) {
+    warnings.push(`使わなかった音：${skippedList.map(([label, count]) => `${label} ${count}か所`).join("、")}`);
   }
 
   // 使えなかった記号を、多い順に「トリル 12個、…」の形で知らせる（ステップ8-4a）
