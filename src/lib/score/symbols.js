@@ -19,11 +19,17 @@ export const BOWINGS = {
 // ----------------------------------------------------------
 // アーティキュレーション（データの articulations に入れる。いくつでも付けられる）
 // 音符の玉の近く（符尾と反対側）に付く
+//   group … 同じ group のものは、1つの音に1つだけ（ステップ11-1a）
+//           short  … 短く切る記号（スタッカート・スタッカーティシモ）
+//           strong … 強くする記号（アクセント・マルカート）
+//           テヌートは group なし（スタッカートと一緒に付けられる）
 // ----------------------------------------------------------
 export const ARTICULATIONS = {
-  staccato: { label: "スタッカート", vf: "a.", musicxml: "staccato", icon: "\uE4A2" },
+  staccato: { label: "スタッカート", vf: "a.", musicxml: "staccato", icon: "\uE4A2", group: "short" },
+  staccatissimo: { label: "スタッカーティシモ", vf: "av", musicxml: "staccatissimo", icon: "\uE4A6", group: "short" },
   tenuto: { label: "テヌート", vf: "a-", musicxml: "tenuto", icon: "\uE4A4" },
-  accent: { label: "アクセント", vf: "a>", musicxml: "accent", icon: "\uE4A0" },
+  accent: { label: "アクセント", vf: "a>", musicxml: "accent", icon: "\uE4A0", group: "strong" },
+  marcato: { label: "マルカート", vf: "a^", musicxml: "strong-accent", icon: "\uE4AC", group: "strong" },
 };
 
 // ----------------------------------------------------------

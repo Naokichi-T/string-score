@@ -11,7 +11,7 @@
 // ==========================================================
 
 import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups } from "./model.js";
-import { TECHNIQUES } from "./symbols.js";
+import { ARTICULATIONS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
 
@@ -573,8 +573,15 @@ export function toggleNoteSymbol(score, selection, kind, value) {
       n.fingerings = toggleInList(n.fingerings, value);
       if (n.fingerings.length === 0) delete n.fingerings;
     } else if (kind === "articulation") {
-      // スタッカートなど：いくつでも付けられる
-      n.articulations = toggleInList(n.articulations, value);
+      // スタッカートなど：いくつでも付けられるが、同じ group のもの（スタッカートとスタッカーティシモ、アクセントとマルカート）は1つだけ（ステップ11-1a）
+      const adding = !(n.articulations ?? []).includes(value);
+      let list = toggleInList(n.articulations, value);
+      if (adding) {
+        const group = ARTICULATIONS[value]?.group;
+        // 同じ group の別の記号を外す（group がない記号は何も外さない）
+        list = list.filter((name) => name === value || !group || ARTICULATIONS[name]?.group !== group);
+      }
+      n.articulations = list;
       if (n.articulations.length === 0) delete n.articulations;
     } else if (kind === "technique") {
       // 奏法：いくつでも付けられるが、同じ group のもの（pizz. と arco）は1つだけ

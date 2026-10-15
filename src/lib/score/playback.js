@@ -54,11 +54,15 @@ const DEFAULT_DYNAMIC = "mf";
 // ----------------------------------------------------------
 const GATE_NORMAL = 0.95; // ふつう：少しだけ短くして、音と音の間に切れ目を作る
 const GATE_STACCATO = 0.5; // スタッカート：半分で切る
+const GATE_STACCATISSIMO = 0.25; // スタッカーティシモ：4分の1で切る（ステップ11-1a）
 const GATE_TENUTO = 1.0; // テヌート：いっぱいに鳴らす
 const GATE_SLUR = 1.0; // スラーの中：切れ目なしでつなげる
 
 // アクセントで強くする量（0〜127 の強さに足す）
 const ACCENT_BOOST = 20;
+
+// マルカートで強くする量（アクセントより強くする）（ステップ11-1a）
+const MARCATO_BOOST = 30;
 
 // フェルマータでのばす倍率（2 なら、その音符の長さの2倍）（ステップ6-3b）
 const FERMATA_RATE = 2;
@@ -110,14 +114,13 @@ function applyDynamic(dynamic, current) {
 // 音符の記号から、音を出す長さの割合を決める（ステップ6-3a）
 //   note   … 音符のデータ
 //   legato … スラーの中で、次の音とつなげるか
-// 優先する順：スタッカート → テヌート → スラー → ふつう
+// 優先する順：スタッカーティシモ → スタッカート → テヌート → スラー → ふつう
 // （スラーの中でもスタッカートが付いていれば短く切る）
 // ----------------------------------------------------------
 function noteGate(note, legato) {
   const articulations = note.articulations ?? [];
+  if (articulations.includes("staccatissimo")) return GATE_STACCATISSIMO;
   if (articulations.includes("staccato")) return GATE_STACCATO;
-  if (articulations.includes("tenuto")) return GATE_TENUTO;
-  if (legato) return GATE_SLUR;
   return GATE_NORMAL;
 }
 
@@ -330,9 +333,12 @@ export function buildEvents(score, startMeasure, partIndex) {
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
         const connected = gate >= 1;
 
-        // アクセントが付いていたら、少し強くする（127 をこえないようにする）
-        const accented = (note.articulations ?? []).includes("accent");
-        const velocity = accented ? Math.min(127, baseVelocity + ACCENT_BOOST) : baseVelocity;
+        // アクセント・マルカートが付いていたら、強くする（127 をこえないようにする）（マルカートはステップ11-1a）
+        const articulations = note.articulations ?? [];
+        let boost = 0;
+        if (articulations.includes("accent")) boost = ACCENT_BOOST;
+        if (articulations.includes("marcato")) boost = MARCATO_BOOST;
+        const velocity = Math.min(127, baseVelocity + boost);
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
           // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
