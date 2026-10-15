@@ -4,7 +4,7 @@
 // （記号の一覧表は ../symbols.js にある）
 // ==========================================================
 
-import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
 
 // フェルマータを持ち上げる量（ピクセル。マイナスが上）
 const FERMATA_LIFT = -6;
@@ -41,6 +41,16 @@ export function addSymbols(VF, staveNote, note) {
     const bowing = new VF.Articulation(BOWINGS[note.bowing].vf);
     bowing.setPosition(ABOVE);
     staveNote.addModifier(bowing, 0);
+  }
+
+  // ②-2 弦楽器の記号（ハーモニクス・左手ピチカート・バルトーク・ピチカート）（ステップ11-1b）
+  //      弓の記号と同じく、いつも五線の上に付ける
+  for (const name of note.stringMarks ?? []) {
+    const symbol = STRING_MARKS[name];
+    if (!symbol) continue; // 表にない名前は無視する
+    const mark = new VF.Articulation(symbol.vf);
+    mark.setPosition(ABOVE);
+    staveNote.addModifier(mark, 0);
   }
 
   // ③ 指番号（弓の記号の上に小さい数字で書く。複数あれば、付けた順に下から積み重ねる）

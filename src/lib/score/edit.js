@@ -11,7 +11,7 @@
 // ==========================================================
 
 import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups } from "./model.js";
-import { ARTICULATIONS, TECHNIQUES } from "./symbols.js";
+import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
 
@@ -538,6 +538,7 @@ function toggleInList(list, value) {
 //   kind  … 記号の種類
 //            'bowing'（弓）・'fingering'（指番号）・'articulation'（スタッカートなど）
 //            'fermata'（フェルマータ）・'technique'（奏法）・'dynamic'（強弱）
+//            'stringMark'（ハーモニクス・左手ピチカートなど）（ステップ11-1b）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱）は、別のものを押すと入れ替わる
 // 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
@@ -583,6 +584,17 @@ export function toggleNoteSymbol(score, selection, kind, value) {
       }
       n.articulations = list;
       if (n.articulations.length === 0) delete n.articulations;
+    } else if (kind === "stringMark") {
+      // 弦楽器の記号：いくつでも付けられるが、同じ group のもの（左手ピチカートとバルトーク・ピチカート）は1つだけ（ステップ11-1b）
+      const adding = !(n.stringMarks ?? []).includes(value);
+      let list = toggleInList(n.stringMarks, value);
+      if (adding) {
+        const group = STRING_MARKS[value]?.group;
+        // 同じ group の別の記号を外す（group がない記号は何も外さない）
+        list = list.filter((name) => name === value || !group || STRING_MARKS[name]?.group !== group);
+      }
+      n.stringMarks = list;
+      if (n.stringMarks.length === 0) delete n.stringMarks;
     } else if (kind === "technique") {
       // 奏法：いくつでも付けられるが、同じ group のもの（pizz. と arco）は1つだけ
       const adding = !(n.techniques ?? []).includes(value);

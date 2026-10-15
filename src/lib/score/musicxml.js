@@ -32,7 +32,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -342,11 +342,15 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
     inner.push("          </articulations>");
   }
 
-  // 弓（ダウン・アップ）と指番号
+  // 弓（ダウン・アップ）と指番号、弦楽器の記号（ハーモニクス・左手ピチカート・バルトーク・ピチカート）（弦楽器の記号はステップ11-1b）
   const fingerings = note.fingerings ?? [];
-  if (note.bowing || fingerings.length > 0) {
+  const stringMarks = note.stringMarks ?? [];
+  if (note.bowing || fingerings.length > 0 || stringMarks.length > 0) {
     inner.push("          <technical>");
     if (note.bowing) inner.push(`            <${BOWINGS[note.bowing].musicxml}/>`);
+    stringMarks.forEach((name) => {
+      inner.push(`            <${STRING_MARKS[name].musicxml}/>`);
+    });
     fingerings.forEach((finger) => {
       inner.push(`            <fingering>${finger}</fingering>`);
     });

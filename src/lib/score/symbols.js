@@ -33,6 +33,18 @@ export const ARTICULATIONS = {
 };
 
 // ----------------------------------------------------------
+// 弦楽器の記号（データの stringMarks に名前の並びを入れる。いくつでも付けられる）（ステップ11-1b）
+// いつも五線の上（弓の記号のそば）に付く
+//   group … 同じ group のものは、1つの音に1つだけ
+//           pluck … はじく記号（左手ピチカート・バルトーク・ピチカート）
+// ----------------------------------------------------------
+export const STRING_MARKS = {
+  harmonic: { label: "ハーモニクス", vf: "ah", musicxml: "harmonic", icon: "\uE614" },
+  lhpizz: { label: "左手ピチカート", vf: "a+", musicxml: "stopped", icon: "\uE633", group: "pluck" },
+  snappizz: { label: "バルトーク・ピチカート", vf: "ao", musicxml: "snap-pizzicato", icon: "\uE631", group: "pluck" },
+};
+
+// ----------------------------------------------------------
 // フェルマータ（データの fermata に true を入れる）
 // ----------------------------------------------------------
 export const FERMATA = { label: "フェルマータ", vf: "a@a", musicxml: "fermata", icon: "\uE4C0" };

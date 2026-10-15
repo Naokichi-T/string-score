@@ -326,9 +326,13 @@ export function buildEvents(score, startMeasure, partIndex) {
 
         if (!playing) return;
 
+        // 左手ピチカート・バルトーク・ピチカートの音は、その音だけピチカートで鳴らす（ステップ11-1b）
+        const stringMarks = note.stringMarks ?? [];
+        const plucked = pizz || stringMarks.includes("lhpizz") || stringMarks.includes("snappizz");
+
         // 音を出す長さ（ティック）：楽譜の長さ × 割合
         // ピチカートは、はじいた音が自然に消えていくので、長さの記号（スタッカート・スラーなど）は効かせない
-        const gate = pizz ? GATE_NORMAL : noteGate(note, legato);
+        const gate = plucked ? GATE_NORMAL : noteGate(note, legato);
         const soundLength = length * gate;
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
         const connected = gate >= 1;
@@ -338,6 +342,8 @@ export function buildEvents(score, startMeasure, partIndex) {
         let boost = 0;
         if (articulations.includes("accent")) boost = ACCENT_BOOST;
         if (articulations.includes("marcato")) boost = MARCATO_BOOST;
+        // バルトーク・ピチカートは強くはじくので、アクセントと同じだけ強くする（ステップ11-1b）
+        if (stringMarks.includes("snappizz")) boost = Math.max(boost, ACCENT_BOOST);
         const velocity = Math.min(127, baseVelocity + boost);
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
@@ -359,7 +365,7 @@ export function buildEvents(score, startMeasure, partIndex) {
             ticks: length,
             soundTicks: soundLength,
             connected: connected,
-            pizz: pizz, // ピチカートで鳴らすか（ステップ6-3c）
+            pizz: plucked, // ピチカートで鳴らすか（ステップ6-3c。左手・バルトーク・ピチカートはステップ11-1b）
             velocity: velocity,
             fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
           };

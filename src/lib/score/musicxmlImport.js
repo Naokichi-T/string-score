@@ -38,7 +38,7 @@
 
 import { unzipSync } from "fflate";
 import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
-import { BOWINGS, ARTICULATIONS, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
@@ -85,6 +85,7 @@ function reverseTable(table) {
 }
 const XML_TO_BOWING = reverseTable(BOWINGS);
 const XML_TO_ARTICULATION = reverseTable(ARTICULATIONS);
+const XML_TO_STRING_MARK = reverseTable(STRING_MARKS); // ステップ11-1b
 const XML_TO_DYNAMIC = reverseTable(DYNAMICS);
 
 // ----------------------------------------------------------
@@ -483,12 +484,20 @@ function readNotations(noteElement, note, state, counter) {
       }
     });
 
-    // 弓・指番号
+    // 弓・指番号・弦楽器の記号（弦楽器の記号はステップ11-1b）
     childElements(notations, "technical").forEach((group) => {
       for (const child of Array.from(group.childNodes)) {
         if (child.nodeType !== 1) continue;
         if (XML_TO_BOWING[child.nodeName]) {
           note.bowing = XML_TO_BOWING[child.nodeName];
+        } else if (XML_TO_STRING_MARK[child.nodeName]) {
+          // ハーモニクス・左手ピチカート・バルトーク・ピチカート
+          // 同じ group の記号（左手ピチカートとバルトーク・ピチカート）がもう付いていたら、あとのほうは入れない
+          const name = XML_TO_STRING_MARK[child.nodeName];
+          const group = STRING_MARKS[name].group;
+          const list = note.stringMarks ?? [];
+          const sameGroup = list.some((other) => group && STRING_MARKS[other].group === group);
+          if (!list.includes(name) && !sameGroup) note.stringMarks = [...list, name];
         } else if (child.nodeName === "fingering") {
           // 指番号は 0〜4 だけ（同じ数字は1つだけ）
           const finger = Number(child.textContent.trim());
