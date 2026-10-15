@@ -927,9 +927,10 @@ export function deleteMeasures(score, from, to) {
 // ----------------------------------------------------------
 // 関数：sameTime
 // 2つの拍子が同じか調べる
+// （ステップ8-1b：コモンタイム・カットタイムの印（symbol）も同じときだけ「同じ」とする。4/4 と C は別のもの）
 // ----------------------------------------------------------
 function sameTime(a, b) {
-  return a.beats === b.beats && a.beatType === b.beatType;
+  return a.beats === b.beats && a.beatType === b.beatType && (a.symbol ?? null) === (b.symbol ?? null);
 }
 
 // ==========================================================
@@ -939,7 +940,7 @@ function sameTime(a, b) {
 // ----------------------------------------------------------
 // 関数：changeTime
 // from 小節目から to 小節目までの拍子を変える（全パートいっしょに。番号は 0 から）
-//   time … 新しい拍子 { beats, beatType }
+//   time … 新しい拍子 { beats, beatType }（C・¢ のときは symbol: "common"・"cut" も付く）
 //   to   … null のときは「次に拍子が変わる小節の手前まで（なければ最後まで）」
 // 入りきらない音がある小節が1つでもあるときは、何も変えない
 // 変えるときは、小節の中身（終わりの休符より前の音）はそのままにして、
@@ -994,6 +995,8 @@ export function changeTime(score, from, to, time) {
 
   // ⑤ 楽譜全体の小節の情報に、拍子を書く
   newScore.measures[from].time = { beats: time.beats, beatType: time.beatType };
+  // コモンタイム・カットタイムなら、その印も書く（ステップ8-1b）
+  if (time.symbol) newScore.measures[from].time.symbol = time.symbol;
   // 範囲の中にあった、ほかの拍子の変化は消す
   for (let m = from + 1; m <= last; m++) {
     delete newScore.measures[m].time;

@@ -6,14 +6,16 @@
   // （ステップ5-3：拍子の変更を追加）
   // （ステップ5-4：調の変更を追加）
   // （ステップ5-5：音部記号の変更を追加）
+  // （ステップ8-1b：拍子のボタンに、コモンタイム（C）・カットタイム（¢）を追加）
   // ==========================================================
 
   // 親から受け取るもの
   //   canDelete   … 小節を消せるか（何も選んでいない・小節が1つしか残らないときは false）
   //   onmeasure   … ボタンが押されたときに呼ぶ関数
   //                 "before"（前に追加）・"after"（後ろに追加）・"delete"（削除）を渡す
-  //   currentTime … 選んでいる小節の拍子 { beats, beatType }（ボタンを青くするのに使う）
-  //   ontime      … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子 { beats, beatType } を渡す）
+  //   currentTime … 選んでいる小節の拍子 { beats, beatType, symbol }（ボタンを青くするのに使う）
+  //   ontime      … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子 { beats, beatType, symbol } を渡す）
+  //                 symbol は C のとき "common"、¢ のとき "cut"。数字の拍子のときは付かない
   //   currentKey  … 選んでいる小節の調（♯の数がプラス、♭の数がマイナス。選ぶ欄に出すのに使う）
   //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
   //   currentClef … 選んでいるパート・小節の音部記号（何も選んでいないときは null。ボタンを青くするのに使う）
@@ -21,11 +23,17 @@
   let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {}, currentKey = 0, onkey = () => {}, currentClef = null, onclef = () => {} } = $props();
 
   // よく使う拍子（ボタンにして並べる）
+  //   symbol … コモンタイム・カットタイムのときだけ付ける（ボタンには数字ではなく記号を出す）
+  //   icon   … 記号のボタンに出す、楽譜用フォント（Bravura）の文字
+  //   name   … マウスを乗せたときに出す名前（記号のボタンだけ）
+  // （ステップ8-1b：C は 4/4 の隣、¢ は 2/2 の隣に置いた）
   const PRESETS = [
     { beats: 2, beatType: 4 },
     { beats: 3, beatType: 4 },
     { beats: 4, beatType: 4 },
+    { beats: 4, beatType: 4, symbol: "common", icon: "\uE08A", name: "コモンタイム（4/4 と同じ長さ）" },
     { beats: 2, beatType: 2 },
+    { beats: 2, beatType: 2, symbol: "cut", icon: "\uE08B", name: "カットタイム（2/2 と同じ長さ）" },
     { beats: 3, beatType: 8 },
     { beats: 6, beatType: 8 },
   ];
@@ -82,9 +90,21 @@
   // ----------------------------------------------------------
   // 関数：isCurrent
   // その拍子が、選んでいる小節の拍子と同じか調べる（同じならボタンを青くする）
+  // （ステップ8-1b：記号の印（symbol）も比べる。4/4 の小節で C のボタンは青くしない）
   // ----------------------------------------------------------
   function isCurrent(time) {
-    return time.beats === currentTime.beats && time.beatType === currentTime.beatType;
+    const sameSymbol = (time.symbol ?? null) === (currentTime.symbol ?? null);
+    return time.beats === currentTime.beats && time.beatType === currentTime.beatType && sameSymbol;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：pickTime
+  // 拍子のボタンが押されたとき：ボタン用の情報（icon・name）を除いて、拍子のデータだけを親に渡す
+  // ----------------------------------------------------------
+  function pickTime(time) {
+    const newTime = { beats: time.beats, beatType: time.beatType };
+    if (time.symbol) newTime.symbol = time.symbol;
+    ontime(newTime);
   }
 </script>
 
@@ -104,12 +124,24 @@
   <div class="group">
     <span class="label">拍子</span>
     {#each PRESETS as time}
-      <button class="time" class:active={isCurrent(time)} onclick={() => ontime(time)} title="選んでいる小節から、次に拍子が変わる所までの拍子を変える（範囲を選んでいるときは、範囲にかかる小節だけ）">
-        <!-- 分数のように、上の数字と下の数字を縦に並べる -->
-        <span class="fraction">
-          <span>{time.beats}</span>
-          <span>{time.beatType}</span>
-        </span>
+      <button
+        class="time"
+        class:active={isCurrent(time)}
+        onclick={() => pickTime(time)}
+        title={`${time.name ? time.name + "：" : ""}選んでいる小節から、次に拍子が変わる所までの拍子を変える（範囲を選んでいるときは、範囲にかかる小節だけ）`}
+      >
+        {#if time.symbol}
+          <!-- C・¢ は楽譜用フォントの記号を SVG で描く（文字の基準の線を、ボタンのまん中に合わせるため） -->
+          <svg width="30" height="40" viewBox="0 0 30 40">
+            <text x="15" y="20" class="time-icon">{time.icon}</text>
+          </svg>
+        {:else}
+          <!-- 分数のように、上の数字と下の数字を縦に並べる -->
+          <span class="fraction">
+            <span>{time.beats}</span>
+            <span>{time.beatType}</span>
+          </span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -237,6 +269,17 @@
   }
   /* 中の SVG ではマウスの操作を受け取らず、下のボタンに通す（「小節」タブが押せなかったときと同じ対策） */
   button.clef svg {
+    pointer-events: none;
+  }
+  /* C・¢ の記号（楽譜用フォント。Bravura の拍子記号は、文字の基準の線が記号のまん中にある） */
+  .time-icon {
+    font-family: "Bravura";
+    font-size: 32px;
+    fill: currentColor;
+    text-anchor: middle; /* x の位置を記号の左右のまん中にする */
+  }
+  /* C・¢ の SVG も、マウスの操作を下のボタンに通す */
+  button.time svg {
     pointer-events: none;
   }
   select {

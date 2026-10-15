@@ -5,7 +5,7 @@
 // ==========================================================
 
 import { CLEFS } from "../model.js";
-import { timeToString, keyToVexKey } from "./helpers.js";
+import { timeToSignature, keyToVexKey } from "./helpers.js";
 
 // 2段目からの段の頭で、音部記号・調号と最初の音符の間に空けるすき間（ピクセル）
 // （VexFlow のままだと、最初の音符が音部記号にくっついて、段をまたぐタイを描く場所がない）
@@ -31,7 +31,8 @@ export function buildStates(score) {
 
   score.measures.forEach((info, i) => {
     // 拍子が変わったか（最初の小節は必ず表示するので true 扱い）
-    const timeChanged = i === 0 || (info.time !== undefined && timeToString(info.time) !== timeToString(time));
+    // （ステップ8-1b：4/4 と C のように、長さが同じでも書き方が違えば「変わった」とする）
+    const timeChanged = i === 0 || (info.time !== undefined && timeToSignature(info.time) !== timeToSignature(time));
     if (info.time) time = info.time;
 
     // 調が変わったか（最初の小節は必ず表示するので true 扱い）
@@ -92,7 +93,7 @@ export function addModifiers(VF, stave, state, p, isLineStart, isFirst) {
 
   // 拍子記号（変わる小節だけ。最初の小節は変わる扱い）
   if (state.timeChanged) {
-    stave.addTimeSignature(timeToString(state.time));
+    stave.addTimeSignature(timeToSignature(state.time)); // C・¢ の印があれば記号で描く（ステップ8-1b）
   }
 }
 

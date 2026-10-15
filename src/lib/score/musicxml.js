@@ -2,6 +2,7 @@
 // musicxml.js
 // 楽譜データと MusicXML（ほかの楽譜アプリと楽譜をやりとりするための形）を変換する
 // （ステップ8-1：書き出しの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
+// （ステップ8-1b：コモンタイム（C）・カットタイム（¢）の拍子記号）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -143,7 +144,9 @@ function attributesXml(isFirst, key, time, clef) {
     lines.push("        </key>");
   }
   if (time) {
-    lines.push("        <time>");
+    // コモンタイム・カットタイムは symbol で記号を指定する（数字の 4/4・2/2 も一緒に書く決まり）
+    const symbol = time.symbol ? ` symbol="${time.symbol}"` : "";
+    lines.push(`        <time${symbol}>`);
     lines.push(`          <beats>${time.beats}</beats>`);
     lines.push(`          <beat-type>${time.beatType}</beat-type>`);
     lines.push("        </time>");
@@ -261,6 +264,15 @@ function barlineXml(isLast, nextKeyChanges) {
 }
 
 // ----------------------------------------------------------
+// 関数：sameTimeSignature
+// 2つの拍子記号が同じか調べる（数字に加えて、C・¢ の印も同じときだけ「同じ」）（ステップ8-1b）
+// ----------------------------------------------------------
+function sameTimeSignature(a, b) {
+  if (!a || !b) return false;
+  return a.beats === b.beats && a.beatType === b.beatType && (a.symbol ?? null) === (b.symbol ?? null);
+}
+
+// ----------------------------------------------------------
 // 関数：partXml
 // 1つのパートの <part> を作る
 //   score … 楽譜データ
@@ -275,16 +287,27 @@ function partXml(score, p) {
   let tiedIn = false; // 前の小節の最後の音から、タイでつながってきているか
   const lastIndex = part.measures.length - 1;
 
+  // 1つ前の小節の拍子・調・音部記号（変わったかどうかを比べるため）（ステップ8-1b）
+  let prevTime = null;
+  let prevKey = null;
+  let prevClef = null;
+
   part.measures.forEach((measure, i) => {
     const isFirst = i === 0;
-    const info = score.measures[i]; // 全パート共通の小節の情報（拍子・調）
     lines.push(`    <measure number="${i + 1}">`);
 
-    // 小節の頭の情報（1小節目はいつも書く。途中は変わったときだけ）
-    const key = isFirst ? keyAt(score, 0) : info.key;
-    const time = isFirst ? timeAt(score, 0) : info.time;
-    const clef = isFirst ? (measure.clef ?? INSTRUMENTS[part.instrument].clef) : measure.clef;
+    // 小節の頭の情報（1小節目はいつも書く。途中は、前の小節と違うときだけ書く）
+    // （ステップ8-1b：データに書いてあっても、前と同じなら書かない。小節の削除などで同じ拍子が残ることがあるため）
+    const nowTime = timeAt(score, i);
+    const nowKey = keyAt(score, i);
+    const nowClef = measure.clef ?? prevClef ?? INSTRUMENTS[part.instrument].clef;
+    const time = isFirst || !sameTimeSignature(nowTime, prevTime) ? nowTime : undefined;
+    const key = isFirst || nowKey !== prevKey ? nowKey : undefined;
+    const clef = isFirst || nowClef !== prevClef ? nowClef : undefined;
     lines.push(...attributesXml(isFirst, key, time, clef));
+    prevTime = nowTime;
+    prevKey = nowKey;
+    prevClef = nowClef;
 
     // テンポは1小節目の一番上のパートにだけ書く
     if (isFirst && p === 0) lines.push(...tempoXml(score));
