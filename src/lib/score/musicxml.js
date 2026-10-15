@@ -3,6 +3,7 @@
 // 楽譜データと MusicXML（ほかの楽譜アプリと楽譜をやりとりするための形）を変換する
 // （ステップ8-1：書き出しの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
 // （ステップ8-1b：コモンタイム（C）・カットタイム（¢）の拍子記号）
+// （ステップ8-2：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -12,8 +13,8 @@
 //     <part id="P1">
 //       <measure number="1">
 //         <attributes>長さの単位・調・拍子・音部記号</attributes>
-//         <direction>テンポ</direction>
-//         <note>音符・休符</note> …
+//         <direction>テンポ・強弱・pizz.・松葉など（音符の前に置く）</direction>
+//         <note>音符・休符（スラー・弓・指番号などは、音符の中の <notations> に書く）</note> …
 //       </measure> …
 //     </part> …
 //   </score-partwise>
@@ -26,6 +27,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
+import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符をいくつに分けるか（16分音符＝1 にするので 4）
 const DIVISIONS = 4;
@@ -235,16 +237,118 @@ function noteXml(note, accidental, tieStop) {
     lines.push(`        <accidental>${ACCIDENTAL_TO_XML[accidental]}</accidental>`);
   }
 
-  // タイ（表示用の <tied>。MusicXML では再生用と表示用の両方を書く決まり）
-  if (tieStop || tieStart) {
-    lines.push("        <notations>");
-    if (tieStop) lines.push(`          <tied type="stop"/>`);
-    if (tieStart) lines.push(`          <tied type="start"/>`);
-    lines.push("        </notations>");
-  }
+  // 音符に付く記号（タイの表示・スラー・アーティキュレーション・弓・指番号・フェルマータ）
+  lines.push(...notationsXml(note, tieStop, tieStart));
 
   lines.push("      </note>");
   return lines;
+}
+
+// ----------------------------------------------------------
+// 関数：notationsXml
+// 音符の中に書く記号の <notations> を作る（ステップ8-2）
+//   note      … 音符・休符のデータ
+//   tieStop   … 前の音からタイでつながってきているか
+//   tieStart  … 次の音へタイでつながるか
+// 中に書くもの（MusicXML の名前）
+//   タイの表示 … <tied>（再生用の <tie> とは別に、表示用にも書く決まり）
+//   スラー     … <slur type="start"> ～ <slur type="stop">
+//   スタッカートなど … <articulations> の中
+//   弓・指番号 … <technical> の中（弦楽器の奏法の記号はここ）
+//   フェルマータ … <fermata>
+// 何もなければ空の配列を返す（<notations> 自体を書かない）
+// ----------------------------------------------------------
+function notationsXml(note, tieStop, tieStart) {
+  const inner = []; // <notations> の中身
+
+  // タイの表示
+  if (tieStop) inner.push(`          <tied type="stop"/>`);
+  if (tieStart) inner.push(`          <tied type="start"/>`);
+
+  // スラー（このアプリは同時に1本だけなので、番号はいつも 1）
+  if (note.slur === "start") inner.push(`          <slur type="start" number="1"/>`);
+  if (note.slur === "stop") inner.push(`          <slur type="stop" number="1"/>`);
+
+  // スタッカート・テヌート・アクセント（symbols.js の musicxml の名前を使う）
+  const articulations = note.articulations ?? [];
+  if (articulations.length > 0) {
+    inner.push("          <articulations>");
+    articulations.forEach((name) => {
+      inner.push(`            <${ARTICULATIONS[name].musicxml}/>`);
+    });
+    inner.push("          </articulations>");
+  }
+
+  // 弓（ダウン・アップ）と指番号
+  const fingerings = note.fingerings ?? [];
+  if (note.bowing || fingerings.length > 0) {
+    inner.push("          <technical>");
+    if (note.bowing) inner.push(`            <${BOWINGS[note.bowing].musicxml}/>`);
+    fingerings.forEach((finger) => {
+      inner.push(`            <fingering>${finger}</fingering>`);
+    });
+    inner.push("          </technical>");
+  }
+
+  // フェルマータ（upright：五線の上に付く、ふつうの向き）
+  if (note.fermata) inner.push(`          <${FERMATA.musicxml} type="upright"/>`);
+
+  if (inner.length === 0) return [];
+  return ["        <notations>", ...inner, "        </notations>"];
+}
+
+// ----------------------------------------------------------
+// 関数：directionsBeforeXml
+// 音符の前に置く <direction>（強弱・pizz./arco・松葉の始まり）を作る（ステップ8-2）
+// MusicXML では、強弱などは音符の中ではなく、音符の直前に「指示」として書く
+//   note … 音符・休符のデータ
+// 戻り値：XML の行の配列（何もなければ空の配列）
+// ----------------------------------------------------------
+function directionsBeforeXml(note) {
+  const lines = [];
+
+  // 強弱（pp〜ff・sf・fp）：五線の下に書く
+  if (note.dynamic) {
+    lines.push(`      <direction placement="below">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <dynamics><${DYNAMICS[note.dynamic].musicxml}/></dynamics>`);
+    lines.push("        </direction-type>");
+    lines.push("      </direction>");
+  }
+
+  // 奏法の文字（pizz.・arco）：五線の上に文字で書き、再生用に「はじく・弓で弾く」の印も付ける
+  (note.techniques ?? []).forEach((name) => {
+    const pizzicato = name === "pizz." ? "yes" : "no";
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <words>${escapeXml(TECHNIQUES[name].musicxml)}</words>`);
+    lines.push("        </direction-type>");
+    lines.push(`        <sound pizzicato="${pizzicato}"/>`);
+    lines.push("      </direction>");
+  });
+
+  // 松葉の始まり（＜ は crescendo、＞ は diminuendo）：五線の下に書く
+  if (note.wedge === "crescendo" || note.wedge === "diminuendo") {
+    lines.push(`      <direction placement="below">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <wedge type="${note.wedge}"/>`);
+    lines.push("        </direction-type>");
+    lines.push("      </direction>");
+  }
+
+  return lines;
+}
+
+// ----------------------------------------------------------
+// 関数：directionsAfterXml
+// 音符のあとに置く <direction>（松葉の終わり）を作る（ステップ8-2）
+// 終わりの音の「あと」に置くと、松葉がその音の終わりまでのびる（このアプリの表示と同じ）
+//   note … 音符・休符のデータ
+// 戻り値：XML の行の配列（何もなければ空の配列）
+// ----------------------------------------------------------
+function directionsAfterXml(note) {
+  if (note.wedge !== "stop") return [];
+  return [`      <direction placement="below">`, "        <direction-type>", `          <wedge type="stop"/>`, "        </direction-type>", "      </direction>"];
 }
 
 // ----------------------------------------------------------
@@ -319,7 +423,9 @@ function partXml(score, p) {
     let prevTie = tiedIn; // 1つ前の音が、この音にタイでつながっているか
     measure.notes.forEach((note, k) => {
       const tieStop = prevTie && !note.rest;
+      lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
       lines.push(...noteXml(note, accidentals[k], tieStop));
+      lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
     });
     tiedIn = prevTie; // 次の小節へ引き継ぐ
