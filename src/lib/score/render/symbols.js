@@ -4,7 +4,7 @@
 // （記号の一覧表は ../symbols.js にある）
 // ==========================================================
 
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbols.js";
 
 // フェルマータを持ち上げる量（ピクセル。マイナスが上）
 const FERMATA_LIFT = -6;
@@ -51,6 +51,14 @@ export function addSymbols(VF, staveNote, note) {
     const mark = new VF.Articulation(symbol.vf);
     mark.setPosition(ABOVE);
     staveNote.addModifier(mark, 0);
+  }
+
+  // ②-3 装飾（トリルなど）（ステップ11-3a）
+  //      いつも五線の上。VexFlow は、弓などの記号の上・指番号などの文字の下に積み重ねる
+  if (note.ornament && ORNAMENTS[note.ornament]) {
+    const ornament = new VF.Ornament(ORNAMENTS[note.ornament].vf);
+    ornament.setPosition(ABOVE);
+    staveNote.addModifier(ornament, 0);
   }
 
   // ③ 指番号（弓の記号の上に小さい数字で書く。複数あれば、付けた順に下から積み重ねる）
@@ -112,6 +120,79 @@ export function drawBreath(VF, context, staveNote, nextStaveNote, stave, breath)
   context.save();
   context.setFont("Bravura", 24); // 楽譜用フォントで記号の形を描く
   context.fillText(symbol.icon, x, y);
+  context.restore();
+}
+
+// トリルの波線を、tr の文字の基準線からどれだけ上に描くか（ピクセル）（ステップ11-3a）
+const TRILL_LINE_RAISE = 7;
+
+// ----------------------------------------------------------
+// 関数：drawTrillLine
+// トリルの波線を、音符1つ分だけ描く（ステップ11-3a）
+// トリルの音が次の音にタイでつながっているとき、タイの最後の音まで波線をのばす
+// 小節・段をまたいでも続くように、音符1つ分ずつ描いて、続きの情報を次の音符に渡す
+//   VF            … VexFlow の部品一式
+//   context       … 描く先
+//   staveNote     … VexFlow の音符（位置が決まったあとのもの）
+//   nextStaveNote … 同じ小節の次の音符（小節の最後の音符なら null）
+//   stave         … その音符の五線
+//   note          … 音符のデータ
+//   active        … 前の音符から続いている波線 { dy }（続いていなければ null）
+//                   dy … 五線の一番上の線から、波線までの高さの差（段が変わっても同じ高さに描くため）
+// 戻り値：次の音符に続く波線 { dy }（ここで終わるなら null）
+// ----------------------------------------------------------
+export function drawTrillLine(VF, context, staveNote, nextStaveNote, stave, note, active) {
+  const topLineY = stave.getYForLine(0);
+  let startX; // 波線を描き始める横の位置
+  let dy; // 五線の一番上の線から、波線までの高さの差
+
+  if (note.ornament === "trill") {
+    // トリルの始まり：次の音にタイでつながっていなければ、波線はいらない
+    if (!note.tie) return null;
+    const ornament = staveNote.getModifiersByType("Ornament")[0];
+    if (!ornament) return null;
+    // tr の文字の右から描き始める（getX・getY は、描いたあとの tr の文字の左端・基準線）
+    startX = ornament.getX() + ornament.getWidth() + 3;
+    dy = ornament.getY() - TRILL_LINE_RAISE - topLineY;
+  } else if (active) {
+    // タイで続いている音：小節の最初の音なら、小節の中で音符が始まる所から描く（小節線のすぐ後ろからつなげる）
+    const isFirstInMeasure = staveNote.getVoice().getTickables()[0] === staveNote;
+    startX = isFirstInMeasure ? stave.getNoteStartX() - 4 : staveNote.getAbsoluteX();
+    dy = active.dy;
+  } else {
+    return null;
+  }
+
+  // 描き終わる横の位置：次の音符の所まで（小節の最後の音符なら小節の終わりまで）
+  // この音でタイが終わるなら、次の音符の少し手前で止める
+  const last = !note.tie;
+  const endX = nextStaveNote ? nextStaveNote.getAbsoluteX() : stave.getX() + stave.getWidth();
+  drawWavyLine(context, startX, last ? endX - 8 : endX, topLineY + dy);
+
+  return last ? null : { dy: dy };
+}
+
+// ----------------------------------------------------------
+// 関数：drawWavyLine
+// 横向きのギザギザの線（波線）を描く（ステップ11-3a）
+//   context … 描く先
+//   x1, x2  … 描き始める・描き終わる横の位置
+//   y       … 線のまん中の高さ
+// ----------------------------------------------------------
+function drawWavyLine(context, x1, x2, y) {
+  if (x2 - x1 < 6) return; // 短すぎるときは描かない
+  context.save();
+  context.setLineWidth(1.4);
+  context.beginPath();
+  context.moveTo(x1, y);
+  let x = x1;
+  let up = true; // 次に上へ行くか、下へ行くか
+  while (x + 3 <= x2) {
+    x = x + 3;
+    context.lineTo(x, up ? y - 2.5 : y + 2.5);
+    up = !up;
+  }
+  context.stroke();
   context.restore();
 }
 

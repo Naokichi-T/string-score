@@ -32,7 +32,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -356,6 +356,14 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
       inner.push(`            <fingering>${finger}</fingering>`);
     });
     inner.push("          </technical>");
+  }
+
+  // 装飾（トリルなど）（ステップ11-3a）
+  // トリルの波線は、タイから自動で描いているので書き出さない（読むアプリでは tr だけが出る）
+  if (note.ornament) {
+    inner.push("          <ornaments>");
+    inner.push(`            <${ORNAMENTS[note.ornament].musicxml}/>`);
+    inner.push("          </ornaments>");
   }
 
   // フェルマータ（upright：五線の上に付く、ふつうの向き）

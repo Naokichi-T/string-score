@@ -23,7 +23,8 @@
 // }
 // ==========================================================
 
-import { measureTicks, noteTicks, timeAt, TICKS_PER_16TH } from "./model.js";
+import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH } from "./model.js";
+import { keyAlters } from "./accidentals.js";
 
 // ----------------------------------------------------------
 // 強弱記号ごとの音の強さ（0〜127。MIDI と同じ決め方）
@@ -140,6 +141,68 @@ function nextPizz(note, current) {
   if (techniques.includes("pizz.")) return true;
   if (techniques.includes("arco")) return false;
   return current;
+}
+
+// トリルで行き来する1回分の長さ（ティック）：32分音符（ステップ11-3a）
+const TRILL_STEP = TICKS_PER_16TH / 2;
+
+// 音名の並び（1つ上の音を決めるのに使う）（ステップ11-3a）
+const STEP_NAMES = ["C", "D", "E", "F", "G", "A", "B"];
+
+// ----------------------------------------------------------
+// 関数：upperNeighbor
+// 音符の「1つ上の音」を返す（トリルで行き来する音）（ステップ11-3a）
+// ♯♭は、調号と、同じ小節でその音より前に出てきた同じ高さの音に合わせる
+// （例：ト長調のミ → ファ♯。同じ小節の前にファ♮があれば → ファ♮）
+//   score … 楽譜データ
+//   part  … パートのデータ
+//   i     … 何小節目か（0 から）
+//   j     … 小節の中で何番目の音か（0 から）
+// 戻り値：音の高さ { step, octave, alter }
+// ----------------------------------------------------------
+function upperNeighbor(score, part, i, j) {
+  const pitch = part.measures[i].notes[j].pitch;
+  const index = STEP_NAMES.indexOf(pitch.step);
+  const step = STEP_NAMES[(index + 1) % 7]; // シの1つ上はド
+  const octave = index === 6 ? pitch.octave + 1 : pitch.octave; // シからドに上がるときはオクターブも上がる
+
+  // まず調号の ♯♭
+  let alter = keyAlters(keyAt(score, i))[step];
+  // 同じ小節で、前に同じ高さ（音名とオクターブ）の音があれば、その音の ♯♭ が続いている
+  part.measures[i].notes.slice(0, j).forEach((n) => {
+    if (!n.rest && n.pitch.step === step && n.pitch.octave === octave) alter = n.pitch.alter ?? 0;
+  });
+  return { step: step, octave: octave, alter: alter };
+}
+
+// ----------------------------------------------------------
+// 関数：trillPieces
+// トリルの音を、主の音と1つ上の音を 32分音符ずつ行き来する音に分ける（ステップ11-3a）
+// 最後が主の音になるように、かけらの数が偶数なら上の音から始める
+//   event … 鳴らす音（trillUpper に1つ上の音が入っているもの）
+// 戻り値：分けた音の一覧
+// ----------------------------------------------------------
+function trillPieces(event) {
+  const total = event.soundTicks; // 音を出す長さ全体（フェルマータでのびたぶんも入っている）
+  const count = Math.max(1, Math.floor(total / TRILL_STEP)); // かけらの数
+  const pieces = [];
+  for (let k = 0; k < count; k++) {
+    const isLast = k === count - 1;
+    // 最後のかけらは、残りの長さを全部鳴らす
+    const length = isLast ? total - k * TRILL_STEP : TRILL_STEP;
+    // 最後から数えて偶数番目（最後・最後から3つ目…）が主の音
+    const isMain = (count - 1 - k) % 2 === 0;
+    pieces.push({
+      ...event,
+      pitch: isMain ? event.pitch : event.trillUpper,
+      startTick: event.startTick + k * TRILL_STEP,
+      ticks: length,
+      soundTicks: length,
+      connected: isLast ? event.connected : false, // 最後のかけら以外は、次のかけらと重ねずに切る
+      ornamentPiece: true, // 装飾で分けたかけら（sound.js で、余韻を短くして重ならないようにする）
+    });
+  }
+  return pieces;
 }
 
 // 弱音器（con sord.）を付けている間の音の強さの割合（ステップ11-2）
@@ -397,6 +460,7 @@ export function buildEvents(score, startMeasure, partIndex) {
             pizz: plucked, // ピチカートで鳴らすか（ステップ6-3c。左手・バルトーク・ピチカートはステップ11-1b）
             velocity: velocity,
             fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
+            trillUpper: note.ornament === "trill" ? upperNeighbor(score, part, i, j) : null, // トリルで行き来する1つ上の音（ステップ11-3a）
           };
           events.push(event);
           tiedEvent = event;
@@ -446,10 +510,20 @@ export function buildEvents(score, startMeasure, partIndex) {
     totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
   });
 
-  // 鳴り始める順に並べる（同じ時間なら上のパートから）
-  events.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
+  // トリルの音を、主の音と1つ上の音を行き来する音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a）
+  const played = [];
+  events.forEach((event) => {
+    if (event.trillUpper) {
+      played.push(...trillPieces(event));
+    } else {
+      played.push(event);
+    }
+  });
 
-  return { events: events, totalTicks: totalTicks, highlights: highlights };
+  // 鳴り始める順に並べる（同じ時間なら上のパートから）
+  played.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
+
+  return { events: played, totalTicks: totalTicks, highlights: highlights };
 }
 
 // ----------------------------------------------------------

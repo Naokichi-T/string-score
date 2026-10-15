@@ -15,7 +15,7 @@
 
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
-import { drawDynamic, drawBreath } from "./render/symbols.js";
+import { drawDynamic, drawBreath, drawTrillLine } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
@@ -231,6 +231,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ, line: 何段目か }
   const allNotes = score.parts.map(() => []);
 
+  // パートごとに、前の音符から続いているトリルの波線（続いていなければ null）（ステップ11-3a）
+  // 小節・段をまたいで続くので、段ごとの処理の外に置く
+  const trillLines = score.parts.map(() => null);
+
   // 段ごとの左右の端の位置（段をまたぐスラー・松葉を描くのに使う）
   // lineBounds[l] = { startX: 音符が始まる位置, endX: 段の右端 }
   const lineBounds = [];
@@ -331,13 +335,18 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
-      // 強弱とブレス・カエスーラを描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）（ブレス・カエスーラはステップ11-1c）
+      // 強弱・ブレス・カエスーラ・トリルの波線を描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）
+      // （ブレス・カエスーラはステップ11-1c、トリルの波線はステップ11-3a）
       score.parts.forEach((part, p) => {
         const tickables = voices[p].getTickables();
         part.measures[i].notes.forEach((note, j) => {
-          if (note.rest) return;
+          if (note.rest) {
+            trillLines[p] = null; // 休符でトリルの波線は切れる
+            return;
+          }
           if (note.dynamic) drawDynamic(VF, context, tickables[j], staves[p], note.dynamic);
           if (note.breath) drawBreath(VF, context, tickables[j], tickables[j + 1] ?? null, staves[p], note.breath);
+          trillLines[p] = drawTrillLine(VF, context, tickables[j], tickables[j + 1] ?? null, staves[p], note, trillLines[p]);
         });
       });
 

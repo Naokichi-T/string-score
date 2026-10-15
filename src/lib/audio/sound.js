@@ -301,7 +301,10 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
     // （ただし、短くしすぎないように、もとの長さの半分は鳴らす）
     let soundDuration = duration;
     let release = undefined; // undefined なら smplr のいつもの余韻（0.3 秒）
-    if (!event.connected) {
+    if (event.ornamentPiece && !event.connected) {
+      // トリルなどで分けた短いかけら：長さはそのまま鳴らし、余韻だけ短くして、次のかけらと重ならないようにする（ステップ11-3a）
+      release = SHORT_RELEASE;
+    } else if (!event.connected) {
       soundDuration = Math.max(duration * 0.5, duration - SHORT_RELEASE - NOTE_GAP);
       release = SHORT_RELEASE;
     }

@@ -540,8 +540,9 @@ function toggleInList(list, value) {
 //            'fermata'（フェルマータ）・'technique'（奏法）・'dynamic'（強弱）
 //            'stringMark'（ハーモニクス・左手ピチカートなど）（ステップ11-1b）
 //            'breath'（ブレス・カエスーラ）（ステップ11-1c）
+//            'ornament'（トリルなどの装飾）（ステップ11-3a）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
-// 1つだけのもの（弓・強弱・ブレスとカエスーラ）は、別のものを押すと入れ替わる
+// 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾）は、別のものを押すと入れ替わる
 // 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
 // ----------------------------------------------------------
 export function toggleNoteSymbol(score, selection, kind, value) {
@@ -562,6 +563,13 @@ export function toggleNoteSymbol(score, selection, kind, value) {
         delete n.breath;
       } else {
         n.breath = value;
+      }
+    } else if (kind === "ornament") {
+      // 装飾：同じものなら外す、違うものなら入れ替える（ステップ11-3a）
+      if (n.ornament === value) {
+        delete n.ornament;
+      } else {
+        n.ornament = value;
       }
     } else if (kind === "dynamic") {
       // 強弱：同じものなら外す、違うものなら入れ替える

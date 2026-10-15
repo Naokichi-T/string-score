@@ -38,7 +38,7 @@
 
 import { unzipSync } from "fflate";
 import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
@@ -87,6 +87,7 @@ const XML_TO_BOWING = reverseTable(BOWINGS);
 const XML_TO_ARTICULATION = reverseTable(ARTICULATIONS);
 const XML_TO_STRING_MARK = reverseTable(STRING_MARKS); // ステップ11-1b
 const XML_TO_BREATH = reverseTable(BREATHS); // ステップ11-1c
+const XML_TO_ORNAMENT = reverseTable(ORNAMENTS); // ステップ11-3a
 const XML_TO_DYNAMIC = reverseTable(DYNAMICS);
 
 // ----------------------------------------------------------
@@ -525,10 +526,13 @@ function readNotations(noteElement, note, state, counter) {
       readDynamics(dynamics, note, counter);
     });
 
-    // トリルなどの装飾（このアプリにはないので数える）
+    // トリルなどの装飾（ステップ11-3a：トリルを読む。このアプリにない装飾は数える）
+    // トリルの波線（wavy-line）は、タイから自動で描くので読まない
     childElements(notations, "ornaments").forEach((group) => {
       for (const child of Array.from(group.childNodes)) {
-        if (child.nodeType === 1 && !IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
+        if (child.nodeType !== 1) continue;
+        if (XML_TO_ORNAMENT[child.nodeName]) note.ornament = XML_TO_ORNAMENT[child.nodeName];
+        else if (!IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
       }
     });
 

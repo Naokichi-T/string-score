@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, FERMATA, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -57,6 +57,15 @@
     {#each Object.entries(STRING_MARKS) as [name, symbol] (name)}
       <button class="tool" class:on={(note?.stringMarks ?? []).includes(name)} {disabled} onclick={() => onsymbol("stringMark", name)} title={symbol.label} aria-label={symbol.label}>
         <span class="icon string-mark">{symbol.icon}</span>
+      </button>
+    {/each}
+  </div>
+
+  <!-- 装飾（トリルなど）（ステップ11-3a） -->
+  <div class="group">
+    {#each Object.entries(ORNAMENTS) as [name, symbol] (name)}
+      <button class="tool" class:on={note?.ornament === name} {disabled} onclick={() => onsymbol("ornament", name)} title={symbol.label} aria-label={symbol.label}>
+        <span class="icon ornament">{symbol.icon}</span>
       </button>
     {/each}
   </div>
@@ -164,6 +173,9 @@
   }
   .icon.breath {
     top: 10px; /* ステップ11-1c */
+  }
+  .icon.ornament {
+    top: 4px; /* ステップ11-3a */
   }
   .icon.dynamic {
     top: -2px;
