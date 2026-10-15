@@ -10,9 +10,17 @@
 // にしてから、小節ごとに分け直す。
 // 小節線をまたぐ音は、小節線で分けてタイでつなぐ（休符は分けるだけ）
 // （ティック = 長さの単位。16分音符1つ = TICKS_PER_16TH ティック。model.js を参照）
+//
+// 【連符の扱い】（ステップ10-4）
+//   連符は途中で分けられないので、いつも「連符まるごと」で扱う
+//   ・コピー：範囲が連符の途中で始まる・終わるときは、連符全体に広げる
+//   ・貼り付け：貼り付ける所にかかった連符は、まるごと消す（はみ出す分は休符にする）
+//   ・貼り付けられないとき（知らせて、何もしない）
+//       連符の途中（2つ目から）を選んで貼り付けたとき
+//       貼り付ける連符が小節線をまたぐとき
 // ==========================================================
 
-import { noteTicks, durationToTicks, timeAt, measureTicks, restsForSpan } from "./model.js";
+import { noteTicks, durationToTicks, timeAt, measureTicks, restsForSpan, tupletGroups } from "./model.js";
 import { cloneScore, appendMeasure, cleanSpanners } from "./edit.js";
 import { positionsInRange } from "./selection.js";
 
@@ -30,16 +38,48 @@ const NOTE_VALUES = [
 ].map((value) => ({ ...value, ticks: durationToTicks(value.duration, value.dots) }));
 
 // ----------------------------------------------------------
+// 関数：expandToTuplets
+// コピーする範囲を決める（範囲がなければ、選んでいる1つの音）（ステップ10-4）
+// 範囲の始まり・終わりが連符の途中なら、その連符全体まで広げる
+//   range     … 選んでいる範囲（なければ null）
+//   selection … 選んでいる場所
+// 戻り値：{ part, start: { measure, note }, end: { measure, note } }（何も選んでいないときは null）
+// ----------------------------------------------------------
+export function expandToTuplets(score, range, selection) {
+  const target = range ?? (selection ? { part: selection.part, start: selection, end: selection } : null);
+  if (!target) return null;
+
+  const measures = score.parts[target.part].measures;
+
+  // 始まり：連符の途中なら、その連符の最初の音まで戻す
+  const startNotes = measures[target.start.measure].notes;
+  const startGroup = tupletGroups(startNotes).find((g) => g.start <= target.start.note && target.start.note <= g.end);
+  const startNote = startGroup ? startGroup.start : target.start.note;
+
+  // 終わり：連符の途中なら、その連符の最後の音まで進める
+  const endNotes = measures[target.end.measure].notes;
+  const endGroup = tupletGroups(endNotes).find((g) => g.start <= target.end.note && target.end.note <= g.end);
+  const endNote = endGroup ? endGroup.end : target.end.note;
+
+  return {
+    part: target.part,
+    start: { measure: target.start.measure, note: startNote },
+    end: { measure: target.end.measure, note: endNote },
+  };
+}
+
+// ----------------------------------------------------------
 // 関数：copyNotes
 // 範囲（範囲がなければ選んでいる1つの音）の音を、コピーして配列にする
 //   range     … 選んでいる範囲（なければ null）
 //   selection … 選んでいる場所
+// ・範囲が連符の途中までなら、連符全体をコピーする（ステップ10-4）
 // ・最後の音から出ているタイは外す（コピーしていない音へのタイなので）
 // ・相手がコピーの中にないスラー・松葉は外す
 // 戻り値：音の配列（何も選んでいないときは null）
 // ----------------------------------------------------------
 export function copyNotes(score, range, selection) {
-  const target = range ?? (selection ? { part: selection.part, start: selection, end: selection } : null);
+  const target = expandToTuplets(score, range, selection);
   if (!target) return null;
 
   // 範囲の音を、前から順にコピーする
@@ -101,9 +141,16 @@ function plainNote(note, value) {
 // 選んでいる音の頭から、コピーした音を貼り付ける（上書き）
 //   selection … 貼り付ける場所（この音の頭から貼る）
 //   clip      … copyNotes で作った音の配列
-// 戻り値：{ score: 新しい楽譜データ, start: 貼り付けた最初の場所, end: 貼り付けた最後の場所 }
+// 戻り値：{ score: 新しい楽譜データ, start: 貼り付けた最初の場所, end: 貼り付けた最後の場所, error: "" }
+//         貼り付けられないときは { score: 元の楽譜データ, error: 知らせる文 }（ステップ10-4）
 // ----------------------------------------------------------
 export function pasteNotes(score, selection, clip) {
+  // 連符の途中（2つ目から）には貼り付けられない（ステップ10-4）
+  const selectedGroup = tupletGroups(score.parts[selection.part].measures[selection.measure].notes).find((g) => g.start <= selection.note && selection.note <= g.end);
+  if (selectedGroup && selectedGroup.start !== selection.note) {
+    return { score: score, error: "連符の途中には貼り付けられません。連符の最初の音を選んでください" };
+  }
+
   let newScore = cloneScore(score);
 
   // ① 貼り付ける所の頭と終わり（曲の頭から何ティック目か）
@@ -119,6 +166,22 @@ export function pasteNotes(score, selection, clip) {
   while (starts[starts.length - 1] < pasteEnd) {
     newScore = appendMeasure(newScore);
     starts = measureStartTicks(newScore);
+  }
+
+  // ②-2 貼り付ける連符が、小節線をまたがないか調べる（ステップ10-4）
+  let clipPosition = pasteStart;
+  const clipStarts = clip.map((note) => {
+    const start = clipPosition;
+    clipPosition = clipPosition + noteTicks(note);
+    return start;
+  });
+  for (const group of tupletGroups(clip)) {
+    const groupStart = clipStarts[group.start];
+    const groupEnd = clipStarts[group.end] + noteTicks(clip[group.end]);
+    // 連符の始まりと終わりの間に、小節の区切りがあったらまたいでいる
+    if (starts.some((s) => s > groupStart && s < groupEnd)) {
+      return { score: score, error: "連符が小節線をまたぐので、ここには貼り付けられません" };
+    }
   }
 
   const part = newScore.parts[selection.part];
@@ -143,10 +206,37 @@ export function pasteNotes(score, selection, clip) {
   //    kind … "keep"（元の音をそのまま）・"paste"（貼り付ける音）・"rest"（休符で埋める所）
   const events = [];
   for (let m = firstMeasure; m <= lastMeasure; m++) {
+    const measureNotes = part.measures[m].notes;
+    // 音ごとの始まり（曲の頭から何ティック目か）と、この小節の連符（ステップ10-4）
+    let notePosition = starts[m];
+    const noteStarts = measureNotes.map((note) => {
+      const start = notePosition;
+      notePosition = notePosition + noteTicks(note);
+      return start;
+    });
+    const groups = tupletGroups(measureNotes);
+
     let position = starts[m];
-    part.measures[m].notes.forEach((note) => {
+    measureNotes.forEach((note, j) => {
       const length = noteTicks(note);
       const end = position + length;
+
+      // 連符の中の音：連符まるごとで決める（ステップ10-4）
+      const group = groups.find((g) => g.start <= j && j <= g.end);
+      if (group) {
+        const groupStart = noteStarts[group.start];
+        const groupEnd = noteStarts[group.end] + noteTicks(measureNotes[group.end]);
+        if (groupEnd <= pasteStart || groupStart >= pasteEnd) {
+          // 貼り付ける所にかからない連符：そのまま
+          events.push({ start: position, length: length, note: note, kind: "keep" });
+        } else if (j === group.start && groupEnd > pasteEnd) {
+          // 貼り付ける所にかかる連符はまるごと消す。後ろにはみ出す分は休符にする（連符の最初の音のときに1回だけ）
+          events.push({ start: pasteEnd, length: groupEnd - pasteEnd, note: null, kind: "rest" });
+        }
+        position = end;
+        return;
+      }
+
       if (end <= pasteStart || position >= pasteEnd) {
         // 貼り付ける所の外：そのまま
         events.push({ start: position, length: length, note: note, kind: "keep" });
@@ -184,6 +274,10 @@ export function pasteNotes(score, selection, clip) {
 
       if (event.kind === "keep") {
         notes.push(event.note); // 元の音はもともと小節の中に収まっている
+      } else if (event.note && event.note.tuplet) {
+        // 貼り付ける連符の音：分けずにそのまま置く（小節線をまたがないことは ②-2 で調べてある）（ステップ10-4）
+        event.pieces = [{ measure: m, note: notes.length, data: event.note }];
+        notes.push(event.note);
       } else if (event.kind === "rest" || event.note.rest) {
         // 休符：その部分を1拍ずつの休符で埋める
         const rests = restsForSpan(from - measureStart, to - from, time);
@@ -241,5 +335,6 @@ export function pasteNotes(score, selection, clip) {
     score: newScore,
     start: { part: selection.part, measure: firstPiece.measure, note: firstPiece.note },
     end: { part: selection.part, measure: lastPiece.measure, note: lastPiece.note },
+    error: "",
   };
 }

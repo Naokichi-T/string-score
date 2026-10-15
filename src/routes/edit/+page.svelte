@@ -62,7 +62,7 @@
     deletePart,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
-  import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
+  import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
@@ -1098,6 +1098,12 @@
 
     if (action === "copy" || action === "cut") {
       if (!canCopy) return;
+      // 範囲が連符の途中までなら、連符全体に広げて選び直す（コピーする所が見えるように）（ステップ10-4）
+      const target = expandToTuplets(score, range, selection);
+      const single = target.start.measure === target.end.measure && target.start.note === target.end.note;
+      selection = { part: target.part, measure: target.start.measure, note: target.start.note };
+      rangeEnd = single ? null : { part: target.part, measure: target.end.measure, note: target.end.note };
+
       clipboard = copyNotes(score, range, selection);
       // 切り取り：コピーしたあと、音符を休符にする（削除のボタンと同じ）
       if (action === "cut") handleDelete();
@@ -1107,6 +1113,11 @@
     // 貼り付け：選んでいる音の頭から上書きして、貼り付けた所を範囲で選ぶ
     if (!canPaste) return;
     const result = pasteNotes(score, selection, clipboard);
+    // 貼り付けられないとき（連符の途中・連符が小節線をまたぐ）は知らせる（ステップ10-4）
+    if (result.error) {
+      message = result.error;
+      return;
+    }
     commit(result.score, result.start);
     // commit で範囲選択が消えるので、そのあとで範囲の終わりを決める（1つだけなら範囲にしない）
     const single = result.start.measure === result.end.measure && result.start.note === result.end.note;
