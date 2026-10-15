@@ -5,7 +5,8 @@
 //
 // 【保存の形】
 //   "string-score:list"          … 一覧用の小さな表
-//       [{ id, title, createdAt, updatedAt }, ...]
+//       [{ id, title, parts, createdAt, updatedAt }, ...]
+//       （parts は短いパート名の配列。例：["Vln. I", "Vln. II", "Vla.", "Vc."]）（ステップ7-2）
 //       （createdAt・updatedAt は日時を数字にしたもの。Date.now() の値）
 //   "string-score:score:（id）"   … 楽譜データそのもの（1曲に1つ）
 //
@@ -70,7 +71,7 @@ function createId() {
 // ----------------------------------------------------------
 // 関数：listScores
 // 保存した楽譜の一覧を返す
-// 戻り値：[{ id, title, createdAt, updatedAt }, ...]
+// 戻り値：[{ id, title, parts, createdAt, updatedAt }, ...]
 // ----------------------------------------------------------
 export function listScores() {
   return readList();
@@ -108,14 +109,16 @@ export function saveScore(id, score) {
 
     // 一覧の表を書き換える
     const now = Date.now();
+    // 編成（短いパート名の配列）。一覧に出すため（ステップ7-2）
+    const parts = score.parts.map((part) => part.abbreviation);
     const list = readList();
     const index = list.findIndex((item) => item.id === id);
     if (index >= 0) {
-      // もうある：タイトルと更新日時だけ変える（作った日時はそのまま）
-      list[index] = { ...list[index], title: score.title, updatedAt: now };
+      // もうある：タイトル・編成・更新日時を変える（作った日時はそのまま）
+      list[index] = { ...list[index], title: score.title, parts: parts, updatedAt: now };
     } else {
       // まだない：新しく足す
-      list.push({ id: id, title: score.title, createdAt: now, updatedAt: now });
+      list.push({ id: id, title: score.title, parts: parts, createdAt: now, updatedAt: now });
     }
     writeList(list);
     return true;
