@@ -541,8 +541,10 @@ function toggleInList(list, value) {
 //            'stringMark'（ハーモニクス・左手ピチカートなど）（ステップ11-1b）
 //            'breath'（ブレス・カエスーラ）（ステップ11-1c）
 //            'ornament'（トリルなどの装飾）（ステップ11-3a）
+//            'tremolo'（トレモロ。value は斜線の本数）（ステップ11-4）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
-// 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾）は、別のものを押すと入れ替わる
+// 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
+// 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
 // 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
 // ----------------------------------------------------------
 export function toggleNoteSymbol(score, selection, kind, value) {
@@ -570,6 +572,15 @@ export function toggleNoteSymbol(score, selection, kind, value) {
         delete n.ornament;
       } else {
         n.ornament = value;
+        delete n.tremolo; // トレモロは外す（ステップ11-4）
+      }
+    } else if (kind === "tremolo") {
+      // トレモロ：同じ本数なら外す、違う本数なら入れ替える（ステップ11-4）
+      if (n.tremolo === value) {
+        delete n.tremolo;
+      } else {
+        n.tremolo = value;
+        delete n.ornament; // 装飾は外す
       }
     } else if (kind === "dynamic") {
       // 強弱：同じものなら外す、違うものなら入れ替える

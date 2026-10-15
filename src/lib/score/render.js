@@ -15,7 +15,7 @@
 
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
-import { drawDynamic, drawBreath, drawTrillLine } from "./render/symbols.js";
+import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
@@ -329,6 +329,12 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       // 音符を並べる幅（小節の終わりに NOTE_END_PADDING のすき間を残す）
       const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - NOTE_END_PADDING;
       formatter.format(voices, noteAreaWidth);
+
+      // トレモロの斜線を、旗・連桁と重ならない所までずらす（符尾の向きが決まったあとに行う）（ステップ11-4）
+      score.parts.forEach((part, p) => {
+        const tickables = voices[p].getTickables();
+        part.measures[i].notes.forEach((note, j) => shiftTremolo(VF, tickables[j], note));
+      });
 
       // 音符と連桁と連符の数字を描く
       voices.forEach((voice, p) => voice.draw(context, staves[p]));

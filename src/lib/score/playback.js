@@ -178,6 +178,26 @@ function neighborPitch(score, part, i, j, direction) {
   return { step: step, octave: octave, alter: alter };
 }
 
+// 旗・連桁の数（トレモロの刻む細かさを決めるのに使う）（ステップ11-4）
+const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2 };
+
+// ----------------------------------------------------------
+// 関数：tremoloStep
+// トレモロで刻む1回分の長さ（ティック）を決める（ステップ11-4）
+// 「音符の旗・連桁の数 ＋ 斜線の本数」で細かさが決まる（楽譜の決まり）
+//   1 → 8分音符、2 → 16分音符、3 以上 → 32分音符（できるだけ細かく）
+// 連符の中の音なら、連符の割合（3連符なら 2/3）も掛ける
+//   note … 音符のデータ（tremolo に斜線の本数が入っているもの）
+// ----------------------------------------------------------
+function tremoloStep(note) {
+  const level = (FLAG_COUNT[note.duration] ?? 0) + note.tremolo;
+  let step = TRILL_STEP; // 3 以上：32分音符
+  if (level === 1) step = TICKS_PER_16TH * 2; // 8分音符
+  if (level === 2) step = TICKS_PER_16TH; // 16分音符
+  if (note.tuplet) step = (step * note.tuplet.normal) / note.tuplet.actual;
+  return step;
+}
+
 // ----------------------------------------------------------
 // 関数：ornamentPitches
 // 装飾の付いた音について、すばやく鳴らす音の並びを決める（ステップ11-3b）
@@ -202,7 +222,8 @@ function ornamentPitches(event) {
 //           最後が主の音になるように、かけらの数が偶数なら上の音から始める
 //   プラルトリラー・モルデント・ターン：始めに 32分音符ずつすばやく鳴らして、残りは主の音をのばす
 //           （音が短くて入りきらないときは、かけらを短くして収める）
-//   event … 鳴らす音（ornament に装飾の名前が入っているもの）
+//   トレモロ：同じ音を tremoloStep ずつ刻む（ステップ11-4）
+//   event … 鳴らす音（ornament に装飾の名前、または tremoloStep にトレモロの長さが入っているもの）
 // 戻り値：分けた音の一覧
 // ----------------------------------------------------------
 function ornamentPieces(event) {
@@ -210,7 +231,14 @@ function ornamentPieces(event) {
 
   // かけらの音の高さと長さの並び { pitch, length } を作る
   const parts = [];
-  if (event.ornament === "trill") {
+  if (event.tremoloStep) {
+    // トレモロ：同じ音を、決まった細かさで刻む（ステップ11-4）
+    const count = Math.max(1, Math.round(total / event.tremoloStep)); // 刻む回数
+    for (let k = 0; k < count; k++) {
+      const isLast = k === count - 1;
+      parts.push({ pitch: event.pitch, length: isLast ? total - k * event.tremoloStep : event.tremoloStep });
+    }
+  } else if (event.ornament === "trill") {
     const count = Math.max(1, Math.floor(total / TRILL_STEP)); // かけらの数
     for (let k = 0; k < count; k++) {
       const isLast = k === count - 1;
@@ -504,6 +532,7 @@ export function buildEvents(score, startMeasure, partIndex) {
             ornament: note.ornament ?? null, // 装飾（トリルなど）の名前（ステップ11-3a）
             upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
             lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
+            tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
           };
           events.push(event);
           tiedEvent = event;
@@ -553,10 +582,10 @@ export function buildEvents(score, startMeasure, partIndex) {
     totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
   });
 
-  // 装飾の付いた音を、すばやく行き来する短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b）
+  // 装飾・トレモロの付いた音を、短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b・11-4）
   const played = [];
   events.forEach((event) => {
-    if (event.ornament) {
+    if (event.ornament || event.tremoloStep) {
       played.push(...ornamentPieces(event));
     } else {
       played.push(event);

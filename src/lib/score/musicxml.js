@@ -358,11 +358,13 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
     inner.push("          </technical>");
   }
 
-  // 装飾（トリルなど）（ステップ11-3a）
+  // 装飾（トリルなど）とトレモロ（ステップ11-3a・11-4）
   // トリルの波線は、タイから自動で描いているので書き出さない（読むアプリでは tr だけが出る）
-  if (note.ornament) {
+  // トレモロは <tremolo type="single">斜線の本数</tremolo>（single：1つの音を刻むトレモロ）
+  if (note.ornament || note.tremolo) {
     inner.push("          <ornaments>");
-    inner.push(`            <${ORNAMENTS[note.ornament].musicxml}/>`);
+    if (note.ornament) inner.push(`            <${ORNAMENTS[note.ornament].musicxml}/>`);
+    if (note.tremolo) inner.push(`            <tremolo type="single">${note.tremolo}</tremolo>`);
     inner.push("          </ornaments>");
   }
 

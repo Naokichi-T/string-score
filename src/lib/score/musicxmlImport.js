@@ -531,8 +531,19 @@ function readNotations(noteElement, note, state, counter) {
     childElements(notations, "ornaments").forEach((group) => {
       for (const child of Array.from(group.childNodes)) {
         if (child.nodeType !== 1) continue;
-        if (XML_TO_ORNAMENT[child.nodeName]) note.ornament = XML_TO_ORNAMENT[child.nodeName];
-        else if (!IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
+        if (XML_TO_ORNAMENT[child.nodeName]) {
+          note.ornament = XML_TO_ORNAMENT[child.nodeName];
+        } else if (child.nodeName === "tremolo") {
+          // トレモロ（ステップ11-4）
+          // type が single（なければ single とみなす）：1つの音を刻むトレモロ。斜線は 1〜3 本（4本以上は 3本にする）
+          // それ以外（start・stop）：2つの音を行き来するトレモロ。このアプリにはないので数える
+          const type = child.getAttribute("type") ?? "single";
+          const count = Number(child.textContent.trim() || "3");
+          if (type === "single" && Number.isInteger(count) && count >= 1) note.tremolo = Math.min(count, 3);
+          else report(counter, "2つの音を行き来するトレモロ");
+        } else if (!IGNORED_NOTATIONS.includes(child.nodeName)) {
+          report(counter, unsupportedLabel(child.nodeName));
+        }
       }
     });
 

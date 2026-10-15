@@ -61,6 +61,12 @@ export function addSymbols(VF, staveNote, note) {
     staveNote.addModifier(ornament, 0);
   }
 
+  // ②-4 トレモロ（符尾に斜線。符尾のない全音符は玉の上か下に描かれる）（ステップ11-4）
+  //      8分音符などの旗・連桁と重ならないようにする調整は、位置が決まってから shiftTremolo で行う
+  if (note.tremolo) {
+    staveNote.addModifier(new VF.Tremolo(note.tremolo), 0);
+  }
+
   // ③ 指番号（弓の記号の上に小さい数字で書く。複数あれば、付けた順に下から積み重ねる）
   for (const number of note.fingerings ?? []) {
     const fingering = new VF.Annotation(String(number));
@@ -121,6 +127,30 @@ export function drawBreath(VF, context, staveNote, nextStaveNote, stave, breath)
   context.setFont("Bravura", 24); // 楽譜用フォントで記号の形を描く
   context.fillText(symbol.icon, x, y);
   context.restore();
+}
+
+// 旗・連桁1本ぶんの太さとすき間（ピクセル）（トレモロの斜線をずらす量）（ステップ11-4）
+const BEAM_SPACE = 8;
+
+// 旗・連桁の数（ステップ11-4）
+const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2 };
+
+// ----------------------------------------------------------
+// 関数：shiftTremolo
+// トレモロの斜線を、旗・連桁と重ならない所までずらす（ステップ11-4）
+// VexFlow は斜線を符尾の先から描くので、8分音符・16分音符では旗や連桁に重なってしまう
+// 連桁が付くと符尾の向きが変わることがあるので、音符の位置が決まったあと（描く前）に呼ぶ
+//   VF        … VexFlow の部品一式
+//   staveNote … VexFlow の音符
+//   note      … 音符のデータ
+// ----------------------------------------------------------
+export function shiftTremolo(VF, staveNote, note) {
+  if (!note.tremolo) return;
+  const tremolo = staveNote.getModifiersByType("Tremolo")[0];
+  if (!tremolo) return;
+  // 符尾が上向きなら下へ（玉のほうへ）、下向きなら上へずらす
+  const direction = staveNote.getStemDirection() === VF.Stem.UP ? 1 : -1;
+  tremolo.setYShift((FLAG_COUNT[note.duration] ?? 0) * BEAM_SPACE * direction);
 }
 
 // トリルの波線を、tr の文字の基準線からどれだけ上に描くか（ピクセル）（ステップ11-3a）
