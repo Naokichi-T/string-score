@@ -37,7 +37,7 @@
 // ==========================================================
 
 import { unzipSync } from "fflate";
-import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups } from "./model.js";
+import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups, createPartId } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
@@ -962,7 +962,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const lastNote = lastNotes[lastNotes.length - 1];
     if (lastNote && lastNote.tie) lastNote.tie = false;
 
-    return { name: "", abbreviation: "", instrument: instrument, measures: partMeasures };
+    // id はパートの名札（ステップ12-3）
+    return { id: createPartId(), name: "", abbreviation: "", instrument: instrument, measures: partMeasures };
   });
 
   // タイの相手が休符・違う高さになっている所は外す（つながる先がない）

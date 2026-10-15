@@ -10,7 +10,7 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -1246,7 +1246,8 @@ export function addPart(score, instrument) {
     return measure;
   });
 
-  newScore.parts.push({ name: "", abbreviation: "", instrument: instrument, measures: measures });
+  // id はパートの名札（ステップ12-3）
+  newScore.parts.push({ id: createPartId(), name: "", abbreviation: "", instrument: instrument, measures: measures });
   renameParts(newScore.parts);
   return newScore;
 }

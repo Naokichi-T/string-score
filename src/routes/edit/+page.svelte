@@ -27,7 +27,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, INSTRUMENTS } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, INSTRUMENTS, ensurePartIds } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
     canFit,
@@ -285,8 +285,14 @@
       return;
     }
     scoreId = id;
-    score = loaded;
-    savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
+    // パートに id（名札）がなければ付ける（ステップ12-3 より前に作った楽譜）（ステップ12-3）
+    const withIds = ensurePartIds(loaded);
+    score = withIds;
+    if (withIds === loaded) {
+      savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
+    } else {
+      savedScore = null; // id を付けたときは、付けた id を覚えておくために1回だけ保存する
+    }
     loadState = "ready";
   }
 

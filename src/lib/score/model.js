@@ -287,6 +287,32 @@ export function restsForSpan(start, length, time) {
   return rests;
 }
 
+// ----------------------------------------------------------
+// 関数：createPartId
+// パートの名札（id）を新しく作る（ステップ12-3）
+// パートの名前や並び順が変わっても、同じパートだとわかるようにするため
+// （パートごとの音量の設定を、この id で覚える）
+// 例："p8k2xq7mz"（"p" ＋ ランダムな英数字8文字）
+// ----------------------------------------------------------
+export function createPartId() {
+  return "p" + Math.random().toString(36).slice(2, 10);
+}
+
+// ----------------------------------------------------------
+// 関数：ensurePartIds
+// id の付いていないパートがあれば、id を付けた新しい楽譜データを返す（ステップ12-3）
+// （ステップ12-3 より前に作った楽譜には id がないため。開いたときに使う）
+// 戻り値：全部のパートに id があれば、渡された楽譜データそのまま
+//         なければ、id を付けた新しい楽譜データ
+// ----------------------------------------------------------
+export function ensurePartIds(score) {
+  if (score.parts.every((part) => part.id)) return score;
+  return {
+    ...score,
+    parts: score.parts.map((part) => (part.id ? part : { ...part, id: createPartId() })),
+  };
+}
+
 // パートの番号に使うローマ数字（11個目からは、ふつうの数字にする）
 // （ステップ7-3：edit.js から移した）
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
@@ -338,6 +364,7 @@ export function createEmptyScore(instruments = ["violin", "violin", "viola", "ce
 
   // パートを作る（名前はあとで renameParts で付ける）
   const parts = instruments.map((instrument) => ({
+    id: createPartId(), // パートの名札（ステップ12-3）
     name: "",
     abbreviation: "",
     instrument: instrument,
