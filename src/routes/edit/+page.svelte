@@ -61,7 +61,7 @@
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
-  import { loadScore, saveScore, createScore } from "#lib/score/library.js";
+  import { loadScore, saveScore } from "#lib/score/library.js";
 
   // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
   let score = $state(createEmptyScore());
@@ -70,7 +70,6 @@
   //   "loading"  … 読み込み中（楽譜はまだ出さない）
   //   "ready"    … 読み込み完了（楽譜を出す）
   //   "notfound" … URL の id の楽譜が見つからない
-  //   "error"    … 新しい楽譜を保存できなかった
   let loadState = $state("loading");
 
   // 今開いている楽譜の id（保存するときに使う）
@@ -233,38 +232,26 @@
   // 関数：openScore
   // URL の id（/edit?id=xxx）の楽譜を、ブラウザの中から読み込む（ステップ7-1）
   //   id がある   → その楽譜を開く（見つからなければ「見つかりませんでした」を出す）
-  //   id がない   → 空の弦楽四重奏を作って保存し、URL を /edit?id=新しいid に書き換える
+  //   id がない   → トップページへ戻す（楽譜を作るのはトップページの［作成］だけにする）（ステップ7-3）
   // ----------------------------------------------------------
   function openScore() {
     const id = page.url.searchParams.get("id");
 
-    if (id) {
-      const loaded = loadScore(id);
-      if (!loaded) {
-        loadState = "notfound";
-        return;
-      }
-      scoreId = id;
-      score = loaded;
-      savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
-      loadState = "ready";
+    if (!id) {
+      // replace：「戻る」で id のない /edit に戻ってこないようにする
+      goto("/", { replace: true });
       return;
     }
 
-    // id がない：新しい楽譜を作って保存する
-    const newScore = createEmptyScore();
-    const newId = createScore(newScore);
-    if (!newId) {
-      loadState = "error";
+    const loaded = loadScore(id);
+    if (!loaded) {
+      loadState = "notfound";
       return;
     }
-    scoreId = newId;
-    score = newScore;
-    savedScore = score;
+    scoreId = id;
+    score = loaded;
+    savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
     loadState = "ready";
-    // URL だけを書き換える（replace：「戻る」で id のない URL に戻らないようにする、
-    // shallow：ページを読み込み直さない）
-    goto(`/edit?id=${newId}`, { replace: true, shallow: true });
   }
 
   // ----------------------------------------------------------
@@ -1179,6 +1166,7 @@
       onsoundtype={handleSoundType}
     />
     <ToolTabs
+      isNew={page.state.isNew === true}
       {duration}
       {dotted}
       {canUse}
@@ -1229,16 +1217,10 @@
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->
   <p class="load-status">読み込み中…</p>
-{:else if loadState === "notfound"}
+{:else}
   <!-- URL の id の楽譜が見つからない -->
   <div class="load-status">
     <p>楽譜が見つかりませんでした（削除されたか、別のブラウザで作った楽譜かもしれません）。</p>
-    <p><a href="/">楽譜の一覧へ</a></p>
-  </div>
-{:else}
-  <!-- 新しい楽譜を保存できなかった -->
-  <div class="load-status">
-    <p>新しい楽譜を保存できませんでした（ブラウザの保存できる量を超えているかもしれません）。</p>
     <p><a href="/">楽譜の一覧へ</a></p>
   </div>
 {/if}

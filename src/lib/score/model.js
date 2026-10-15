@@ -206,22 +206,68 @@ export function restsForSpan(start, length, time) {
   return rests;
 }
 
+// パートの番号に使うローマ数字（11個目からは、ふつうの数字にする）
+// （ステップ7-3：edit.js から移した）
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+
+// ----------------------------------------------------------
+// 関数：renameParts
+// パート名を、楽器と並び順から付け直す（渡されたパートの配列を直接書き換える）
+//   同じ楽器が1つだけ   → 番号なし（"Violin"・"Vln."）
+//   同じ楽器が2つ以上   → 上から順に I・II…（"Violin I"・"Vln. I"）
+// （コピーした楽譜データの中でだけ使う）
+// （ステップ7-3：新しい楽譜を作るときにも使うので、edit.js から移した）
+// ----------------------------------------------------------
+export function renameParts(parts) {
+  // 楽器ごとの数を数える
+  const totals = {};
+  parts.forEach((part) => {
+    totals[part.instrument] = (totals[part.instrument] ?? 0) + 1;
+  });
+
+  // 上から順に名前を付ける
+  const counters = {}; // 楽器ごとに、ここまでにいくつ出てきたか
+  parts.forEach((part) => {
+    const info = INSTRUMENTS[part.instrument];
+    counters[part.instrument] = (counters[part.instrument] ?? 0) + 1;
+    if (totals[part.instrument] === 1) {
+      part.name = info.name;
+      part.abbreviation = info.abbreviation;
+    } else {
+      const n = counters[part.instrument];
+      const number = ROMAN[n - 1] ?? String(n);
+      part.name = `${info.name} ${number}`;
+      part.abbreviation = `${info.abbreviation} ${number}`;
+    }
+  });
+}
+
 // ----------------------------------------------------------
 // 関数：createEmptyScore
-// 空の弦楽四重奏の楽譜を作る（4小節・ハ長調・4分の4拍子・全部休符）
+// 空の楽譜を作る（4小節・ハ長調・4分の4拍子・全部休符）
+//   instruments … 上から順の楽器の配列（例：["violin", "violin", "viola", "cello"]）
+//                 省略したときは弦楽四重奏
+// パート名は楽器の並びから自動で付ける（renameParts）
+// （ステップ7-3：楽器を選べるようにした）
 // ----------------------------------------------------------
-export function createEmptyScore() {
+export function createEmptyScore(instruments = ["violin", "violin", "viola", "cello"]) {
   const time = { beats: 4, beatType: 4 };
   const measureCount = 4;
   const ticks = measureTicks(time);
 
-  // パートの一覧（名前・短い名前・楽器）
-  const partList = [
-    { name: "Violin I", abbreviation: "Vln. I", instrument: "violin" },
-    { name: "Violin II", abbreviation: "Vln. II", instrument: "violin" },
-    { name: "Viola", abbreviation: "Vla.", instrument: "viola" },
-    { name: "Cello", abbreviation: "Vc.", instrument: "cello" },
-  ];
+  // パートを作る（名前はあとで renameParts で付ける）
+  const parts = instruments.map((instrument) => ({
+    name: "",
+    abbreviation: "",
+    instrument: instrument,
+    measures: Array.from({ length: measureCount }, (_, i) => {
+      const measure = { notes: restsForSpan(0, ticks, time) };
+      // 1小節目には楽器に合った音部記号を書いておく
+      if (i === 0) measure.clef = INSTRUMENTS[instrument].clef;
+      return measure;
+    }),
+  }));
+  renameParts(parts);
 
   return {
     title: "無題",
@@ -230,16 +276,6 @@ export function createEmptyScore() {
     tempo: 80,
     // 1小節目に最初の拍子と調、あとは空
     measures: Array.from({ length: measureCount }, (_, i) => (i === 0 ? { time: time, key: 0 } : {})),
-    parts: partList.map((info) => ({
-      name: info.name,
-      abbreviation: info.abbreviation,
-      instrument: info.instrument,
-      measures: Array.from({ length: measureCount }, (_, i) => {
-        const measure = { notes: restsForSpan(0, ticks, time) };
-        // 1小節目には楽器に合った音部記号を書いておく
-        if (i === 0) measure.clef = INSTRUMENTS[info.instrument].clef;
-        return measure;
-      }),
-    })),
+    parts: parts,
   };
 }

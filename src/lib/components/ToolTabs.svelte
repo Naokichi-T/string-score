@@ -15,6 +15,7 @@
   // （ステップ5-7：「音符」タブにコピー・切り取り・貼り付けのボタンを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
+  import { untrack } from "svelte";
   import { DURATION_ORDER } from "#lib/score/model.js";
   import SymbolTools from "./SymbolTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
@@ -59,7 +60,9 @@
   //   canCopy      … コピー・切り取りができるか（音か範囲を選んでいるか）
   //   canPaste     … 貼り付けができるか（コピーした音があって、場所を選んでいるか）
   //   onclipboard  … コピー・切り取り・貼り付けのボタンが押されたときに呼ぶ関数（"copy"・"cut"・"paste" を渡す）
+  //   isNew        … 新しく作った楽譜か（true なら「楽譜の設定」タブで始めて、タイトルの入力欄にカーソルを入れる）（ステップ7-3）
   let {
+    isNew = false,
     score,
     onsettings = () => {},
     canDeleteMeasure = false,
@@ -132,15 +135,27 @@
     { alter: 0, icon: "\uE261", name: "ナチュラル（♮）" },
   ];
 
-  // 今選んでいるタブ
-  let activeTab = $state("note");
+  // 今選んでいるタブ（新しく作った楽譜なら「楽譜の設定」、それ以外は「音符」で始める）
+  // untrack：isNew の「最初の値だけ」を使う、という意味（あとで isNew が変わっても、タブは変えない）
+  let activeTab = $state(untrack(() => isNew) ? "settings" : "note");
+
+  // 「楽譜の設定」タブを出したときに、タイトルの入力欄にカーソルを入れるか
+  // （最初の1回だけ。タブを押したら false にして、あとで「楽譜の設定」に戻ってきても入れない）
+  let focusTitle = $state(untrack(() => isNew));
 </script>
 
 <div class="tool-tabs">
   <!-- タブのボタンの並び -->
   <div class="tab-list">
     {#each TABS as tab (tab.id)}
-      <button class="tab" class:active={activeTab === tab.id} onclick={() => (activeTab = tab.id)}>
+      <button
+        class="tab"
+        class:active={activeTab === tab.id}
+        onclick={() => {
+          activeTab = tab.id;
+          focusTitle = false;
+        }}
+      >
         {tab.label}
       </button>
     {/each}
@@ -221,7 +236,7 @@
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} />
     {:else if activeTab === "settings"}
-      <ScoreSettings {score} {onsettings} />
+      <ScoreSettings {score} {onsettings} {focusTitle} />
     {/if}
   </div>
 </div>

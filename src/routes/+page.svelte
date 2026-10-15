@@ -2,10 +2,14 @@
   // ==========================================================
   // トップページ（/）
   // 保存した楽譜の一覧（開く・削除・並び順の切り替え）
-  // （ステップ7-2：一覧を作った。新しい楽譜を作る画面はステップ7-3で）
+  // （ステップ7-2：一覧を作った）
+  // （ステップ7-3：［＋ 新しい楽譜］で楽器の数を選んで作る）
   // ==========================================================
   import { onMount } from "svelte";
-  import { listScores, deleteScore } from "#lib/score/library.js";
+  import { goto } from "$app/navigation";
+  import { listScores, deleteScore, createScore } from "#lib/score/library.js";
+  import { createEmptyScore } from "#lib/score/model.js";
+  import NewScoreDialog from "#lib/components/NewScoreDialog.svelte";
 
   // 保存した楽譜の一覧 [{ id, title, parts, createdAt, updatedAt }, ...]
   let scores = $state([]);
@@ -16,8 +20,28 @@
   // 並び順（"updated"：更新日の新しい順、"created"：作った日の新しい順、"title"：タイトル順）
   let sortOrder = $state("updated");
 
-  // 知らせたいこと（削除できなかったときに赤く出す）
+  // 知らせたいこと（削除・作成できなかったときに赤く出す）
   let message = $state("");
+
+  // 新しい楽譜を作る窓を出しているか（ステップ7-3）
+  let showNewDialog = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleCreate
+  // 新しい楽譜の窓で［作成］が押されたとき：空の楽譜を作って保存し、編集ページで開く（ステップ7-3）
+  //   instruments … 上から順の楽器の配列（例：["violin", "violin", "viola", "cello"]）
+  // ----------------------------------------------------------
+  function handleCreate(instruments) {
+    showNewDialog = false;
+    const id = createScore(createEmptyScore(instruments));
+    if (!id) {
+      message = "新しい楽譜を保存できませんでした（ブラウザの保存できる量を超えているかもしれません）";
+      return;
+    }
+    // state：URL には出さずに「新しく作った」という印を編集ページに渡す（再読み込みすると消える）
+    // 編集ページは、この印があれば「楽譜の設定」タブで始めて、タイトルの入力欄にカーソルを入れる
+    goto(`/edit?id=${id}`, { state: { isNew: true } });
+  }
 
   // 並び替えた一覧（scores か sortOrder が変わると、自動で作り直される）
   let sortedScores = $derived(sortScores(scores, sortOrder));
@@ -99,8 +123,16 @@
   <h1>string-score</h1>
   <p class="lead">弦楽器のための楽譜作成アプリ</p>
 
-  <!-- 新しい楽譜（今は空の弦楽四重奏を作る仮のリンク。ステップ7-3で編成を選べるようにする） -->
-  <p><a class="new-button" href="/edit">＋ 新しい楽譜</a></p>
+  <!-- 新しい楽譜（押すと、楽器の数を選ぶ窓が出る） -->
+  <p>
+    <button
+      class="new-button"
+      onclick={() => {
+        message = "";
+        showNewDialog = true;
+      }}>＋ 新しい楽譜</button
+    >
+  </p>
 
   <div class="list-header">
     <h2>保存した楽譜</h2>
@@ -137,6 +169,11 @@
   {/if}
 </main>
 
+<!-- 新しい楽譜を作る窓（showNewDialog が true のときだけ出す） -->
+{#if showNewDialog}
+  <NewScoreDialog oncreate={handleCreate} oncancel={() => (showNewDialog = false)} />
+{/if}
+
 <style>
   main {
     max-width: 800px; /* 広い画面でも横に伸びすぎないようにする */
@@ -148,13 +185,14 @@
     color: #555;
   }
   .new-button {
-    display: inline-block;
     padding: 8px 16px;
     background: #2563eb; /* 青 */
     color: white;
+    border: none; /* ボタンのふちの線を消す */
     border-radius: 6px;
-    text-decoration: none;
+    font-size: 15px;
     font-weight: bold;
+    cursor: pointer; /* マウスを乗せたら指の形にする */
   }
   .new-button:hover {
     background: #1d4ed8; /* マウスを乗せたら少し濃い青 */

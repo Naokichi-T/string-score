@@ -10,7 +10,7 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts } from "./model.js";
 import { TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -1135,39 +1135,7 @@ export function changeClef(score, partIndex, from, to, clef) {
 // ここから下は、パートを足す・並べ替える・消す関数（ステップ5-6）
 // ==========================================================
 
-// パートの番号に使うローマ数字（11個目からは、ふつうの数字にする）
-const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
-
-// ----------------------------------------------------------
-// 関数：renameParts
-// パート名を、楽器と並び順から付け直す（渡されたパートの配列を直接書き換える）
-//   同じ楽器が1つだけ   → 番号なし（"Violin"・"Vln."）
-//   同じ楽器が2つ以上   → 上から順に I・II…（"Violin I"・"Vln. I"）
-// （コピーした楽譜データの中でだけ使う）
-// ----------------------------------------------------------
-function renameParts(parts) {
-  // 楽器ごとの数を数える
-  const totals = {};
-  parts.forEach((part) => {
-    totals[part.instrument] = (totals[part.instrument] ?? 0) + 1;
-  });
-
-  // 上から順に名前を付ける
-  const counters = {}; // 楽器ごとに、ここまでにいくつ出てきたか
-  parts.forEach((part) => {
-    const info = INSTRUMENTS[part.instrument];
-    counters[part.instrument] = (counters[part.instrument] ?? 0) + 1;
-    if (totals[part.instrument] === 1) {
-      part.name = info.name;
-      part.abbreviation = info.abbreviation;
-    } else {
-      const n = counters[part.instrument];
-      const number = ROMAN[n - 1] ?? String(n);
-      part.name = `${info.name} ${number}`;
-      part.abbreviation = `${info.abbreviation} ${number}`;
-    }
-  });
-}
+// パート名を付け直す renameParts は、model.js に移した（ステップ7-3）
 
 // ----------------------------------------------------------
 // 関数：addPart

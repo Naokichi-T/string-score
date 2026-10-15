@@ -7,13 +7,28 @@
   // 速度記号の候補は、打った文字で「始まる」ものだけを出す（大文字・小文字は区別しない）
   // （ブラウザの datalist は「含む」ものを出すので、候補の一覧は自分で作っている）
   // ==========================================================
-  import { tick } from "svelte";
+  import { tick, onMount } from "svelte";
 
   // 親から受け取るもの
   //   score      … 楽譜データ（入力欄に今の値を出すのに使う）
   //   onsettings … 確定したときに呼ぶ関数（項目の名前と、入力された文字を渡す）
   //                例：onsettings("title", "春の歌")、onsettings("tempo", "120")
-  let { score, onsettings = () => {} } = $props();
+  //   focusTitle … true なら、出てきたときにタイトルの入力欄にカーソルを入れて、文字を全部選ぶ（ステップ7-3）
+  let { score, onsettings = () => {}, focusTitle = false } = $props();
+
+  // タイトルの入力欄（bind:this で入力欄そのものが入る）
+  let titleInput;
+
+  // ----------------------------------------------------------
+  // 出てきたときに、タイトルの入力欄にカーソルを入れて「無題」を全部選ぶ
+  // （全部選んでおくと、そのまま打てば「無題」と入れ替わる）
+  // ----------------------------------------------------------
+  onMount(() => {
+    if (focusTitle) {
+      titleInput.focus(); // カーソルを入れる
+      titleInput.select(); // 文字を全部選ぶ
+    }
+  });
 
   // 速度記号の候補（打ち始めると、この中から選べる。ここにない言葉も自由に書ける）
   const TEMPO_WORDS = ["Largo", "Lento", "Adagio", "Andante", "Andantino", "Moderato", "Allegretto", "Allegro", "Vivace", "Presto"];
@@ -115,7 +130,7 @@
 <div class="score-settings">
   <label>
     タイトル
-    <input class="text" type="text" value={score.title} onchange={(event) => handleChange("title", event)} onkeydown={handleKeydown} />
+    <input bind:this={titleInput} class="text" type="text" value={score.title} onchange={(event) => handleChange("title", event)} onkeydown={handleKeydown} />
   </label>
 
   <label>
