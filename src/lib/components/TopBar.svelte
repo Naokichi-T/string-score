@@ -7,6 +7,7 @@
   // （ステップ6-1：再生・停止のボタンと、鳴らすパートを選ぶ欄、音の種類（楽器の音・電子音）を選ぶ欄）
   // （ステップ7-1：［保存］ボタンをやめて、自動保存の状態を出す）
   // （ステップ8-1：［MusicXML 書き出し］ボタンが動くようにした）
+  // （ステップ9：［PDF 出力］ボタンを足した）
   // ==========================================================
 
   // 親から受け取るもの
@@ -28,6 +29,7 @@
   //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument" か "synth" を渡す）
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   //   onexport   … ［MusicXML 書き出し］ボタンが押されたときに呼ぶ関数（ステップ8-1）
+  //   onprint    … ［PDF 出力］ボタンが押されたときに呼ぶ関数（ステップ9）
   let {
     tempo,
     tempoText = "",
@@ -47,6 +49,7 @@
     onsoundtype = () => {},
     saveState = "saved",
     onexport = () => {},
+    onprint = () => {},
   } = $props();
 
   // ----------------------------------------------------------
@@ -127,6 +130,7 @@
       <span class="save-status">✓ 保存済み</span>
     {/if}
     <button onclick={() => onexport()} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">MusicXML 書き出し</button>
+    <button onclick={() => onprint()} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">PDF 出力</button>
   </div>
 </header>
 

@@ -26,6 +26,7 @@
   import ScoreView from "#lib/components/ScoreView.svelte";
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
+  import PrintView from "#lib/components/PrintView.svelte";
   import { createEmptyScore, keyAt, timeAt, INSTRUMENTS } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
@@ -1015,6 +1016,19 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // 印刷用のページを作っているか（true の間だけ PrintView を出す）（ステップ9）
+  let printing = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handlePrint
+  // ［PDF 出力］が押されたとき：再生を止めて、印刷用のページを作る（ステップ9）
+  // （PrintView が出てくると、ページを作って印刷の画面を開く）
+  // ----------------------------------------------------------
+  function handlePrint() {
+    handleStop();
+    printing = true;
+  }
+
   // コピーした音の配列（まだ何もコピーしていないときは null。ページを再読み込みすると消える）
   let clipboard = $state.raw(null);
 
@@ -1204,6 +1218,7 @@
       ontarget={handleTarget}
       onsoundtype={handleSoundType}
       onexport={handleExport}
+      onprint={handlePrint}
     />
     <ToolTabs
       isNew={page.state.isNew === true}
@@ -1256,6 +1271,11 @@
 
     <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
   </div>
+
+  <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
+  {#if printing}
+    <PrintView {score} onclose={() => (printing = false)} />
+  {/if}
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->
   <p class="load-status">読み込み中…</p>

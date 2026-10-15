@@ -54,7 +54,8 @@
     if (!VF) return;
     // 枠の内側の幅（左右の padding 8px ずつを引く）
     const width = wrapper.clientWidth - 16;
-    hitBoxes = renderScore(VF, container, score, width, selection, range, playingNotes);
+    // renderScore は段の位置なども返すが、ここで使うのは当たり判定の四角だけ（ステップ9）
+    hitBoxes = renderScore(VF, container, score, width, selection, range, playingNotes).hitBoxes;
     followPlaying();
   }
 

@@ -60,9 +60,13 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   selection … 選択中の場所 { part, measure, note }（選んでいなければ null）
 //   range     … 範囲選択 { part, start, end }（範囲を選んでいなければ null）
 //   playingNotes … 再生中に鳴っている音符の場所の一覧 [{ part, measure, note }, ...]（ステップ6-2）
-// 戻り値：クリックの当たり判定に使う、音符ごとの四角の一覧
-//   [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
-//   lineTop・lineBottom … その音符がある段の上端と下端（再生中の自動スクロールに使う）
+// 戻り値：{ hitBoxes, lineTops, lineBottoms, totalHeight }
+//   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
+//                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
+//                 lineTop・lineBottom … その音符がある段の上端と下端（再生中の自動スクロールに使う）
+//   lineTops    … 段ごとの上端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
+//   lineBottoms … 段ごとの下端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
+//   totalHeight … 楽譜全体の高さ（ステップ9）
 // ----------------------------------------------------------
 export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = []) {
   // 鳴っている音符を「パート-小節-番号」の文字にして、すぐに探せるようにしておく
@@ -194,7 +198,12 @@ export function renderScore(VF, container, score, width, selection = null, range
       });
     });
   });
-  return hitBoxes;
+  return {
+    hitBoxes: hitBoxes,
+    lineTops: positions.lineTops,
+    lineBottoms: positions.lineBottoms,
+    totalHeight: positions.totalHeight,
+  };
 }
 
 // ----------------------------------------------------------
