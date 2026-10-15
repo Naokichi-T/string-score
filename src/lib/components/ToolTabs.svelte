@@ -64,9 +64,13 @@
   //   isNew        … 新しく作った楽譜か（true なら「楽譜の設定」タブで始めて、タイトルの入力欄にカーソルを入れる）（ステップ7-3）
   //   canTuplet    … 連符のボタンを押せるか（音か休符を選んでいるか）（ステップ10-2）
   //   ontuplet     … 連符のボタンが押されたときに呼ぶ関数（連符の数字を渡す）（ステップ10-2）
+  //   inTuplet     … 選んでいる音が連符の中か（true なら［連符を解除］のボタンを出す）（ステップ10-3）
+  //   onremovetuplet … ［連符を解除］が押されたときに呼ぶ関数（ステップ10-3）
   let {
     canTuplet = false,
     ontuplet = () => {},
+    inTuplet = false,
+    onremovetuplet = () => {},
     isNew = false,
     score,
     onsettings = () => {},
@@ -206,8 +210,31 @@
       </div>
 
       <!-- 連符（音か休符を選んでいるときだけ押せる）（ステップ10-2） -->
+      <!-- 連符の中の音を選んでいるときは、かわりに［連符を解除］を出す（ステップ10-3） -->
       <div class="group">
-        <button class="tool text wide" disabled={!canTuplet} onclick={() => ontuplet(3)} title="選んでいる音の長さで3連符を作る（例：8分音符を選んで押すと、8分音符2つ分に3つ入る）"> 3連符 </button>
+        {#if inTuplet}
+          <button class="tool text clip" onclick={() => onremovetuplet()} title="選んでいる音が入っている連符を、ふつうの音符に戻す（入りきらない音は消える）"> 連符を解除 </button>
+        {:else}
+          <button class="tool text clip" disabled={!canTuplet} onclick={() => ontuplet(3)} title="選んでいる音の長さで3連符を作る（例：8分音符を選んで押すと、8分音符2つ分に3つ入る）"> 3連符 </button>
+          <!-- ほかの連符（2〜12連符）は、プルダウンから選ぶ（ステップ10-3） -->
+          <!-- 選んだらすぐ連符を作り、表示は「その他」に戻す -->
+          <select
+            class="tool-select"
+            disabled={!canTuplet}
+            value=""
+            onchange={(event) => {
+              const actual = Number(event.currentTarget.value);
+              event.currentTarget.value = ""; // 「その他」に戻す（同じ数字をもう一度選べるように）
+              if (actual) ontuplet(actual);
+            }}
+            title="ほかの連符を作る（選んでいる音の長さで作る）"
+          >
+            <option value="">その他</option>
+            {#each [2, 4, 5, 6, 7, 8, 9, 10, 11, 12] as n (n)}
+              <option value={n}>{n}連符</option>
+            {/each}
+          </select>
+        {/if}
       </div>
 
       <!-- 臨時記号（音符を選んでいるときだけ押せる） -->
@@ -336,6 +363,19 @@
     width: auto; /* コピーなどは文字が長いので、文字に合わせた幅にする */
     padding: 0 10px;
     font-size: 14px;
+  }
+  .tool-select {
+    height: 40px; /* ボタンと同じ高さ（その他の連符のプルダウン）（ステップ10-3） */
+    padding: 0 4px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .tool-select:disabled {
+    opacity: 0.35; /* 押せないときはうすく（ボタンと同じ） */
+    cursor: not-allowed;
   }
   .mode-switch {
     display: flex; /* 2つのボタンをくっつけて並べる */

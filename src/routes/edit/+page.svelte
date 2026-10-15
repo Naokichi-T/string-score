@@ -63,7 +63,7 @@
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
-  import { tupletError, makeTuplet } from "#lib/score/tuplets.js";
+  import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
@@ -455,6 +455,11 @@
   // ----------------------------------------------------------
   function handleDuration(d) {
     message = "";
+    // 連符の中の音を選んでいるときは、長さを変えない（ステップ10-3）
+    if (selectedInTuplet) {
+      message = "連符の中の音の長さは変えられません（［連符を解除］すると変えられます）";
+      return;
+    }
     // 今の付点のまま入らないなら、付点を外す
     let dots = dotted ? 1 : 0;
     if (selection && !canUse(d, dots)) dots = 0;
@@ -489,6 +494,12 @@
       return;
     }
 
+    // 連符の中の音には付点を付けられない（ステップ10-3）
+    if (note.tuplet) {
+      message = "連符の中の音には付点を付けられません";
+      return;
+    }
+
     // 選んでいる音の付点を切り替える
     const newDots = (note.dots ?? 0) > 0 ? 0 : 1;
     if (!canUse(note.duration, newDots)) {
@@ -510,6 +521,11 @@
   function putNote(newNote) {
     if (!selection) {
       message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
+      return false;
+    }
+    // 挿入モードでは、連符の中には入れられない（ステップ10-3）
+    if (mode === "insert" && selectedInTuplet) {
+      message = "連符の中には挿入できません。上書きモードにして入れてください";
       return false;
     }
     if (!canPlace(newNote.duration, newNote.dots)) {
@@ -590,6 +606,9 @@
   // 連符のボタンを押せるか（音か休符を1つ選んでいるとき）（ステップ10-2）
   let canTuplet = $derived(selection !== null);
 
+  // 選んでいる音が連符の中か（ステップ10-3）
+  let selectedInTuplet = $derived(!!getSelectedNote(score, selection)?.tuplet);
+
   // ----------------------------------------------------------
   // 関数：handleTuplet
   // 連符のボタンが押されたとき：選んでいる音を連符の1つ目にする（ステップ10-2）
@@ -604,6 +623,17 @@
     }
     message = "";
     commit(makeTuplet(score, selection, actual));
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleRemoveTuplet
+  // ［連符を解除］が押されたとき：選んでいる音が入っている連符を、ふつうの音符に戻す（ステップ10-3）
+  // 解除したあとは、連符だった所の最初の音を選ぶ
+  // ----------------------------------------------------------
+  function handleRemoveTuplet() {
+    message = "";
+    const result = removeTuplet(score, selection);
+    commit(result.score, result.selection);
   }
 
   // ----------------------------------------------------------
@@ -1251,6 +1281,8 @@
       {canRest}
       {canTuplet}
       ontuplet={handleTuplet}
+      inTuplet={selectedInTuplet}
+      onremovetuplet={handleRemoveTuplet}
       {noteSelected}
       onaccidental={handleAccidental}
       onstep={handleTranspose}

@@ -305,7 +305,8 @@ export function deleteNote(score, selection) {
   const newScore = cloneScore(score);
   const notes = newScore.parts[selection.part].measures[selection.measure].notes;
   // 長さだけ残して休符にする（記号やタイは消える）
-  notes[selection.note] = { rest: true, duration: note.duration, dots: note.dots ?? 0 };
+  // 連符の中の音なら、連符の印も残す（ステップ10-3）
+  notes[selection.note] = { rest: true, duration: note.duration, dots: note.dots ?? 0, ...(note.tuplet ? { tuplet: { ...note.tuplet } } : {}) };
   return newScore;
 }
 
@@ -363,6 +364,8 @@ export function toggleTie(score, selection) {
       duration: nextNote.duration,
       dots: nextNote.dots ?? 0,
       tie: false,
+      // 次の休符が連符の中なら、連符の印も残す（ステップ10-3）
+      ...(nextNote.tuplet ? { tuplet: { ...nextNote.tuplet } } : {}),
     };
     return { score: newScore, error: "" };
   }
@@ -390,10 +393,11 @@ export function toggleTie(score, selection) {
 // 関数：contentCount
 // 小節の音の並びのうち、「終わりに続く休符」より前にある音の数を返す
 // 例：[ド, 休, レ, 休, 休] → 3（ド・休・レ。最後の2つの休符は数えない）
+// 連符の中の休符は「終わりに続く休符」に入れない（取りのぞくと連符の数がそろわなくなるため）（ステップ10-3）
 // ----------------------------------------------------------
 function contentCount(notes) {
   let count = notes.length;
-  while (count > 0 && notes[count - 1].rest) {
+  while (count > 0 && notes[count - 1].rest && !notes[count - 1].tuplet) {
     count = count - 1;
   }
   return count;
@@ -695,8 +699,8 @@ export function deleteRange(score, range) {
     const notes = newScore.parts[pos.part].measures[pos.measure].notes;
     const note = notes[pos.note];
     if (note.rest) return; // 休符はそのまま
-    // 長さだけ残して休符にする（deleteNote と同じ。記号やタイは消える）
-    notes[pos.note] = { rest: true, duration: note.duration, dots: note.dots ?? 0 };
+    // 長さだけ残して休符にする（deleteNote と同じ。記号やタイは消える。連符の印は残す）
+    notes[pos.note] = { rest: true, duration: note.duration, dots: note.dots ?? 0, ...(note.tuplet ? { tuplet: { ...note.tuplet } } : {}) };
   });
   return newScore;
 }
