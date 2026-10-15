@@ -14,6 +14,7 @@
   // （ステップ6-1：録音した楽器の音で再生する（全体・パート別）、鍵盤の音も楽器の音にする）
   // （ステップ6-2：再生中に鳴っている音符を緑にする）
   // （ステップ7-1：URL の id の楽譜を読み込み、変えるたびに自動で保存する）
+  // （ステップ8-1：MusicXML の書き出し）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -62,6 +63,7 @@
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
+  import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
   // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
   let score = $state(createEmptyScore());
@@ -985,6 +987,32 @@
     playTarget = target;
   }
 
+  // ----------------------------------------------------------
+  // 関数：handleExport
+  // ［MusicXML 書き出し］が押されたとき：今の楽譜を MusicXML のファイルにしてダウンロードする（ステップ8-1）
+  // ファイルの名前は「タイトル.musicxml」
+  // ----------------------------------------------------------
+  function handleExport() {
+    // 楽譜データ → MusicXML の文字（$state.snapshot で、画面と連動していないふつうのデータにしてから渡す）
+    const xml = scoreToMusicXML($state.snapshot(score));
+
+    // 文字を「ファイルのかたまり（Blob）」にする（type は MusicXML のファイルの種類の名前）
+    const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+
+    // かたまりを指す一時的な URL を作り、見えないリンクを押したことにしてダウンロードさせる
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = musicXMLFileName(score.title); // download：開くのではなく、この名前で保存させる
+    document.body.appendChild(link); // ページに一度入れてから押す（入れないと名前が付かないブラウザがある）
+    link.click();
+    link.remove();
+
+    // 使い終わった一時的な URL を消す（メモリを空けるため）
+    // すぐ消すとダウンロードが始まる前に消えてしまうことがあるので、少し（1秒）待ってから消す
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   // コピーした音の配列（まだ何もコピーしていないときは null。ページを再読み込みすると消える）
   let clipboard = $state.raw(null);
 
@@ -1173,6 +1201,7 @@
       onstop={handleStop}
       ontarget={handleTarget}
       onsoundtype={handleSoundType}
+      onexport={handleExport}
     />
     <ToolTabs
       isNew={page.state.isNew === true}
