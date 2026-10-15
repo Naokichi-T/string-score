@@ -61,7 +61,7 @@
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
-  import { loadScore, saveScore } from "#lib/score/library.js";
+  import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
 
   // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
   let score = $state(createEmptyScore());
@@ -199,6 +199,7 @@
     handleStop();
     soundType = type;
     setSoundType(type); // 鳴らす仕組み（sound.js）にも知らせる
+    saveSetting("soundType", type); // 次に開いたときのために覚えておく（アプリ全体で1つ）（ステップ7-4）
   }
 
   // 鍵盤などで音を鳴らすときの楽器（選んでいるパートの楽器。何も選んでいないときはバイオリン）
@@ -209,8 +210,15 @@
   // （読み込みが終わるまでは、鍵盤は電子音で鳴る。再生ボタンは押せない）
   // ----------------------------------------------------------
   onMount(() => {
-    // URL の id の楽譜を開く（id がなければ新しく作る）
+    // URL の id の楽譜を開く（id がなければトップページへ戻す）
     openScore();
+
+    // 前に選んだ音の種類を読み込む（保存していなければ「楽器の音」のまま）（ステップ7-4）
+    const savedType = loadSettings().soundType;
+    if (savedType === "instrument" || savedType === "synth") {
+      soundType = savedType;
+      setSoundType(savedType); // 鳴らす仕組み（sound.js）にも知らせる
+    }
 
     loadInstruments()
       .then(() => {
@@ -1140,7 +1148,8 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <svelte:head>
-  <title>編集 - string-score</title>
+  <!-- ブラウザのタブに楽譜のタイトルを出す（読み込む前は「編集」）（ステップ7-4） -->
+  <title>{loadState === "ready" ? score.title : "編集"} - string-score</title>
 </svelte:head>
 
 {#if loadState === "ready"}

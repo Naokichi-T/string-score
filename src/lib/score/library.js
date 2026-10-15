@@ -9,6 +9,8 @@
 //       （parts は短いパート名の配列。例：["Vln. I", "Vln. II", "Vla.", "Vc."]）（ステップ7-2）
 //       （createdAt・updatedAt は日時を数字にしたもの。Date.now() の値）
 //   "string-score:score:（id）"   … 楽譜データそのもの（1曲に1つ）
+//   "string-score:settings"      … アプリ全体の設定（楽譜とは別）（ステップ7-4）
+//       { soundType: "instrument" }（音の種類。"instrument"：楽器の音、"synth"：電子音）
 //
 // 一覧の表と楽譜を分けておくと、トップページは小さな表を読むだけで済む
 //
@@ -156,5 +158,47 @@ export function deleteScore(id) {
   } catch (error) {
     console.error("楽譜を削除できませんでした", error);
     return false;
+  }
+}
+
+// ==========================================================
+// ここから下は、アプリ全体の設定（ステップ7-4）
+// ==========================================================
+
+// 設定を入れる場所の名前
+const SETTINGS_KEY = "string-score:settings";
+
+// ----------------------------------------------------------
+// 関数：loadSettings
+// アプリ全体の設定を読み込む
+// 戻り値：設定 { soundType, ... }（まだ保存していない・読めないときは空の {}）
+// ----------------------------------------------------------
+export function loadSettings() {
+  try {
+    const text = localStorage.getItem(SETTINGS_KEY);
+    if (!text) return {};
+    const settings = JSON.parse(text);
+    // ふつうのオブジェクトでなければ（壊れていたら）空にする
+    return settings && typeof settings === "object" ? settings : {};
+  } catch (error) {
+    console.error("設定を読み込めませんでした", error);
+    return {};
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：saveSetting
+// アプリ全体の設定を1つだけ書き換えて保存する（ほかの設定はそのまま残す）
+//   name  … 設定の名前（例："soundType"）
+//   value … 値（例："synth"）
+// ----------------------------------------------------------
+export function saveSetting(name, value) {
+  try {
+    const settings = loadSettings();
+    settings[name] = value;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (error) {
+    // 設定を保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
+    console.error("設定を保存できませんでした", error);
   }
 }
