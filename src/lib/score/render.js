@@ -10,6 +10,7 @@
 //   render/layout.js   … 改行の位置を決める
 //   render/ties.js     … タイを描く
 //   render/spanners.js … スラー・松葉を描く
+//   render/spacing.js  … パートの間・段の間を中身に合わせて決める（パートの間の自動調整）
 // ==========================================================
 
 import { computeAccidentals } from "./accidentals.js";
@@ -20,20 +21,18 @@ import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } f
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
 import { drawSpanners } from "./render/spanners.js";
+import { measureExtents, computePositions } from "./render/spacing.js";
 import { isInRange } from "./selection.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
+// （パートの間・段の間・上下の余白は、render/spacing.js で中身に合わせて決める）
 // ----------------------------------------------------------
 const LEFT = 10; // 左右の余白
 const NAME_WIDTH_FIRST = 80; // 1段目のパート名（フルネーム）を書くための幅
 const NAME_WIDTH_OTHER = 70; // 2段目以降のパート名（短い名前）を書くための幅
 const TITLE_AREA = 80; // タイトルと作曲者を書く場所の高さ
 const TEMPO_AREA = 28; // テンポ（Allegro ♩ = 120）を書く場所の高さ
-const TOP = 30; // 段の上の余白（五線の上に飛び出す音符のぶん）
-const PART_SPACING = 110; // パートとパートの五線の間隔（上の五線の上端から下の五線の上端まで）
-const SYSTEM_GAP = 150; // 段と段の間隔（上の段の一番下の五線の上端から、下の段の一番上の五線の上端まで）
-const BOTTOM = 130; // 一番下の余白（五線の下に飛び出す音符のぶん）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -45,6 +44,11 @@ const RANGE_COLOR = "#60a5fa";
 
 // 再生中に鳴っている音符の色（緑）（ステップ6-2）
 const PLAYING_COLOR = "#16a34a";
+
+// 最後に測った「五線の上下のはみ出し」を覚えておく
+// 楽譜データと幅が前と同じなら測り直さない（選択の青や再生中の緑では、はみ出しは変わらないため）
+// （楽譜データは書き換えずに新しく作る決まりなので、「同じものか」は === で比べられる）
+let lastMeasured = { score: null, width: 0, extents: null };
 
 // ----------------------------------------------------------
 // 関数：renderScore
@@ -113,20 +117,45 @@ export function renderScore(VF, container, score, width, selection = null, range
   const otherLeft = LEFT + NAME_WIDTH_OTHER; // 2段目以降の五線が始まる横の位置
   const lines = layoutLines(noteWidths, startWidths, middleWidths, totalWidth - firstLeft - LEFT, totalWidth - otherLeft - LEFT);
 
-  // 1つの段の高さ（一番上の五線の上端から、次の段の一番上の五線の上端まで）
-  const systemHeight = PART_SPACING * (partCount - 1) + SYSTEM_GAP;
   // タイトルか作曲者があるときだけ、上に場所を空ける（テンポの場所はいつも空ける）
   const hasHeader = !!(score.title || score.composer);
   const headerHeight = (hasHeader ? TITLE_AREA : 0) + TEMPO_AREA;
-  // 全体の高さ
-  const totalHeight = headerHeight + TOP + systemHeight * (lines.length - 1) + PART_SPACING * (partCount - 1) + BOTTOM;
 
-  // SVG で描く準備
+  // 段を描くのに使うもの（下書きと本番で共通）
+  const drawInfo = {
+    score: score,
+    lines: lines,
+    states: states,
+    accidentalsList: accidentalsList,
+    firstLeft: firstLeft,
+    otherLeft: otherLeft,
+    selection: selection,
+    range: range,
+    playingKeys: playingKeys,
+  };
+
+  // ----- 5. 下書きを描いて、段ごと・パートごとに、五線の上下にどれだけはみ出すかを測る -----
+  // （下書きでは、パートの間をとても広くとるので、となりのパートとは重ならない）
+  // 楽譜データと幅が前回と同じなら、前回測った結果をそのまま使う
+  let extents;
+  if (lastMeasured.score === score && lastMeasured.width === totalWidth) {
+    extents = lastMeasured.extents;
+  } else {
+    extents = measureExtents(VF, lines.length, partCount, totalWidth, (draftContext, draftStaveYs) => {
+      drawSystems(VF, draftContext, drawInfo, draftStaveYs, true);
+    });
+    lastMeasured = { score: score, width: totalWidth, extents: extents };
+  }
+
+  // ----- 6. 測った結果から、五線を置く高さと全体の高さを決める -----
+  const positions = computePositions(VF, extents, headerHeight);
+
+  // ----- 7. 本番：SVG で描く準備 -----
   const renderer = new VF.Renderer(container, VF.Renderer.Backends.SVG);
-  renderer.resize(totalWidth, totalHeight);
+  renderer.resize(totalWidth, positions.totalHeight);
   const context = renderer.getContext();
 
-  // ----- 5. タイトルと作曲者を描く -----
+  // ----- 8. タイトルと作曲者を描く -----
   context.save();
   if (score.title) {
     context.setFont("Academico", 24, "bold");
@@ -140,8 +169,53 @@ export function renderScore(VF, container, score, width, selection = null, range
   }
   context.restore();
 
-  // ----- 5-2. テンポを描く（1段目の五線の左端の上） -----
+  // ----- 8-2. テンポを描く（1段目の五線の左端の上） -----
   drawTempo(context, score, firstLeft, headerHeight - 8);
+
+  // ----- 9. 段・音符・タイ・スラー・松葉を、決めた高さで描く -----
+  const allNotes = drawSystems(VF, context, drawInfo, positions.staveYs, false);
+
+  // ----- 10. クリックの当たり判定に使う四角の一覧を作って返す -----
+  const hitBoxes = [];
+  allNotes.forEach((notesOfPart) => {
+    notesOfPart.forEach((entry) => {
+      const box = entry.staveNote.getBoundingBox(); // 音符を囲む四角
+      hitBoxes.push({
+        part: entry.part,
+        measure: entry.measure,
+        note: entry.note,
+        x: box.getX(),
+        y: box.getY(),
+        w: box.getW(),
+        h: box.getH(),
+        // この音符がある段の上端と下端（はみ出した中身も含める。spacing.js で決めたもの）
+        lineTop: positions.lineTops[entry.line],
+        lineBottom: positions.lineBottoms[entry.line],
+      });
+    });
+  });
+  return hitBoxes;
+}
+
+// ----------------------------------------------------------
+// 関数：drawSystems
+// 段ごとに、五線・音符・強弱・小節線・括弧・パート名を描き、
+// そのあとタイ・スラー・松葉を描く
+// 下書き（測るため）と本番の2回呼ばれる
+//   VF        … VexFlow の部品一式
+//   context   … 描く先
+//   info      … 描くのに使うもの（score・lines・states・accidentalsList・firstLeft・otherLeft・
+//                selection・range・playingKeys）
+//   staveYs   … staveYs[l][p] = l 段目・p パート目の五線を置く高さ
+//   isDraft   … 下書きなら true
+//                （下書きでは、パートをまたぐ線（小節線のつなぎ・括弧）とパート名は描かない。
+//                 パートごとのはみ出しを測るのに、じゃまになるため）
+// 戻り値：パートごとの音符の一覧 allNotes[p] = [{ staveNote, data, line, part, measure, note }, ...]
+// ----------------------------------------------------------
+function drawSystems(VF, context, info, staveYs, isDraft) {
+  const { score, lines, states, accidentalsList, firstLeft, otherLeft, selection, range, playingKeys } = info;
+  const partCount = score.parts.length;
+  const measureCount = score.measures.length;
 
   // タイを描くために、作った音符をパートごとに全部ためておく（小節・段をまたぐタイのため）
   // allNotes[p] の中身：{ staveNote: VexFlow の音符, data: 音符のデータ, line: 何段目か }
@@ -151,10 +225,9 @@ export function renderScore(VF, container, score, width, selection = null, range
   // lineBounds[l] = { startX: 音符が始まる位置, endX: 段の右端 }
   const lineBounds = [];
 
-  // ----- 6. 段ごとに描く -----
+  // ----- 段ごとに描く -----
   lines.forEach((line, l) => {
     const isFirstLine = l === 0;
-    const lineTop = headerHeight + TOP + systemHeight * l; // この段の一番上の五線の上端
     let x = isFirstLine ? firstLeft : otherLeft; // 次の小節を描き始める横の位置
 
     // この段の最初の小節の五線（括弧とパート名を描くのに使う）
@@ -170,9 +243,9 @@ export function renderScore(VF, container, score, width, selection = null, range
       // 次の小節で調が変わるなら、この小節の終わりを複縦線にする
       const nextKeyChanges = !isLast && states[i + 1].keyChanged;
 
-      // --- 6-1. パートごとに五線を作り、記号を付ける ---
+      // --- パートごとに五線を作り、記号を付ける ---
       const staves = score.parts.map((part, p) => {
-        const y = lineTop + PART_SPACING * p;
+        const y = staveYs[l][p]; // この段・このパートの五線を置く高さ（spacing.js で決めたもの）
         const stave = new VF.Stave(x, y, measureWidth);
         addModifiers(VF, stave, state, p, isLineStart, isFirst);
 
@@ -198,7 +271,7 @@ export function renderScore(VF, container, score, width, selection = null, range
       // 五線を描く
       staves.forEach((stave) => stave.setContext(context).draw());
 
-      // --- 6-2. パートごとに音符を作る ---
+      // --- パートごとに音符を作る ---
       const voices = [];
       const beamsList = [];
       score.parts.forEach((part, p) => {
@@ -230,7 +303,7 @@ export function renderScore(VF, container, score, width, selection = null, range
         beamsList.push(beams);
       });
 
-      // --- 6-3. 全パートの音符の横の位置をそろえて並べる ---
+      // --- 全パートの音符の横の位置をそろえて並べる ---
       const formatter = new VF.Formatter();
       voices.forEach((voice) => formatter.joinVoices([voice]));
       const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - 10;
@@ -249,16 +322,18 @@ export function renderScore(VF, container, score, width, selection = null, range
         });
       });
 
-      // --- 6-4. 小節線を全パートつなげる ---
-      const topStave = staves[0];
-      const bottomStave = staves[partCount - 1];
-      let connectorType = VF.StaveConnector.type.SINGLE_RIGHT; // ふつうの小節線
-      if (isLast) {
-        connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり
-      } else if (nextKeyChanges) {
-        connectorType = VF.StaveConnector.type.THIN_DOUBLE; // 複縦線
+      // --- 小節線を全パートつなげる（下書きでは描かない） ---
+      if (!isDraft) {
+        const topStave = staves[0];
+        const bottomStave = staves[partCount - 1];
+        let connectorType = VF.StaveConnector.type.SINGLE_RIGHT; // ふつうの小節線
+        if (isLast) {
+          connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり
+        } else if (nextKeyChanges) {
+          connectorType = VF.StaveConnector.type.THIN_DOUBLE; // 複縦線
+        }
+        new VF.StaveConnector(topStave, bottomStave).setType(connectorType).setContext(context).draw();
       }
-      new VF.StaveConnector(topStave, bottomStave).setType(connectorType).setContext(context).draw();
 
       if (isLineStart) lineStartStaves = staves;
 
@@ -269,31 +344,33 @@ export function renderScore(VF, container, score, width, selection = null, range
     // この段の左右の端の位置を覚えておく（x はこの段の右端まで進んでいる）
     lineBounds.push({ startX: lineStartStaves[0].getNoteStartX(), endX: x });
 
-    // --- 6-5. この段の左端の線・括弧・パート名を描く ---
-    const lineTopStave = lineStartStaves[0];
-    const lineBottomStave = lineStartStaves[partCount - 1];
-    // 左端の縦線（全パートをつなぐ）
-    new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(context).draw();
-    // 角ばった括弧（ブラケット）。パートが2つ以上のときだけ
-    if (partCount > 1) {
-      new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.BRACKET).setContext(context).draw();
+    // --- この段の左端の線・括弧・パート名を描く（下書きでは描かない） ---
+    if (!isDraft) {
+      const lineTopStave = lineStartStaves[0];
+      const lineBottomStave = lineStartStaves[partCount - 1];
+      // 左端の縦線（全パートをつなぐ）
+      new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(context).draw();
+      // 角ばった括弧（ブラケット）。パートが2つ以上のときだけ
+      if (partCount > 1) {
+        new VF.StaveConnector(lineTopStave, lineBottomStave).setType(VF.StaveConnector.type.BRACKET).setContext(context).draw();
+      }
+      // パート名（1段目はフルネーム、2段目以降は短い名前。五線のまん中の高さに右寄せ）
+      const staveLeft = isFirstLine ? firstLeft : otherLeft;
+      context.save();
+      context.setFont("Academico", 14);
+      score.parts.forEach((part, p) => {
+        const name = isFirstLine ? part.name : (part.abbreviation ?? part.name);
+        const stave = lineStartStaves[p];
+        const textWidth = context.measureText(name).width;
+        const textX = staveLeft - 14 - textWidth; // 括弧とぶつからないように少し離す
+        const textY = stave.getYForLine(2) + 5; // 第3線（まん中の線）の高さ
+        context.fillText(name, textX, textY);
+      });
+      context.restore();
     }
-    // パート名（1段目はフルネーム、2段目以降は短い名前。五線のまん中の高さに右寄せ）
-    const staveLeft = isFirstLine ? firstLeft : otherLeft;
-    context.save();
-    context.setFont("Academico", 14);
-    score.parts.forEach((part, p) => {
-      const name = isFirstLine ? part.name : (part.abbreviation ?? part.name);
-      const stave = lineStartStaves[p];
-      const textWidth = context.measureText(name).width;
-      const textX = staveLeft - 14 - textWidth; // 括弧とぶつからないように少し離す
-      const textY = stave.getYForLine(2) + 5; // 第3線（まん中の線）の高さ
-      context.fillText(name, textX, textY);
-    });
-    context.restore();
   });
 
-  // ----- 7. タイを描く（パートごと） -----
+  // ----- タイを描く（パートごと） -----
   allNotes.forEach((notesOfPart) => {
     for (let k = 0; k < notesOfPart.length - 1; k++) {
       const current = notesOfPart[k];
@@ -313,31 +390,10 @@ export function renderScore(VF, container, score, width, selection = null, range
     }
   });
 
-  // ----- 8. スラーと松葉を描く -----
+  // ----- スラーと松葉を描く -----
   drawSpanners(VF, context, allNotes, lineBounds);
 
-  // ----- 9. クリックの当たり判定に使う四角の一覧を作って返す -----
-  const hitBoxes = [];
-  allNotes.forEach((notesOfPart) => {
-    notesOfPart.forEach((entry) => {
-      const box = entry.staveNote.getBoundingBox(); // 音符を囲む四角
-      // この音符がある段の上端（上の余白も含める）と下端（一番下の五線の下に飛び出す音符のぶんも含める）
-      const lineTop = headerHeight + systemHeight * entry.line;
-      const lineBottom = lineTop + TOP + PART_SPACING * (partCount - 1) + 100;
-      hitBoxes.push({
-        part: entry.part,
-        measure: entry.measure,
-        note: entry.note,
-        x: box.getX(),
-        y: box.getY(),
-        w: box.getW(),
-        h: box.getH(),
-        lineTop: lineTop,
-        lineBottom: lineBottom,
-      });
-    });
-  });
-  return hitBoxes;
+  return allNotes;
 }
 
 // ----------------------------------------------------------
