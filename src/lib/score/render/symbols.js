@@ -9,6 +9,9 @@ import { BOWINGS, ARTICULATIONS, FERMATA, TECHNIQUES, DYNAMICS } from "../symbol
 // フェルマータを持ち上げる量（ピクセル。マイナスが上）
 const FERMATA_LIFT = -6;
 
+// 下向きの符尾の先から、強弱記号の文字の下端までの間（ピクセル）
+const STEM_GAP = 22;
+
 // ----------------------------------------------------------
 // 関数：addSymbols
 // 音符に、五線の上や音符の近くに付く記号を付ける
@@ -84,6 +87,15 @@ export function dynamicBaselineY(VF, staveNote, stave) {
   const belowCount = staveNote.getModifiersByType("Articulation").filter((a) => a.getPosition() === VF.Modifier.Position.BELOW).length;
   const lowestNoteY = Math.max(...staveNote.getYs()) + belowCount * 12;
   if (lowestNoteY + 26 > y) y = lowestNoteY + 26;
+
+  // 符尾が下向きのときは、符尾の先（連桁があれば連桁）より下にする
+  // （高い音から低い音まで連桁でつながると、符尾が五線の下まで伸びて、強弱記号や松葉と重なるため）
+  // getStemExtents：符尾の両端の高さ { topY, baseY }。下向きの符尾では、大きいほうが先の高さ
+  if (staveNote.hasStem() && staveNote.getStemDirection() === VF.Stem.DOWN) {
+    const extents = staveNote.getStemExtents();
+    const stemTipY = Math.max(extents.topY, extents.baseY);
+    if (stemTipY + STEM_GAP > y) y = stemTipY + STEM_GAP;
+  }
   return y;
 }
 
