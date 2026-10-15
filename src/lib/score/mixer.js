@@ -29,3 +29,21 @@ export const DEFAULT_MIXER = { volume: 100, mute: false, solo: false };
 export function mixerOf(mixer, partId) {
   return { ...DEFAULT_MIXER, ...(mixer[partId] ?? {}) };
 }
+
+// ----------------------------------------------------------
+// 関数：isAudible
+// そのパートを鳴らすかどうかを返す（ステップ12-3b）
+//   mixer  … 音量の設定（全パート分）
+//   parts  … パートの一覧（楽譜データの parts。ソロのパートがあるかを調べるのに使う）
+//   partId … 調べるパートの名札（id）
+// 鳴らさないのは次のとき
+//   ・ミュートになっている
+//   ・どれかのパートがソロで、このパートはソロではない
+// ----------------------------------------------------------
+export function isAudible(mixer, parts, partId) {
+  const setting = mixerOf(mixer, partId);
+  if (setting.mute) return false;
+  const anySolo = parts.some((part) => mixerOf(mixer, part.id).solo);
+  if (anySolo && !setting.solo) return false;
+  return true;
+}

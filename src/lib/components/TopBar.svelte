@@ -8,6 +8,7 @@
   // （ステップ7-1：［保存］ボタンをやめて、自動保存の状態を出す）
   // （ステップ8-1：［MusicXML 書き出し］ボタンが動くようにした）
   // （ステップ9：［PDF 出力］ボタンを足した）
+  // （ステップ12-3b：鳴らすパートを選ぶ欄をやめた。「再生」タブのソロで選ぶ）
   // ==========================================================
 
   // 親から受け取るもの
@@ -17,15 +18,12 @@
   //   canRedo    … やり直せるか
   //   onundo     … 元に戻すボタンが押されたときに呼ぶ関数
   //   onredo     … やり直しボタンが押されたときに呼ぶ関数
-  //   parts      … パートの一覧（鳴らすパートを選ぶ欄に、パート名を出すのに使う）
   //   playing    … 再生中か
   //   soundState … 楽器の音の読み込みの状態（"loading"：読み込み中、"ready"：完了、"error"：失敗）
-  //   playTarget … 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
   //   canPlay    … 再生できるか（false なら再生ボタンを押せない）
   //   soundType  … 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）
   //   onplay     … 再生ボタンが押されたときに呼ぶ関数
   //   onstop     … 停止ボタンが押されたときに呼ぶ関数
-  //   ontarget   … 鳴らすパートが選ばれたときに呼ぶ関数（"all" か数字を渡す）
   //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument"・"instrumentB"・"synth" のどれかを渡す）
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   //   onexport   … ［MusicXML 書き出し］ボタンが押されたときに呼ぶ関数（ステップ8-1）
@@ -37,32 +35,17 @@
     canRedo = false,
     onundo = () => {},
     onredo = () => {},
-    parts = [],
     playing = false,
     soundState = "loading",
-    playTarget = "all",
     canPlay = false,
     soundType = "instrument",
     onplay = () => {},
     onstop = () => {},
-    ontarget = () => {},
     onsoundtype = () => {},
     saveState = "saved",
     onexport = () => {},
     onprint = () => {},
   } = $props();
-
-  // ----------------------------------------------------------
-  // 関数：handleTargetChange
-  // 鳴らすパートの欄が変わったとき：選ばれた値を親に渡す
-  // （選ぶ欄の値は文字なので、パートの番号は数字に直す）
-  // ----------------------------------------------------------
-  function handleTargetChange(event) {
-    const value = event.target.value;
-    ontarget(value === "all" ? "all" : Number(value));
-    // 選んだあとは欄の選択を外す（そのままだと、Space キーで再生できずに欄が開いてしまうため）
-    event.target.blur();
-  }
 
   // ----------------------------------------------------------
   // 関数：handleSoundTypeChange
@@ -85,21 +68,13 @@
     <button disabled={!canRedo} onclick={() => onredo()} title="やり直し（Ctrl＋Shift＋Z / ⌘＋Shift＋Z）"> ↷ やり直し </button>
   </div>
 
-  <!-- 再生・停止と、鳴らすパート -->
+  <!-- 再生・停止と、音の種類 -->
   <div class="group">
     {#if playing}
       <button class="play" onclick={() => onstop()} title="停止（Space）">■ 停止</button>
     {:else}
       <button class="play" disabled={!canPlay} onclick={() => onplay()} title="再生（Space）。音を選んでいれば、その小節から">▶ 再生</button>
     {/if}
-
-    <!-- 鳴らすパート（value は今のデータに合わせ、変えるのは親に頼む） -->
-    <select value={String(playTarget)} onchange={handleTargetChange} title="鳴らすパート">
-      <option value="all">全体</option>
-      {#each parts as part, p}
-        <option value={String(p)}>{part.name}</option>
-      {/each}
-    </select>
 
     <!-- 音の種類（value は今のデータに合わせ、変えるのは親に頼む） -->
     <select value={soundType} onchange={handleSoundTypeChange} title="音の種類">

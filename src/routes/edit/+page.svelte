@@ -136,24 +136,34 @@
   // 楽器の音の読み込みの状態（"loading"：読み込み中、"ready"：完了、"error"：失敗）
   let soundState = $state("loading");
 
-  // 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
-  let playTarget = $state("all");
-
   // パートごとの音量の設定（くわしくは score/mixer.js）（ステップ12-3）
   // 楽譜を開いたときに、その楽譜の設定を読み込む
+  // （ステップ12-3b：上のバーの「鳴らすパート」の欄（playTarget）はやめて、これのソロで選ぶようにした）
   let mixer = $state({});
+
+  // 再生中の、小節ごとの始まりの時刻 [{ measure, startTick }, ...]（再生を始めたときに buildEvents で作る）（ステップ12-3b）
+  // 音量を変えたときに「今何小節目か」を調べて、その小節から鳴らし直すのに使う
+  let playMeasureStarts = [];
 
   // ----------------------------------------------------------
   // 関数：handleMixer
   // 「再生」タブで音量・ミュート・ソロが変わったとき（ステップ12-3）
   //   partId  … パートの名札（id）
   //   changes … 変えた項目（例：{ volume: 80 }、{ mute: true }）
+  //   final   … 変え終わったか（つまみを動かしている途中は false、離したときと M・S のボタンは true）（ステップ12-3b）
   // そのパートの設定に変えた項目を重ねて、すぐに保存する
   // （楽譜の中身ではないので、元に戻すの履歴には残さない）
+  // 再生中に変え終わったら、今鳴っている小節の頭から、新しい設定で鳴らし直す（ステップ12-3b）
   // ----------------------------------------------------------
-  function handleMixer(partId, changes) {
+  function handleMixer(partId, changes, final = true) {
     mixer = { ...mixer, [partId]: { ...mixerOf(mixer, partId), ...changes } };
     saveMixer(scoreId, mixer);
+
+    if (final && playing) {
+      const measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
+      handleStop();
+      playFrom(measure);
+    }
   }
 
   // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
@@ -984,13 +994,6 @@
       newSelection = { ...selection, part: index };
     }
     commit(movePart(score, index, delta), newSelection);
-
-    // 鳴らすパートも、入れ替わったパートについていく
-    if (playTarget === index) {
-      playTarget = target;
-    } else if (playTarget === target) {
-      playTarget = index;
-    }
   }
 
   // ----------------------------------------------------------
@@ -1013,25 +1016,15 @@
       newSelection = { ...selection, part: selection.part - 1 };
     }
     commit(newScore, newSelection);
-
-    // 鳴らすパートを消したときは「全体」に戻す。下のパートなら番号を1つ減らす
-    if (playTarget === index) {
-      playTarget = "all";
-    } else if (playTarget !== "all" && playTarget > index) {
-      playTarget = playTarget - 1;
-    }
   }
 
   // ----------------------------------------------------------
   // 関数：handlePlay
   // 再生のボタン（Space キー）が押されたとき
   //   ・音か範囲を選んでいれば、その小節の頭から。何も選んでいなければ1小節目から
-  //   ・鳴らすパートの欄で選んだパートだけ（「全体」なら全パート）を鳴らす
+  //   ・「再生」タブの設定（ミュート・ソロ・音量）に合わせて鳴らす（ステップ12-3b）
   // ----------------------------------------------------------
   function handlePlay() {
-    if (!canPlay) return;
-    message = "";
-
     // 始める小節（範囲を選んでいるときは、範囲の最初の小節）
     let startMeasure = 0;
     if (range) {
@@ -1039,13 +1032,26 @@
     } else if (selection) {
       startMeasure = selection.measure;
     }
+    playFrom(startMeasure);
+  }
 
-    // 楽譜を、鳴らす音の一覧に直す
-    const result = buildEvents(score, startMeasure, playTarget);
+  // ----------------------------------------------------------
+  // 関数：playFrom
+  // 決めた小節の頭から再生する（ステップ12-3b：handlePlay から分けた）
+  //   startMeasure … 何小節目から鳴らすか（0 から数える）
+  // 再生のボタンと、再生中に音量を変えたときの鳴らし直しで使う
+  // ----------------------------------------------------------
+  function playFrom(startMeasure) {
+    if (!canPlay) return;
+    message = "";
+
+    // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す）
+    const result = buildEvents(score, startMeasure, mixer);
     if (result.events.length === 0) {
-      message = "鳴らす音がありません（休符だけです）";
+      message = "鳴らす音がありません（休符だけか、全部のパートが鳴らない設定です）";
       return;
     }
+    playMeasureStarts = result.measureStarts; // 鳴らし直しのために覚えておく（ステップ12-3b）
 
     // まとめて予約して鳴らす（最後まで行ったら、再生中をやめて緑を消す）
     const tickSeconds = secondsPerTick(score.tempo);
@@ -1077,14 +1083,20 @@
   }
 
   // ----------------------------------------------------------
-  // 関数：handleTarget
-  // 鳴らすパートの欄が変わったとき
-  //   target … "all"（全体）か、パートの番号
-  // 再生中なら止める（選び直したパートで、もう一度再生してもらう）
+  // 関数：currentMeasure
+  // 再生中に、今鳴っているのが何小節目かを返す（ステップ12-3b）
+  // 再生を始めてからの時間を、小節ごとの始まりの時刻（playMeasureStarts）とくらべて決める
+  // 戻り値：小節の番号（0 から数える）
   // ----------------------------------------------------------
-  function handleTarget(target) {
-    handleStop();
-    playTarget = target;
+  function currentMeasure() {
+    const time = getPlaybackTime(); // 再生を始めてから何秒たったか（始めてすぐはマイナス）
+    const tick = Math.max(0, time ?? 0) / highlightTickSeconds; // 秒をティックに直す
+    // 始まりの時刻が今より前の小節のうち、一番うしろのもの
+    let measure = playMeasureStarts[0].measure;
+    playMeasureStarts.forEach((m) => {
+      if (m.startTick <= tick) measure = m.measure;
+    });
+    return measure;
   }
 
   // ----------------------------------------------------------
@@ -1315,15 +1327,12 @@
       canRedo={history.redo.length > 0}
       onundo={handleUndo}
       onredo={handleRedo}
-      parts={score.parts}
       {playing}
       {soundState}
-      {playTarget}
       {canPlay}
       {soundType}
       onplay={handlePlay}
       onstop={handleStop}
-      ontarget={handleTarget}
       onsoundtype={handleSoundType}
       onexport={handleExport}
       onprint={handlePrint}

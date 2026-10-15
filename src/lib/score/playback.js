@@ -25,6 +25,7 @@
 
 import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH } from "./model.js";
 import { keyAlters } from "./accidentals.js";
+import { mixerOf, isAudible } from "./mixer.js";
 
 // ----------------------------------------------------------
 // 強弱記号ごとの音の強さ（0〜127。MIDI と同じ決め方）
@@ -409,15 +410,18 @@ function computeWedges(part) {
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（0 から数える）
-//   partIndex    … どのパートを鳴らすか（"all" なら全パート、数字ならそのパートだけ）
-// 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧 }
+//   mixer        … パートごとの音量の設定（くわしくは mixer.js）（ステップ12-3b）
+//                  ミュート・ソロで鳴らさないパートは飛ばし、鳴らすパートは音の強さに音量（0〜100%）をかける
+// 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧,
+//          measureStarts: 小節ごとの始まりの時刻 }
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
 //   （ステップ6-2：鳴っている音符を緑にするために追加。タイでつながった後ろの音符も、その音符の時間で1つずつ入れる）
+//   measureStarts の1つ分：{ measure, startTick }（再生中に、今何小節目かを調べるのに使う。フェルマータのぶんもずらしてある）（ステップ12-3b）
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
-export function buildEvents(score, startMeasure, partIndex) {
+export function buildEvents(score, startMeasure, mixer = {}) {
   const events = [];
   const highlights = []; // 緑にする音符の一覧（ステップ6-2）
   const fermatas = []; // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
@@ -429,8 +433,10 @@ export function buildEvents(score, startMeasure, partIndex) {
   }
 
   score.parts.forEach((part, p) => {
-    // 鳴らさないパートは飛ばす
-    if (partIndex !== "all" && partIndex !== p) return;
+    // 鳴らさないパート（ミュート・ほかのパートがソロ）は飛ばす（ステップ12-3b）
+    if (!isAudible(mixer, score.parts, part.id)) return;
+    // このパートの音量の割合（100 なら 1、80 なら 0.8）（ステップ12-3b）
+    const volumeRate = mixerOf(mixer, part.id).volume / 100;
 
     let dynamic = DEFAULT_DYNAMIC; // 今の強弱
     let tick = 0; // 再生を始めた所から何ティック目か（始める小節より前は数えない）
@@ -506,6 +512,8 @@ export function buildEvents(score, startMeasure, partIndex) {
         let velocity = Math.min(127, baseVelocity + boost);
         // 弱音器を付けている間は、少し小さくする（ステップ11-2）
         if (muted) velocity = Math.round(velocity * MUTE_RATE);
+        // 「再生」タブの音量をかける（ステップ12-3b）
+        velocity = Math.round(velocity * volumeRate);
 
         if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
           // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
@@ -582,6 +590,14 @@ export function buildEvents(score, startMeasure, partIndex) {
     totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
   });
 
+  // 小節ごとの始まりの時刻（フェルマータのぶんもずらす）（ステップ12-3b）
+  const measureStarts = [];
+  let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
+  for (let i = startMeasure; i < score.measures.length; i++) {
+    measureStarts.push({ measure: i, startTick: measureTick + shiftBefore(points, measureTick, true) });
+    measureTick = measureTick + measureTicks(timeAt(score, i));
+  }
+
   // 装飾・トレモロの付いた音を、短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b・11-4）
   const played = [];
   events.forEach((event) => {
@@ -595,7 +611,7 @@ export function buildEvents(score, startMeasure, partIndex) {
   // 鳴り始める順に並べる（同じ時間なら上のパートから）
   played.sort((a, b) => a.startTick - b.startTick || a.part - b.part);
 
-  return { events: played, totalTicks: totalTicks, highlights: highlights };
+  return { events: played, totalTicks: totalTicks, highlights: highlights, measureStarts: measureStarts };
 }
 
 // ----------------------------------------------------------

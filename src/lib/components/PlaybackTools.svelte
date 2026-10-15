@@ -9,8 +9,10 @@
   // 親から受け取るもの
   //   parts   … パートの一覧（楽譜データの parts）
   //   mixer   … 音量の設定（くわしくは score/mixer.js）
-  //   onmixer … 設定が変わったときに呼ぶ関数（パートの名札（id）と、変えた項目を渡す）
-  //             例：onmixer("pk2qyyj3f", { volume: 80 })、onmixer("pk2qyyj3f", { mute: true })
+  //   onmixer … 設定が変わったときに呼ぶ関数（パートの名札（id）と、変えた項目と、変え終わったかを渡す）
+  //             例：onmixer("pk2qyyj3f", { volume: 80 }, false)、onmixer("pk2qyyj3f", { mute: true })
+  //             変え終わったか：つまみを動かしている途中は false、離したときは true（省略したら true）（ステップ12-3b）
+  //             （再生中に変え終わったら、親が今の小節から鳴らし直す）
   let { parts = [], mixer = {}, onmixer = () => {} } = $props();
 
   // どれか1つでもソロになっているか（なっていれば、ソロでないパートは鳴らない）
@@ -48,9 +50,11 @@
         max="100"
         step="1"
         value={setting.volume}
-        oninput={(event) => onmixer(part.id, { volume: Number(event.currentTarget.value) })}
-        onchange={(event) => event.currentTarget.blur()}
-        title="音量"
+        oninput={(event) => onmixer(part.id, { volume: Number(event.currentTarget.value) }, false)}
+        onchange={(event) => {
+          onmixer(part.id, { volume: Number(event.currentTarget.value) }, true); // 離したとき：変え終わった（ステップ12-3b）
+          event.currentTarget.blur();
+        }}
       />
       <!-- 選択を外すのは、Space キーで再生できるようにするため（つまみを選んだままだと、キーがつまみに取られる） -->
 
