@@ -13,8 +13,11 @@
   // （ステップ5-2：小節の追加・削除）
   // （ステップ6-1：録音した楽器の音で再生する（全体・パート別）、鍵盤の音も楽器の音にする）
   // （ステップ6-2：再生中に鳴っている音符を緑にする）
+  // （ステップ7-1：URL の id の楽譜を読み込み、変えるたびに自動で保存する）
   // ==========================================================
   import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { goto } from "$app/navigation";
   import TopBar from "#lib/components/TopBar.svelte";
   import ToolTabs from "#lib/components/ToolTabs.svelte";
   import SelectionInfo from "#lib/components/SelectionInfo.svelte";
@@ -58,9 +61,26 @@
   import { copyNotes, pasteNotes } from "#lib/score/clipboard.js";
   import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
+  import { loadScore, saveScore, createScore } from "#lib/score/library.js";
 
-  // 楽譜データ（空の弦楽四重奏で始める）
+  // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
   let score = $state(createEmptyScore());
+
+  // 読み込みの状態（ステップ7-1）
+  //   "loading"  … 読み込み中（楽譜はまだ出さない）
+  //   "ready"    … 読み込み完了（楽譜を出す）
+  //   "notfound" … URL の id の楽譜が見つからない
+  //   "error"    … 新しい楽譜を保存できなかった
+  let loadState = $state("loading");
+
+  // 今開いている楽譜の id（保存するときに使う）
+  let scoreId = null;
+
+  // 保存の状態（"saved"：保存済み、"error"：保存できなかった）（上のバーに出す）
+  let saveState = $state("saved");
+
+  // 最後に保存した楽譜データ（同じものを何度も保存しないように覚えておく）
+  let savedScore = null;
 
   // 選択中の場所 { part, measure, note }（何も選んでいないときは null）
   let selection = $state(null);
@@ -190,6 +210,9 @@
   // （読み込みが終わるまでは、鍵盤は電子音で鳴る。再生ボタンは押せない）
   // ----------------------------------------------------------
   onMount(() => {
+    // URL の id の楽譜を開く（id がなければ新しく作る）
+    openScore();
+
     loadInstruments()
       .then(() => {
         soundState = "ready";
@@ -204,6 +227,57 @@
       stopPlayback();
       cancelAnimationFrame(highlightFrame);
     };
+  });
+
+  // ----------------------------------------------------------
+  // 関数：openScore
+  // URL の id（/edit?id=xxx）の楽譜を、ブラウザの中から読み込む（ステップ7-1）
+  //   id がある   → その楽譜を開く（見つからなければ「見つかりませんでした」を出す）
+  //   id がない   → 空の弦楽四重奏を作って保存し、URL を /edit?id=新しいid に書き換える
+  // ----------------------------------------------------------
+  function openScore() {
+    const id = page.url.searchParams.get("id");
+
+    if (id) {
+      const loaded = loadScore(id);
+      if (!loaded) {
+        loadState = "notfound";
+        return;
+      }
+      scoreId = id;
+      score = loaded;
+      savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
+      loadState = "ready";
+      return;
+    }
+
+    // id がない：新しい楽譜を作って保存する
+    const newScore = createEmptyScore();
+    const newId = createScore(newScore);
+    if (!newId) {
+      loadState = "error";
+      return;
+    }
+    scoreId = newId;
+    score = newScore;
+    savedScore = score;
+    loadState = "ready";
+    // URL だけを書き換える（replace：「戻る」で id のない URL に戻らないようにする、
+    // shallow：ページを読み込み直さない）
+    goto(`/edit?id=${newId}`, { replace: true, shallow: true });
+  }
+
+  // ----------------------------------------------------------
+  // 自動保存（ステップ7-1）
+  // 楽譜データが入れ替わったら（commit・元に戻す・やり直し）、すぐに保存する
+  // ----------------------------------------------------------
+  $effect(() => {
+    const current = score; // score が入れ替わったら、ここがもう一度動く
+    if (!scoreId || current === savedScore) return; // 開く前・保存済みなら何もしない
+    // $state.snapshot：画面と連動している楽譜データから、ふつうのデータのコピーを作る
+    const ok = saveScore(scoreId, $state.snapshot(current));
+    saveState = ok ? "saved" : "error";
+    savedScore = current;
   });
 
   // 選んでいるのが音符（休符ではない）か（臨時記号などのボタンを押せるかどうかに使う）
@@ -963,6 +1037,9 @@
   // キーボードが押されたときの処理（ページ全体で受け取る）
   // ----------------------------------------------------------
   function handleKeydown(event) {
+    // 楽譜を読み込む前は何もしない（ステップ7-1）
+    if (loadState !== "ready") return;
+
     // 文字を入力する欄で押されたときは何もしない（後のステップで入力欄を作るため）
     const tag = event.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -1079,74 +1156,92 @@
   <title>編集 - string-score</title>
 </svelte:head>
 
-<!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
-<div class="editor">
-  <TopBar
-    tempo={score.tempo}
-    tempoText={score.tempoText}
-    canUndo={history.undo.length > 0}
-    canRedo={history.redo.length > 0}
-    onundo={handleUndo}
-    onredo={handleRedo}
-    parts={score.parts}
-    {playing}
-    {soundState}
-    {playTarget}
-    {canPlay}
-    {soundType}
-    onplay={handlePlay}
-    onstop={handleStop}
-    ontarget={handleTarget}
-    onsoundtype={handleSoundType}
-  />
-  <ToolTabs
-    {duration}
-    {dotted}
-    {canUse}
-    onduration={handleDuration}
-    ondot={handleDot}
-    onrest={handleRest}
-    {canRest}
-    {noteSelected}
-    onaccidental={handleAccidental}
-    onstep={handleTranspose}
-    {rangeEditable}
-    ontie={handleTie}
-    ondelete={handleDelete}
-    {mode}
-    onmode={handleMode}
-    selectedNote={noteSelected ? getSelectedNote(score, selection) : null}
-    onsymbol={handleSymbol}
-    {spanState}
-    {canSpanRange}
-    onspanner={handleSpanner}
-    {score}
-    onsettings={handleSettings}
-    {canDeleteMeasure}
-    onmeasure={handleMeasure}
-    {currentTime}
-    ontime={handleTime}
-    {currentKey}
-    onkey={handleKeySignature}
-    {currentClef}
-    onclef={handleClef}
-    selectedPart={selection ? selection.part : null}
-    onaddpart={handleAddPart}
-    onmovepart={handleMovePart}
-    ondeletepart={handleDeletePart}
-    {canCopy}
-    {canPaste}
-    onclipboard={handleClipboard}
-  />
-  <SelectionInfo {score} {selection} {range} {message} />
+{#if loadState === "ready"}
+  <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
+  <div class="editor">
+    <TopBar
+      {saveState}
+      tempo={score.tempo}
+      tempoText={score.tempoText}
+      canUndo={history.undo.length > 0}
+      canRedo={history.redo.length > 0}
+      onundo={handleUndo}
+      onredo={handleRedo}
+      parts={score.parts}
+      {playing}
+      {soundState}
+      {playTarget}
+      {canPlay}
+      {soundType}
+      onplay={handlePlay}
+      onstop={handleStop}
+      ontarget={handleTarget}
+      onsoundtype={handleSoundType}
+    />
+    <ToolTabs
+      {duration}
+      {dotted}
+      {canUse}
+      onduration={handleDuration}
+      ondot={handleDot}
+      onrest={handleRest}
+      {canRest}
+      {noteSelected}
+      onaccidental={handleAccidental}
+      onstep={handleTranspose}
+      {rangeEditable}
+      ontie={handleTie}
+      ondelete={handleDelete}
+      {mode}
+      onmode={handleMode}
+      selectedNote={noteSelected ? getSelectedNote(score, selection) : null}
+      onsymbol={handleSymbol}
+      {spanState}
+      {canSpanRange}
+      onspanner={handleSpanner}
+      {score}
+      onsettings={handleSettings}
+      {canDeleteMeasure}
+      onmeasure={handleMeasure}
+      {currentTime}
+      ontime={handleTime}
+      {currentKey}
+      onkey={handleKeySignature}
+      {currentClef}
+      onclef={handleClef}
+      selectedPart={selection ? selection.part : null}
+      onaddpart={handleAddPart}
+      onmovepart={handleMovePart}
+      ondeletepart={handleDeletePart}
+      {canCopy}
+      {canPaste}
+      onclipboard={handleClipboard}
+    />
+    <SelectionInfo {score} {selection} {range} {message} />
 
-  <!-- 五線譜の部分だけスクロールする -->
-  <main class="score-area">
-    <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} />
-  </main>
+    <!-- 五線譜の部分だけスクロールする -->
+    <main class="score-area">
+      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} />
+    </main>
 
-  <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
-</div>
+    <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
+  </div>
+{:else if loadState === "loading"}
+  <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->
+  <p class="load-status">読み込み中…</p>
+{:else if loadState === "notfound"}
+  <!-- URL の id の楽譜が見つからない -->
+  <div class="load-status">
+    <p>楽譜が見つかりませんでした（削除されたか、別のブラウザで作った楽譜かもしれません）。</p>
+    <p><a href="/">楽譜の一覧へ</a></p>
+  </div>
+{:else}
+  <!-- 新しい楽譜を保存できなかった -->
+  <div class="load-status">
+    <p>新しい楽譜を保存できませんでした（ブラウザの保存できる量を超えているかもしれません）。</p>
+    <p><a href="/">楽譜の一覧へ</a></p>
+  </div>
+{/if}
 
 <style>
   /* ページ全体の余白をなくす（このページだけ） */
@@ -1164,5 +1259,8 @@
     overflow-y: auto; /* はみ出したらここだけスクロール */
     padding: 12px 16px;
     background: #e5e7eb; /* 紙のまわりは少し濃いグレー */
+  }
+  .load-status {
+    padding: 16px; /* 読み込み中・見つからないときの文字のまわりの余白 */
   }
 </style>

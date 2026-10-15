@@ -5,6 +5,7 @@
   // （ステップ4-3：元に戻す・やり直しのボタンが動くようになった。ほかのボタンは後のステップで）
   // （ステップ5-1：テンポの前に速度記号も出す）
   // （ステップ6-1：再生・停止のボタンと、鳴らすパートを選ぶ欄、音の種類（楽器の音・電子音）を選ぶ欄）
+  // （ステップ7-1：［保存］ボタンをやめて、自動保存の状態を出す）
   // ==========================================================
 
   // 親から受け取るもの
@@ -24,6 +25,7 @@
   //   onstop     … 停止ボタンが押されたときに呼ぶ関数
   //   ontarget   … 鳴らすパートが選ばれたときに呼ぶ関数（"all" か数字を渡す）
   //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument" か "synth" を渡す）
+  //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   let {
     tempo,
     tempoText = "",
@@ -41,6 +43,7 @@
     onstop = () => {},
     ontarget = () => {},
     onsoundtype = () => {},
+    saveState = "saved",
   } = $props();
 
   // ----------------------------------------------------------
@@ -113,9 +116,13 @@
   <!-- 右に寄せるための空き -->
   <div class="spacer"></div>
 
-  <!-- 保存・書き出し（ステップ7・8で動くようにする） -->
+  <!-- 保存の状態と書き出し（書き出しはステップ8で動くようにする） -->
   <div class="group">
-    <button disabled>保存</button>
+    {#if saveState === "error"}
+      <span class="save-status error">保存できませんでした</span>
+    {:else}
+      <span class="save-status">✓ 保存済み</span>
+    {/if}
     <button disabled>MusicXML 書き出し</button>
   </div>
 </header>
@@ -152,6 +159,14 @@
   }
   .sound-status.error {
     color: #dc2626; /* 赤 */
+  }
+  .save-status {
+    font-size: 12px;
+    color: #6b7280; /* うすいグレーの文字 */
+  }
+  .save-status.error {
+    color: #dc2626; /* 赤 */
+    font-weight: bold;
   }
   button {
     padding: 4px 10px;
