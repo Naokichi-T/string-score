@@ -4,6 +4,7 @@
   // 画面の下に出す鍵盤
   // ・押すと、その音を親に知らせる（onpress）
   // ・◀ ▶ ボタンで1オクターブずつずらす（onshift）
+  // （ステップ12-1：日本語の音名の上に、英語の音名（C・D…）も出す）
   // ==========================================================
 
   // 親から受け取るもの
@@ -71,8 +72,14 @@
     <!-- 白鍵 -->
     {#each whiteKeys as key (key.step + key.octave)}
       <button class="white-key" style="width: {WHITE_WIDTH}px" onclick={() => onpress({ step: key.step, alter: 0, octave: key.octave })}>
+        <!-- 音名は2行で書く（上：英語、下：日本語） -->
         <!-- ドの鍵盤にだけ、オクターブの数字も付ける（どこが何オクターブかわかるように） -->
-        <span class="label">{STEP_NAMES[key.step]}{key.step === "C" ? key.octave : ""}</span>
+        <span class="label">
+          <!-- 英語の音名（key.step がそのまま "C" "D" などの英語の音名になっている） -->
+          <span class="label-en">{key.step}{key.step === "C" ? key.octave : ""}</span>
+          <!-- 日本語の音名 -->
+          <span class="label-ja">{STEP_NAMES[key.step]}{key.step === "C" ? key.octave : ""}</span>
+        </span>
       </button>
     {/each}
 
@@ -124,6 +131,17 @@
     background: #dbeafe; /* 押している間はうすい青 */
   }
   .label {
+    display: flex;
+    flex-direction: column; /* 英語と日本語を縦に並べる */
+    align-items: center; /* 横は真ん中にそろえる */
+    line-height: 1.25; /* 2行の間を少しつめる */
+  }
+  .label-en {
+    font-size: 12px;
+    font-weight: bold; /* 英語は太く濃くして目立たせる */
+    color: #222;
+  }
+  .label-ja {
     font-size: 11px;
     color: #555;
   }
@@ -131,7 +149,7 @@
     position: absolute;
     top: 0;
     width: 24px;
-    height: 65%;
+    height: 60%; /* 白鍵の音名（2行）と重ならないように、少し短くした（ステップ12-1） */
     background: #222;
     border: none;
     border-radius: 0 0 3px 3px;
