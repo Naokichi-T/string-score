@@ -70,6 +70,16 @@ export function pitchToJapanese(pitch) {
 }
 
 // ----------------------------------------------------------
+// 関数：pitchToEnglish
+// 音の高さを英語の音名にする（ステップ12-1）
+// 例：{ step: 'F', alter: 1, octave: 4 } → 'F♯4'
+// （step にはもともと英語の音名 "C" "D" などが入っているので、そのまま使う）
+// ----------------------------------------------------------
+export function pitchToEnglish(pitch) {
+  return `${pitch.step}${ALTER_NAMES[String(pitch.alter ?? 0)]}${pitch.octave}`;
+}
+
+// ----------------------------------------------------------
 // 関数：durationToJapanese
 // 音の長さを日本語にする
 // 例：('quarter', 1, false) → '付点4分音符'、('eighth', 0, true) → '8分休符'
@@ -84,7 +94,7 @@ export function durationToJapanese(duration, dots, isRest) {
 // ----------------------------------------------------------
 // 関数：describeSelection
 // 選択中の場所と音を、画面に出す文章にする
-// 例：'Viola　3小節目　2つ目　ラ3・4分音符'
+// 例：'Viola　3小節目　2つ目　ラ3（A3）・4分音符'
 // ----------------------------------------------------------
 export function describeSelection(score, selection) {
   const note = getSelectedNote(score, selection);
@@ -99,7 +109,8 @@ export function describeSelection(score, selection) {
   if (note.rest) {
     return `${where}　${length}`;
   }
-  return `${where}　${pitchToJapanese(note.pitch)}・${length}`;
+  // 日本語の音名のうしろに、英語の音名をかっこで付ける（ステップ12-1）
+  return `${where}　${pitchToJapanese(note.pitch)}（${pitchToEnglish(note.pitch)}）・${length}`;
 }
 
 // ==========================================================
