@@ -2,6 +2,7 @@
 // musicxmlImport.js
 // MusicXML のファイルを読み込んで、このアプリの楽譜データにする
 // （ステップ8-3：読み込みの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
+// （ステップ8-4a：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -14,11 +15,20 @@
 //
 // 【読めないもの】
 //   この版では、読めない音（連符・32分音符など）がある小節は、休符で埋めて知らせる
-//   （重音・2つ目の声部・記号の読み込みはステップ8-4で）
+//   （重音・2つ目の声部はステップ8-4bで）
+//
+// 【記号の読み方】（ステップ8-4a）
+//   音符の中の <notations> … スラー・スタッカートなど・弓・指番号・フェルマータ → その音符に付ける
+//   音符の前の <direction> … 強弱・pizz./arco・松葉の始まり → 次の音符に付ける
+//                            松葉の終わり → その前の音符に付ける
+//   休符には記号を付けない（このアプリの決まり。記号タブでも休符には付けられない）
+//   このアプリにない記号（トリルなど）は読まずに、種類ごとの数を知らせる
 // ==========================================================
 
 import { unzipSync } from "fflate";
 import { INSTRUMENTS, measureTicks, restsForSpan, renameParts } from "./model.js";
+import { BOWINGS, ARTICULATIONS, DYNAMICS } from "./symbols.js";
+import { cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
 // ティック（16分音符＝1）→ 音の長さの名前と付点の数の表
@@ -45,6 +55,53 @@ const NAME_RULES = [
   { instrument: "viola", words: ["viola", "vla", "alto", "ビオラ", "ヴィオラ"] },
   { instrument: "violin", words: ["violin", "violino", "vln", "vn.", "バイオリン", "ヴァイオリン"] },
 ];
+
+// ----------------------------------------------------------
+// MusicXML の記号の名前 → このアプリの名前 の表（ステップ8-4a）
+// symbols.js の表の musicxml から、逆向きの表を作る
+// （記号を symbols.js に足せば、読み込みにも自動で使われる）
+// 例：XML_TO_BOWING["down-bow"] → "down"
+// ----------------------------------------------------------
+function reverseTable(table) {
+  const result = {};
+  Object.entries(table).forEach(([name, info]) => {
+    result[info.musicxml] = name;
+  });
+  return result;
+}
+const XML_TO_BOWING = reverseTable(BOWINGS);
+const XML_TO_ARTICULATION = reverseTable(ARTICULATIONS);
+const XML_TO_DYNAMIC = reverseTable(DYNAMICS);
+
+// ----------------------------------------------------------
+// このアプリにない記号の、知らせるときの日本語の名前（ステップ8-4a）
+// 表にないものは、MusicXML の名前をそのまま出す
+// ----------------------------------------------------------
+const UNSUPPORTED_LABELS = {
+  "trill-mark": "トリル",
+  turn: "ターン",
+  "inverted-turn": "ターン",
+  mordent: "モルデント",
+  "inverted-mordent": "モルデント",
+  tremolo: "トレモロ",
+  staccatissimo: "スタッカーティシモ",
+  spiccato: "スピッカート",
+  "strong-accent": "マルカート",
+  "detached-legato": "ポルタート",
+  "breath-mark": "ブレス",
+  caesura: "カエスーラ",
+  harmonic: "ハーモニクス",
+  "open-string": "開放弦の記号",
+  "thumb-position": "親指の位置",
+  string: "弦の指定",
+  glissando: "グリッサンド",
+  slide: "グリッサンド",
+  arpeggiate: "アルペジオ",
+  "other-dynamics": "強弱（その他）",
+};
+
+// 数えなくてよい（ほかの所で扱う・中身だけを見る）記号の名前（tuplet は連符の印。連符の小節は別に知らせる）
+const IGNORED_NOTATIONS = ["tied", "slur", "fermata", "articulations", "technical", "ornaments", "dynamics", "wavy-line", "accidental-mark", "other-notation", "tuplet"];
 
 // ----------------------------------------------------------
 // 関数：childElements
@@ -79,6 +136,24 @@ function childElement(element, name) {
 function childText(element, name) {
   const child = childElement(element, name);
   return child ? child.textContent.trim() : null;
+}
+
+// ----------------------------------------------------------
+// 関数：report
+// このアプリで使えなかった記号などを数える（ステップ8-4a）
+//   counter … 名前 → 数 の表
+//   label   … 知らせるときの名前
+// ----------------------------------------------------------
+function report(counter, label) {
+  counter[label] = (counter[label] ?? 0) + 1;
+}
+
+// ----------------------------------------------------------
+// 関数：unsupportedLabel
+// このアプリにない記号の、知らせるときの名前を返す（ステップ8-4a）
+// ----------------------------------------------------------
+function unsupportedLabel(name) {
+  return UNSUPPORTED_LABELS[name] ?? name;
 }
 
 // ----------------------------------------------------------
@@ -308,6 +383,180 @@ function readNote(noteElement, divisions) {
 }
 
 // ----------------------------------------------------------
+// 関数：readNotations
+// 音符の中の <notations> を読んで、記号を音符のデータに付ける（ステップ8-4a）
+//   noteElement … <note>
+//   note        … readNote で作った音符のデータ（ここに記号を足す）
+//   state       … パートごとの読みかけの情報（スラーが開いているかなど）
+//   counter     … 使えなかった記号を数える表
+// 休符に付いた記号は使わずに数える
+// ----------------------------------------------------------
+function readNotations(noteElement, note, state, counter) {
+  childElements(noteElement, "notations").forEach((notations) => {
+    // 休符：記号は付けない（タイの表示・スラー以外を数える）
+    if (note.rest) {
+      for (const child of Array.from(notations.childNodes)) {
+        if (child.nodeType === 1 && child.nodeName !== "tied" && child.nodeName !== "slur") report(counter, "休符に付いた記号");
+      }
+      return;
+    }
+
+    // スラー：「ここまで」を先に、「ここから」をあとに見る
+    // （1つの音で前のスラーが終わり、次のスラーが始まる書き方があるため）
+    // このアプリのスラーは同時に1本だけなので、開いているスラーと同じ番号の「ここまで」だけを使う
+    const slurs = childElements(notations, "slur");
+    slurs.forEach((slur) => {
+      const number = slur.getAttribute("number") ?? "1";
+      if (slur.getAttribute("type") === "stop" && state.slurNumber === number && note.slur === undefined) {
+        note.slur = "stop";
+        state.slurNumber = null;
+      }
+    });
+    slurs.forEach((slur) => {
+      if (slur.getAttribute("type") !== "start") return;
+      if (state.slurNumber === null && note.slur === undefined) {
+        note.slur = "start";
+        state.slurNumber = slur.getAttribute("number") ?? "1";
+      } else {
+        report(counter, "重なったスラー"); // 2本目のスラー・終わりと同じ音から始まるスラー
+      }
+    });
+
+    // スタッカート・テヌート・アクセント
+    childElements(notations, "articulations").forEach((group) => {
+      for (const child of Array.from(group.childNodes)) {
+        if (child.nodeType !== 1) continue;
+        const name = XML_TO_ARTICULATION[child.nodeName];
+        if (name) {
+          note.articulations = note.articulations ?? [];
+          if (!note.articulations.includes(name)) note.articulations.push(name);
+        } else {
+          report(counter, unsupportedLabel(child.nodeName));
+        }
+      }
+    });
+
+    // 弓・指番号
+    childElements(notations, "technical").forEach((group) => {
+      for (const child of Array.from(group.childNodes)) {
+        if (child.nodeType !== 1) continue;
+        if (XML_TO_BOWING[child.nodeName]) {
+          note.bowing = XML_TO_BOWING[child.nodeName];
+        } else if (child.nodeName === "fingering") {
+          // 指番号は 0〜4 だけ（同じ数字は1つだけ）
+          const finger = Number(child.textContent.trim());
+          if (Number.isInteger(finger) && finger >= 0 && finger <= 4) {
+            note.fingerings = note.fingerings ?? [];
+            if (!note.fingerings.includes(finger)) note.fingerings.push(finger);
+          } else {
+            report(counter, "指番号（0〜4 以外）");
+          }
+        } else {
+          report(counter, unsupportedLabel(child.nodeName));
+        }
+      }
+    });
+
+    // フェルマータ
+    if (childElement(notations, "fermata")) note.fermata = true;
+
+    // 強弱（ふつうは <direction> に書くが、音符の中に書くソフトもある）
+    childElements(notations, "dynamics").forEach((dynamics) => {
+      readDynamics(dynamics, note, counter);
+    });
+
+    // トリルなどの装飾（このアプリにはないので数える）
+    childElements(notations, "ornaments").forEach((group) => {
+      for (const child of Array.from(group.childNodes)) {
+        if (child.nodeType === 1 && !IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
+      }
+    });
+
+    // そのほか（グリッサンド・アルペジオなど）
+    for (const child of Array.from(notations.childNodes)) {
+      if (child.nodeType === 1 && !IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
+    }
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：readDynamics
+// <dynamics> の中の強弱を読んで、target の dynamic に入れる（ステップ8-4a）
+// このアプリにない強弱（ppp・sfz など）は数える
+// ----------------------------------------------------------
+function readDynamics(dynamics, target, counter) {
+  for (const child of Array.from(dynamics.childNodes)) {
+    if (child.nodeType !== 1) continue;
+    const name = XML_TO_DYNAMIC[child.nodeName];
+    if (name) target.dynamic = name;
+    else report(counter, child.nodeName === "other-dynamics" ? unsupportedLabel(child.nodeName) : `強弱 ${child.nodeName}`);
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：readDirection
+// 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
+//   direction … <direction>
+//   state     … パートごとの読みかけの情報
+//                pending … 次の音符に付ける記号 { dynamic, technique, wedge }
+//                lastNote … ここまでに読んだ最後の音符（松葉の終わりを付ける）
+//   counter   … 使えなかった記号を数える表
+// ----------------------------------------------------------
+function readDirection(direction, state, counter) {
+  // テンポの指示（♩ = ○○ と Allegro など）は readTempo で読むので、ここでは見ない
+  const sound = childElement(direction, "sound");
+  const hasTempo = (sound && sound.getAttribute("tempo")) || direction.getElementsByTagName("metronome").length > 0;
+  if (hasTempo) return;
+
+  childElements(direction, "direction-type").forEach((type) => {
+    // 強弱：次の音符に付ける
+    childElements(type, "dynamics").forEach((dynamics) => {
+      readDynamics(dynamics, state.pending, counter);
+    });
+
+    // 文字：pizz.・arco だけ使う（ほかの文字は数える）
+    childElements(type, "words").forEach((words) => {
+      const text = words.textContent.trim().toLowerCase();
+      if (text === "") return;
+      if (/^pizz\.?$/.test(text)) state.pending.technique = "pizz.";
+      else if (/^arco\.?$/.test(text)) state.pending.technique = "arco";
+      else report(counter, "文字の指示（dolce・cresc. など）");
+    });
+
+    // 松葉
+    childElements(type, "wedge").forEach((wedge) => {
+      const kind = wedge.getAttribute("type");
+      if (kind === "crescendo" || kind === "diminuendo") {
+        // 始まり：次の音符に付ける
+        state.pending.wedge = kind;
+      } else if (kind === "stop") {
+        // 終わり：ここまでに読んだ最後の音符に付ける（その音符に別の印があれば使えない）
+        if (state.lastNote && state.lastNote.wedge === undefined) state.lastNote.wedge = "stop";
+        else report(counter, "つなげられなかった松葉");
+      }
+    });
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：applyPending
+// <direction> で読んでおいた記号（強弱・pizz./arco・松葉の始まり）を、音符に付ける（ステップ8-4a）
+// 休符には付けず、次の音符まで持ち越す
+// ----------------------------------------------------------
+function applyPending(note, state, counter) {
+  if (note.rest) return;
+  const pending = state.pending;
+  if (pending.dynamic) note.dynamic = pending.dynamic;
+  if (pending.technique) note.techniques = [pending.technique];
+  if (pending.wedge) {
+    // 同じ音符で前の松葉が終わっていたら、このアプリでは付けられない
+    if (note.wedge === undefined) note.wedge = pending.wedge;
+    else report(counter, "つなげられなかった松葉");
+  }
+  state.pending = {};
+}
+
+// ----------------------------------------------------------
 // 関数：readPart
 // <part> 1つ分の小節を読む
 //   partElement … <part>
@@ -318,7 +567,13 @@ function readNote(noteElement, divisions) {
 // }
 // time・key は「この小節で書いてあったもの」（変わったかどうかは、あとで全体で決める）
 // ----------------------------------------------------------
-function readPart(partElement) {
+function readPart(partElement, counter) {
+  // 読みかけの記号の情報（ステップ8-4a）
+  //   slurNumber … 開いているスラーの番号（開いていなければ null）
+  //   pending    … <direction> で読んで、次の音符に付ける記号
+  //   lastNote   … ここまでに読んだ最後の音符（松葉の終わりを付ける）
+  const state = { slurNumber: null, pending: {}, lastNote: null };
+
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
   let mainVoice = null; // このパートで使う声部（最初の音の声部）
@@ -358,11 +613,17 @@ function readPart(partElement) {
         continue;
       }
 
+      // 強弱・pizz./arco・松葉（ステップ8-4a）
+      if (element.nodeName === "direction") {
+        readDirection(element, state, counter);
+        continue;
+      }
+
       // 音符・休符
       if (element.nodeName === "note") {
         // 装飾音（大きさのない音）は飛ばす
         if (childElement(element, "grace")) continue;
-        // 重音の2つ目以降と、2つ目の声部は、この版では飛ばす（ステップ8-4で扱う）
+        // 重音の2つ目以降と、2つ目の声部は、この版では飛ばす（ステップ8-4bで扱う）
         if (childElement(element, "chord")) continue;
         const voice = childText(element, "voice") ?? "1";
         if (mainVoice === null) mainVoice = voice;
@@ -370,6 +631,10 @@ function readPart(partElement) {
 
         const { note, ticks } = readNote(element, divisions);
         if (note) {
+          // 記号を付ける（ステップ8-4a）
+          applyPending(note, state, counter);
+          readNotations(element, note, state, counter);
+          if (!note.rest) state.lastNote = note;
           measure.notes.push(note);
         } else {
           measure.readable = false;
@@ -453,7 +718,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   // ④ パートごとに小節を読む
   const partElements = childElements(root, "part");
   if (partElements.length === 0) throw new Error("ファイルの中にパートが見つかりませんでした");
-  const readParts = partElements.map((partElement) => readPart(partElement));
+  const counter = {}; // このアプリで使えなかった記号などの数（ステップ8-4a）
+  const readParts = partElements.map((partElement) => readPart(partElement, counter));
 
   // 小節の数は、一番多いパートに合わせる（最低1小節）
   const measureCount = Math.max(1, ...readParts.map((read) => read.measures.length));
@@ -535,11 +801,20 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     });
   });
 
+  // 相手のいないスラー・松葉を外す（読めなかった小節で片方が消えたときなど）（ステップ8-4a）
+  parts.forEach((part) => cleanSpanners(part));
+
   // パート名は、このアプリの決まりで付け直す（Violin I・Violin II…）
   renameParts(parts);
 
   if (problemTexts.length > 0) {
     warnings.push(`読めない音があったので、休符にしました：${problemTexts.join("、")}`);
+  }
+
+  // 使えなかった記号を、多い順に「トリル 12個、…」の形で知らせる（ステップ8-4a）
+  const unsupported = Object.entries(counter).sort((a, b) => b[1] - a[1]);
+  if (unsupported.length > 0) {
+    warnings.push(`読み込めなかった記号：${unsupported.map(([label, count]) => `${label} ${count}個`).join("、")}`);
   }
 
   // ⑦ テンポ（見つからなければ 80。このアプリで使える 20〜300 に収める）
