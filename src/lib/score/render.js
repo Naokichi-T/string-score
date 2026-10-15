@@ -37,6 +37,7 @@ const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
 const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
+const NOTE_END_PADDING = 22; // 小節の最後の音符と、小節線の間に空けるすき間
 
 // 選択中の音符の色（青）と、範囲選択の中の音符の色（明るい青）
 const SELECTED_COLOR = "#2563eb";
@@ -315,7 +316,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       // --- 全パートの音符の横の位置をそろえて並べる ---
       const formatter = new VF.Formatter();
       voices.forEach((voice) => formatter.joinVoices([voice]));
-      const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - 10;
+      // 音符を並べる幅（小節の終わりに NOTE_END_PADDING のすき間を残す）
+      const noteAreaWidth = staves[0].getNoteEndX() - staves[0].getNoteStartX() - NOTE_END_PADDING;
       formatter.format(voices, noteAreaWidth);
 
       // 音符と連桁を描く
