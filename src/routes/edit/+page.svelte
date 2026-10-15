@@ -64,7 +64,7 @@
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
-  import { playPitch, loadInstruments, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
+  import { playPitch, loadInstruments, isLoaded, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting } from "#lib/score/library.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
@@ -138,7 +138,7 @@
   // 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
   let playTarget = $state("all");
 
-  // 音の種類（"instrument"：録音した楽器の音、"synth"：電子音）。最初は楽器の音
+  // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
   let soundType = $state("instrument");
 
   // 再生できるか（電子音ならいつでも、楽器の音なら読み込みが終わってから）
@@ -196,16 +196,44 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：loadSound
+  // 楽器の音（A か B）を読み込んで、終わったら soundState を変える（ステップ12-2）
+  //   type … "instrument"（楽器の音A）か "instrumentB"（楽器の音B）
+  // 読み込みの途中で別の音の種類に切り替えたときは、soundState を変えない
+  // （soundState は「今選んでいる方」の状態なので、ちがう方の結果で書きかえないため）
+  // ----------------------------------------------------------
+  function loadSound(type) {
+    // もう読み込み済みなら、すぐに「完了」にする
+    if (isLoaded(type)) {
+      soundState = "ready";
+      return;
+    }
+    soundState = "loading";
+    loadInstruments(type)
+      .then(() => {
+        if (soundType === type) soundState = "ready";
+      })
+      .catch((error) => {
+        console.error("楽器の音を読み込めませんでした", error);
+        if (soundType === type) soundState = "error";
+      });
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleSoundType
   // 上のバーで音の種類が選ばれたとき
-  //   type … "instrument"（楽器の音）か "synth"（電子音）
+  //   type … "instrument"（楽器の音A）・"instrumentB"（楽器の音B）・"synth"（電子音）
   // 再生中なら止める（選び直した音で、もう一度再生してもらう）
+  // 楽器の音を選んだときは、まだ読み込んでいなければ読み込む（ステップ12-2）
   // ----------------------------------------------------------
   function handleSoundType(type) {
     handleStop();
     soundType = type;
     setSoundType(type); // 鳴らす仕組み（sound.js）にも知らせる
     saveSetting("soundType", type); // 次に開いたときのために覚えておく（アプリ全体で1つ）（ステップ7-4）
+    if (type !== "synth") {
+      loadSound(type);
+    }
   }
 
   // 鍵盤などで音を鳴らすときの楽器（選んでいるパートの楽器。何も選んでいないときはバイオリン）
@@ -219,21 +247,15 @@
     // URL の id の楽譜を開く（id がなければトップページへ戻す）
     openScore();
 
-    // 前に選んだ音の種類を読み込む（保存していなければ「楽器の音」のまま）（ステップ7-4）
+    // 前に選んだ音の種類を読み込む（保存していなければ「楽器の音A」のまま）（ステップ7-4）
     const savedType = loadSettings().soundType;
-    if (savedType === "instrument" || savedType === "synth") {
+    if (savedType === "instrument" || savedType === "instrumentB" || savedType === "synth") {
       soundType = savedType;
       setSoundType(savedType); // 鳴らす仕組み（sound.js）にも知らせる
     }
 
-    loadInstruments()
-      .then(() => {
-        soundState = "ready";
-      })
-      .catch((error) => {
-        console.error("楽器の音を読み込めませんでした", error);
-        soundState = "error";
-      });
+    // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
+    loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
 
     // ページから離れるときは、鳴っている音を止めて、緑を調べるのもやめる
     return () => {

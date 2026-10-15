@@ -7,6 +7,10 @@
 //   ・楽譜の再生は playEvents で全部の音をまとめて予約し、stopPlayback でまとめて止める
 // （ステップ6-1 追加：setSoundType で「楽器の音」と「電子音」を切り替えられるようにした）
 // （ステップ6-3c：pizz. の音は、ピチカートの録音（電子音のときは、はじいたような音）で鳴らす）
+// （ステップ12-2：楽器の音を2種類にした。「楽器の音A」（FluidR3_GM）と「楽器の音B」（MusyngKite））
+//   ・ページを開いたら、選んでいる方の楽器の音だけを読み込む（電子音のときは A）
+//   ・もう一方は、初めて選んだときに読み込む（一度読み込んだら、切り替えても読み直さない）
+//   ・B は、のばすときにくり返す範囲（ループ）の情報を、自分で作ったファイルから読み込む
 // ==========================================================
 
 import { pitchToMidi } from "../score/playback.js";
@@ -16,12 +20,18 @@ import { pitchToMidi } from "../score/playback.js";
 // 作ること・音のデータを読み込むことは先にできる（そのときは一時停止の状態で作られる）
 let audioContext = null;
 
-// 読み込んだ楽器の音 { violin: …, viola: …, cello: …, pizz: … }（読み込みが終わるまでは null）
-// pizz はピチカートの音（弦楽合奏のピチカート。3つの楽器で共通に使う）
-let instruments = null;
+// 音の種類ごとの、録音のセットの名前（ステップ12-2）
+//   "instrument"  … 楽器の音A（FluidR3_GM）
+//   "instrumentB" … 楽器の音B（MusyngKite）
+const KITS = { instrument: "FluidR3_GM", instrumentB: "MusyngKite" };
 
-// 読み込みの途中の Promise（2回呼ばれても、読み込みは1回だけにするため）
-let loading = null;
+// 音の種類ごとの、読み込んだ楽器の音（読み込みが終わるまでは null）（ステップ12-2）
+// 中身は { violin: …, viola: …, cello: …, pizz: … }
+// pizz はピチカートの音（弦楽合奏のピチカート。3つの楽器で共通に使う）
+let instrumentsByType = { instrument: null, instrumentB: null };
+
+// 音の種類ごとの、読み込みの途中の Promise（2回呼ばれても、読み込みは1回だけにするため）（ステップ12-2）
+let loadingByType = { instrument: null, instrumentB: null };
 
 // 再生中の音を止めるための関数の一覧（smplr の start が返してくれる）
 let stopFunctions = [];
@@ -59,17 +69,27 @@ const KEY_VELOCITY = 90;
 const SHORT_RELEASE = 0.05; // つなげない音の余韻（秒）
 const NOTE_GAP = 0.04; // つなげない音で、余韻が消えてから次の音までに空ける時間（秒）
 
-// 音の種類（"instrument"：録音した楽器の音、"synth"：電子音（のこぎり波））
-// 最初は楽器の音。上のバーの欄で切り替える（setSoundType）
+// 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音（のこぎり波））
+// 最初は楽器の音A。上のバーの欄で切り替える（setSoundType）
 let soundType = "instrument";
 
 // ----------------------------------------------------------
 // 関数：setSoundType
 // 鳴らす音の種類を切り替える（鍵盤の音と、再生の音の両方が変わる）
-//   type … "instrument"（楽器の音）か "synth"（電子音）
+//   type … "instrument"（楽器の音A）・"instrumentB"（楽器の音B）・"synth"（電子音）
 // ----------------------------------------------------------
 export function setSoundType(type) {
   soundType = type;
+}
+
+// ----------------------------------------------------------
+// 関数：currentInstruments
+// 今選んでいる音の種類の、読み込んだ楽器の音を返す（ステップ12-2）
+// 電子音を選んでいるとき・まだ読み込みが終わっていないときは null
+// ----------------------------------------------------------
+function currentInstruments() {
+  if (soundType === "synth") return null;
+  return instrumentsByType[soundType];
 }
 
 // ----------------------------------------------------------
@@ -102,15 +122,29 @@ const PIZZ_SOUNDFONT_NAME = "pizzicato_strings";
 const PIZZ_SYNTH_DECAY = 0.6;
 
 // ----------------------------------------------------------
+// 関数：loopDataUrl
+// 楽器の音B（MusyngKite）の、のばすときにくり返す範囲（ループ）の情報のファイルの場所（ステップ12-2）
+// static フォルダに置いたファイルを読む
+// 例："violin" → "/soundfont-loops/MusyngKite/violin-loop.json"
+// ----------------------------------------------------------
+function loopDataUrl(name) {
+  return `/soundfont-loops/MusyngKite/${name}-loop.json`;
+}
+
+// ----------------------------------------------------------
 // 関数：loadInstruments
 // バイオリン・ビオラ・チェロと、ピチカートの録音した音を、インターネットから読み込む
-// （編集ページを開いたときに1回呼ぶ。2回目からは同じ Promise を返す）
+//   type … どちらの楽器の音を読み込むか（"instrument"：楽器の音A、"instrumentB"：楽器の音B）（ステップ12-2）
+// （同じ type で2回目からは同じ Promise を返す。読み込みは1回だけ）
 // 戻り値：読み込みが終わったら完了する Promise
 // ----------------------------------------------------------
-export function loadInstruments() {
-  if (loading) return loading;
+export function loadInstruments(type = "instrument") {
+  if (loadingByType[type]) return loadingByType[type];
 
-  loading = (async () => {
+  // 録音のセットの名前（"FluidR3_GM" か "MusyngKite"）
+  const kit = KITS[type];
+
+  const loading = (async () => {
     // smplr はブラウザの中でしか動かないので、ここで読み込む
     const { Soundfont } = await import("smplr");
     const ctx = getAudioContext();
@@ -118,14 +152,20 @@ export function loadInstruments() {
     // 3つの楽器をいっしょに読み込み始める
     const loaded = {};
     const waits = Object.entries(SOUNDFONT_NAMES).map(([key, name]) => {
-      const instrument = Soundfont(ctx, {
+      // 読み込みの設定
+      const options = {
         instrument: name,
-        kit: "FluidR3_GM", // 録音のセット（"MusyngKite" と "FluidR3_GM" の2種類がある。音の感じが違う）
+        kit: kit, // 録音のセット（"FluidR3_GM" か "MusyngKite"。音の感じが違う）
         // くり返しの情報を読み込む（録音より長い音を、録音の一部をくり返してのばすため）
-        // ・読み込まないと、チェロの全音符（♩ = 60）が3拍目あたりで消えた（チェロの録音が3秒くらいしかないため）
-        // ・MusyngKite では「ラララ」と短い音がくり返されたが、FluidR3_GM では問題なかった
+        // ・録音はどの音も 3.1 秒しかないので、読み込まないと、それより長い音が途中で消える
         loadLoopData: true,
-      });
+      };
+      // 楽器の音B（MusyngKite）は、自分で作ったくり返しの情報を使う（ステップ12-2）
+      // （いつもの情報だと、くり返す範囲が短くて「ラララ」と聞こえたため）
+      if (kit === "MusyngKite") {
+        options.loopDataUrl = loopDataUrl(name);
+      }
+      const instrument = Soundfont(ctx, options);
       loaded[key] = instrument;
       return instrument.ready; // 読み込みが終わるのを待つ
     });
@@ -134,7 +174,7 @@ export function loadInstruments() {
     // はじいた音は自然に消えていく音なので、くり返しの情報は読み込まない（読み込むと、ずっと鳴り続けてしまう）
     const pizzInstrument = Soundfont(ctx, {
       instrument: PIZZ_SOUNDFONT_NAME,
-      kit: "FluidR3_GM",
+      kit: kit,
       loadLoopData: false,
     });
     loaded.pizz = pizzInstrument;
@@ -143,23 +183,25 @@ export function loadInstruments() {
     await Promise.all(waits);
 
     // 全部終わってから使えるようにする（途中の楽器で鳴らさないため）
-    instruments = loaded;
+    instrumentsByType[type] = loaded;
   })();
 
   // 失敗したときは、次に呼ばれたらもう一度読み込めるようにしておく
   loading.catch(() => {
-    loading = null;
+    loadingByType[type] = null;
   });
 
+  loadingByType[type] = loading;
   return loading;
 }
 
 // ----------------------------------------------------------
 // 関数：isLoaded
 // 録音した音の読み込みが終わっているか
+//   type … どちらの楽器の音か（"instrument" か "instrumentB"）（ステップ12-2）
 // ----------------------------------------------------------
-export function isLoaded() {
-  return instruments !== null;
+export function isLoaded(type = "instrument") {
+  return instrumentsByType[type] !== null;
 }
 
 // ----------------------------------------------------------
@@ -248,8 +290,10 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluc
 // 録音した音の読み込みが終わっていなければ、電子音で鳴らす
 // ----------------------------------------------------------
 export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = false) {
+  // 今選んでいる楽器の音（電子音のとき・読み込みが終わっていないときは null）（ステップ12-2）
+  const instruments = currentInstruments();
   // 電子音を選んでいるとき・読み込みが終わっていないときは、電子音で鳴らす
-  if (soundType === "synth" || !instruments) {
+  if (!instruments) {
     playSynth(pitch, duration, null, 100, pizz);
     return;
   }
@@ -276,7 +320,9 @@ export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = f
 // （電子音を選んでいるときは、読み込みが終わっていなくても鳴らせる）
 // ----------------------------------------------------------
 export function playEvents(events, totalTicks, tickSeconds, onend = () => {}) {
-  if (soundType === "instrument" && !instruments) return false;
+  // 今選んでいる楽器の音（電子音のとき・読み込みが終わっていないときは null）（ステップ12-2）
+  const instruments = currentInstruments();
+  if (soundType !== "synth" && !instruments) return false;
 
   // 前の再生が残っていたら止める
   stopPlayback();

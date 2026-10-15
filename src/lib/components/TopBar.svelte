@@ -22,11 +22,11 @@
   //   soundState … 楽器の音の読み込みの状態（"loading"：読み込み中、"ready"：完了、"error"：失敗）
   //   playTarget … 鳴らすパート（"all" なら全体、数字ならそのパートの番号）
   //   canPlay    … 再生できるか（false なら再生ボタンを押せない）
-  //   soundType  … 音の種類（"instrument"：楽器の音、"synth"：電子音）
+  //   soundType  … 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）
   //   onplay     … 再生ボタンが押されたときに呼ぶ関数
   //   onstop     … 停止ボタンが押されたときに呼ぶ関数
   //   ontarget   … 鳴らすパートが選ばれたときに呼ぶ関数（"all" か数字を渡す）
-  //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument" か "synth" を渡す）
+  //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument"・"instrumentB"・"synth" のどれかを渡す）
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   //   onexport   … ［MusicXML 書き出し］ボタンが押されたときに呼ぶ関数（ステップ8-1）
   //   onprint    … ［PDF 出力］ボタンが押されたときに呼ぶ関数（ステップ9）
@@ -103,7 +103,9 @@
 
     <!-- 音の種類（value は今のデータに合わせ、変えるのは親に頼む） -->
     <select value={soundType} onchange={handleSoundTypeChange} title="音の種類">
-      <option value="instrument">楽器の音</option>
+      <!-- 楽器の音A は FluidR3_GM、楽器の音B は MusyngKite の録音（ステップ12-2） -->
+      <option value="instrument">楽器の音A</option>
+      <option value="instrumentB">楽器の音B</option>
       <option value="synth">電子音</option>
     </select>
 
