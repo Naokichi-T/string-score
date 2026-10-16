@@ -75,8 +75,6 @@ let lastMeasured = { score: null, width: 0, extents: null };
 export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = [], beatLines = false) {
   // 鳴っている音符を「パート-小節-番号」の文字にして、すぐに探せるようにしておく
   const playingKeys = new Set(playingNotes.map((n) => `${n.part}-${n.measure}-${n.note}`));
-  // 前に描いたものを消す
-  container.innerHTML = "";
 
   // 狭すぎるときは最低限の幅にする
   const totalWidth = Math.max(width, MIN_WIDTH);
@@ -160,6 +158,11 @@ export function renderScore(VF, container, score, width, selection = null, range
   const positions = computePositions(VF, extents, headerHeight);
 
   // ----- 7. 本番：SVG で描く準備 -----
+  // 前に描いたものを消す
+  // （消すのは、ここで新しい SVG を入れる直前にする。
+  //   はじめに消すと、下書きで大きさを測っている間、楽譜の枠が空っぽで高さが 0 になり、
+  //   スクロールしていた位置が一番上に戻ってしまうため）
+  container.innerHTML = "";
   const renderer = new VF.Renderer(container, VF.Renderer.Backends.SVG);
   renderer.resize(totalWidth, positions.totalHeight);
   const context = renderer.getContext();
