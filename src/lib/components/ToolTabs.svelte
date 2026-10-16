@@ -56,6 +56,9 @@
   //   currentTime  … 選んでいる小節の拍子 { beats, beatType }（「小節」タブで使う）
   //   ontime       … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子を渡す。「小節」タブで使う）
   //   currentKey   … 選んでいる小節の調（「小節」タブで使う）
+  //   currentTempo … 選んでいる小節のテンポ（何も選んでいないときは null。「小節」タブで使う）（ステップ11-6a）
+  //   ontempo      … テンポの［変える］が押されたときに呼ぶ関数（数字の文字と速度記号を渡す。「小節」タブで使う）（ステップ11-6a）
+  //   onremovetempo … テンポの［元に戻す］が押されたときに呼ぶ関数（「小節」タブで使う）（ステップ11-6a）
   //   onkey        … 調を選んだときに呼ぶ関数（新しい調の数字を渡す。「小節」タブで使う）
   //   currentClef  … 選んでいるパート・小節の音部記号（何も選んでいないときは null。「小節」タブで使う）
   //   onclef       … 音部記号のボタンが押されたときに呼ぶ関数（「小節」タブで使う）
@@ -110,6 +113,9 @@
     currentTime = { beats: 4, beatType: 4 },
     ontime = () => {},
     currentKey = 0,
+    currentTempo = null,
+    ontempo = () => {},
+    onremovetempo = () => {},
     onkey = () => {},
     currentClef = null,
     onclef = () => {},
@@ -313,7 +319,7 @@
       <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
       <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />
     {:else if activeTab === "measure"}
-      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
+      <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} {currentTempo} {ontempo} {onremovetempo} />
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} {hiddenParts} {ontoggleview} {beatLines} {ontogglebeats} />
     {:else if activeTab === "playback"}

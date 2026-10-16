@@ -233,6 +233,21 @@ export function timeAt(score, i) {
 }
 
 // ----------------------------------------------------------
+// 関数：tempoAt
+// i 小節目（0 から数える）のテンポを返す（ステップ11-6a）
+// テンポが変わる小節には measures[i].tempo（と、あれば tempoText）が書いてある
+// 1小節目のテンポは、楽譜全体の score.tempo・score.tempoText（「楽譜の設定」タブで変えるもの）
+// 戻り値：{ tempo: ♩＝○○ の数字, tempoText: 速度記号（なければ空の文字） }
+// ----------------------------------------------------------
+export function tempoAt(score, i) {
+  for (let k = i; k >= 1; k--) {
+    const info = score.measures[k];
+    if (info.tempo !== undefined) return { tempo: info.tempo, tempoText: info.tempoText ?? "" };
+  }
+  return { tempo: score.tempo, tempoText: score.tempoText ?? "" };
+}
+
+// ----------------------------------------------------------
 // 関数：keyAt
 // i 小節目（0 から数える）の調号を返す（さかのぼって探す）
 // ----------------------------------------------------------

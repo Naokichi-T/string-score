@@ -14,6 +14,7 @@
 //   render/beatLines.js … 拍の線を描く（ステップ12-7）
 // ==========================================================
 
+import { tempoAt } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -35,6 +36,8 @@ const NAME_WIDTH_FIRST = 80; // 1段目のパート名（フルネーム）を�
 const NAME_WIDTH_OTHER = 70; // 2段目以降のパート名（短い名前）を書くための幅
 const TITLE_AREA = 80; // タイトルと作曲者を書く場所の高さ
 const TEMPO_AREA = 28; // テンポ（Allegro ♩ = 120）を書く場所の高さ
+const TEMPO_CHANGE_RAISE = 18; // 途中のテンポ変更の文字の下端を、五線の一番上の線からどれだけ上にするか（ステップ11-6a）
+const TEMPO_CHANGE_GAP = 6; // 音符が五線より上に出ているときの、音符の上端と文字の下端のすき間（ステップ11-6a）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -348,6 +351,12 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
+      // 途中のテンポ変更（2小節目から。いちばん上に表示しているパートの上だけ）（ステップ11-6a）
+      // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段・パートと重ならないように間があく）
+      if (!isFirst && score.measures[i].tempo !== undefined) {
+        drawTempoChange(VF, context, staves[0], voices[0].getTickables(), tempoAt(score, i));
+      }
+
       // 拍の線（入のときだけ。下書きでは描かない）（ステップ12-7）
       // 音符の横の位置が決まったあとでないと描けないので、ここで描く（中で、音符の後ろに動かす）
       if (!isDraft && info.beatLines) {
@@ -450,8 +459,29 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 }
 
 // ----------------------------------------------------------
+// 関数：drawTempoChange
+// 途中のテンポ変更を、その小節の頭の上に描く（ステップ11-6a）
+// 五線から少し上（音符が五線より上に出ているときは、その上）に、「Andante ♩ = 60」の形で書く
+//   stave     … いちばん上のパートの、その小節の五線
+//   tickables … その小節の音符（並べ終わったもの。いちばん高い所を調べる）
+//   tempoInfo … { tempo, tempoText }（model.js の tempoAt で調べたもの）
+// ----------------------------------------------------------
+function drawTempoChange(VF, context, stave, tickables, tempoInfo) {
+  // 文字の下端の高さ：五線の一番上の線より TEMPO_CHANGE_RAISE だけ上
+  // 音符（符尾・加線も入る）がそれより上に出ているときは、音符の上端よりさらに上
+  let y = stave.getYForLine(0) - TEMPO_CHANGE_RAISE;
+  tickables.forEach((tickable) => {
+    const box = tickable.getBoundingBox();
+    if (box) y = Math.min(y, box.getY() - TEMPO_CHANGE_GAP);
+  });
+  // 横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
+  drawTempo(context, tempoInfo, stave.getNoteStartX() - 4, y);
+}
+
+// ----------------------------------------------------------
 // 関数：drawTempo
 // テンポを「Allegro ♩ = 120」の形で描く（速度記号がなければ「♩ = 120」）
+//   score … tempo と tempoText が入っているもの（楽譜データ、または tempoAt で調べたもの）（ステップ11-6a）
 //   x … 書き始める横の位置
 //   y … 文字の下端（ベースライン）の位置
 // ----------------------------------------------------------

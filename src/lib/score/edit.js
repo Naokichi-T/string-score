@@ -10,7 +10,7 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, tempoAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -897,6 +897,49 @@ export function setScoreInfo(score, field, value) {
   return newScore;
 }
 
+// ----------------------------------------------------------
+// 関数：setTempoChange
+// i 小節目の頭から、テンポを変える（ステップ11-6a）
+//   i         … 何小節目か（0 から）
+//   tempo     … ♩＝○○ の数字（20〜300 のチェックは呼ぶ側で済ませておく）
+//   tempoText … 速度記号（"Andante" など。なければ空の文字）
+// 1小節目（i が 0）なら、楽譜全体のテンポ（score.tempo・score.tempoText）を変える
+// 戻り値：新しい楽譜データ（今のテンポと同じなら元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setTempoChange(score, i, tempo, tempoText) {
+  // 今のテンポ（前の小節から続いているものも含む）と同じなら、何もしない
+  const now = tempoAt(score, i);
+  if (now.tempo === tempo && now.tempoText === tempoText) return score;
+
+  const newScore = cloneScore(score);
+  if (i === 0) {
+    newScore.tempo = tempo;
+    newScore.tempoText = tempoText;
+  } else {
+    newScore.measures[i].tempo = tempo;
+    if (tempoText) {
+      newScore.measures[i].tempoText = tempoText;
+    } else {
+      delete newScore.measures[i].tempoText; // 速度記号なし
+    }
+  }
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：removeTempoChange
+// i 小節目のテンポ変更を消す（前の小節のテンポが続くようにする）（ステップ11-6a）
+// 1小節目のテンポは消せない（テンポがなくなってしまうため）
+// 戻り値：新しい楽譜データ（消すものがなければ元の楽譜データのまま）
+// ----------------------------------------------------------
+export function removeTempoChange(score, i) {
+  if (i === 0 || score.measures[i].tempo === undefined) return score;
+  const newScore = cloneScore(score);
+  delete newScore.measures[i].tempo;
+  delete newScore.measures[i].tempoText;
+  return newScore;
+}
+
 // ==========================================================
 // ここから下は、小節を足す・消す関数（ステップ5-2）
 // ==========================================================
@@ -1017,6 +1060,12 @@ export function deleteMeasures(score, from, to) {
     if (nextInfo.key === undefined && (from === 0 || keyAt(newScore, from - 1) !== keyAfter)) {
       nextInfo.key = keyAfter;
     }
+    // テンポ：拍子と同じ考え方（ステップ11-6a）
+    const tempoAfter = tempoAt(newScore, to);
+    if (nextInfo.tempo === undefined && (from === 0 || tempoAt(newScore, from - 1).tempo !== tempoAfter.tempo || tempoAt(newScore, from - 1).tempoText !== tempoAfter.tempoText)) {
+      nextInfo.tempo = tempoAfter.tempo;
+      if (tempoAfter.tempoText) nextInfo.tempoText = tempoAfter.tempoText;
+    }
     // 音部記号：パートごとに同じ考え方
     newScore.parts.forEach((part) => {
       const clefAfter = clefAt(part, to);
@@ -1040,6 +1089,15 @@ export function deleteMeasures(score, from, to) {
   newScore.parts.forEach((part) => {
     part.measures.splice(from, count);
   });
+
+  // ③-2 1小節目にテンポ変更が来たら、楽譜全体のテンポに移す（1小節目のテンポは score.tempo に持つ決まりなので）（ステップ11-6a）
+  const firstInfo = newScore.measures[0];
+  if (firstInfo.tempo !== undefined) {
+    newScore.tempo = firstInfo.tempo;
+    newScore.tempoText = firstInfo.tempoText ?? "";
+    delete firstInfo.tempo;
+    delete firstInfo.tempoText;
+  }
 
   // ④ 相手がいなくなったスラー・松葉を外す
   newScore.parts.forEach((part) => cleanSpanners(part));

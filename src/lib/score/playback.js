@@ -492,6 +492,57 @@ function computeWedges(part) {
 }
 
 // ----------------------------------------------------------
+// 関数：makeTempoWarp
+// 途中でテンポが変わる楽譜のために、「ティックの数を伸び縮みさせる」しくみを作る（ステップ11-6a）
+// 再生では、1ティックが何秒かを1小節目のテンポ（score.tempo）で決めたまま変えない。
+// そのかわり、テンポの違う小節では、ティックの数を「1小節目のテンポ ÷ その小節のテンポ」倍にして並べ直す
+//   例：1小節目 ♩＝120、3小節目から ♩＝60 → 3小節目からは2倍のティックにする（＝半分の速さで鳴る）
+//   score        … 楽譜データ
+//   startMeasure … 再生を始める小節（ここを 0 ティックとして数える）
+//   lastMeasure  … 再生する最後の小節
+// 戻り値：{ at, factorAt }
+//   at(tick)             … 伸び縮みさせる前の時刻（ティック）を、伸び縮みさせたあとの時刻にする
+//   factorAt(tick, left) … その時刻の小節の倍率（left が true なら、小節のちょうど頭では前の小節の倍率）
+//                          （フェルマータのように「その音の終わり」で測るものは、left を true にする）
+// ----------------------------------------------------------
+function makeTempoWarp(score, startMeasure, lastMeasure) {
+  // 小節ごとの区切り { from: 伸び縮みさせる前の始まり, warpedFrom: 伸び縮みさせたあとの始まり, factor: 倍率 }
+  const segments = [];
+  let tempo = score.tempo; // 今のテンポ（1小節目から順に、テンポ変更をたどる）
+  let raw = 0;
+  let warped = 0;
+  for (let i = 0; i <= lastMeasure; i++) {
+    if (i > 0 && score.measures[i].tempo !== undefined) tempo = score.measures[i].tempo;
+    if (i < startMeasure) continue; // 始める小節より前は、テンポをたどるだけ
+    const factor = score.tempo / tempo;
+    segments.push({ from: raw, warpedFrom: warped, factor: factor });
+    const length = measureTicks(timeAt(score, i));
+    raw = raw + length;
+    warped = warped + length * factor;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：segmentAt（makeTempoWarp の中だけで使う）
+  // その時刻が入っている小節の区切りを返す（最後の小節より後ろは、最後の小節の区切り）
+  // ----------------------------------------------------------
+  function segmentAt(tick, left) {
+    let found = segments[0];
+    for (const segment of segments) {
+      if (segment.from < tick || (!left && segment.from === tick)) found = segment;
+    }
+    return found;
+  }
+
+  return {
+    at: (tick) => {
+      const segment = segmentAt(tick, false);
+      return segment.warpedFrom + (tick - segment.from) * segment.factor;
+    },
+    factorAt: (tick, left = false) => segmentAt(tick, left).factor,
+  };
+}
+
+// ----------------------------------------------------------
 // 関数：buildEvents
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
@@ -684,6 +735,29 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   events = events.filter((event) => audibleParts.has(event.part));
   highlights = highlights.filter((h) => highlightParts.has(h.part));
 
+  // テンポの変化のぶん、ティックの数を伸び縮みさせる（ステップ11-6a）
+  // （フェルマータでずらす前に行う。フェルマータでのばす量も、その所のテンポに合わせる）
+  const warp = makeTempoWarp(score, startMeasure, lastMeasure);
+  events.forEach((event) => {
+    const start = event.startTick;
+    const end = start + event.ticks;
+    const soundEnd = start + event.soundTicks;
+    event.startTick = warp.at(start);
+    event.ticks = warp.at(end) - event.startTick;
+    event.soundTicks = warp.at(soundEnd) - event.startTick;
+    if (event.tremoloStep) event.tremoloStep = event.tremoloStep * warp.factorAt(start); // トレモロの刻む細かさ
+    if (event.glissTo) event.glissLastTicks = event.glissLastTicks * warp.factorAt(end, true); // グリッサンドのすべる長さ
+  });
+  highlights.forEach((h) => {
+    h.startTick = warp.at(h.startTick);
+    h.endTick = warp.at(h.endTick);
+  });
+  fermatas.forEach((f) => {
+    f.extra = f.extra * warp.factorAt(f.at, true); // のばす量（フェルマータの音のテンポで）
+    f.at = warp.at(f.at);
+  });
+  totalTicks = warp.at(totalTicks);
+
   // フェルマータのぶん、時間をずらす（ステップ6-3b）
   const points = mergeFermatas(fermatas);
   events.forEach((event) => {
@@ -712,12 +786,14 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   const clicks = [];
   let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
   for (let i = startMeasure; i <= lastMeasure; i++) {
-    measureStarts.push({ measure: i, startTick: measureTick + shiftBefore(points, measureTick, true) });
+    // テンポの変化のぶん伸び縮みさせてから、フェルマータのぶんずらす（ステップ11-6a）
+    const measureStart = warp.at(measureTick);
+    measureStarts.push({ measure: i, startTick: measureStart + shiftBefore(points, measureStart, true) });
     // この小節の拍の頭ごとにクリックを1つ（1拍目は strong）
     const time = timeAt(score, i);
     const beat = beatTicks(time); // 1拍の長さ
     for (let b = 0; b < measureTicks(time); b = b + beat) {
-      const t = measureTick + b;
+      const t = warp.at(measureTick + b);
       clicks.push({ startTick: t + shiftBefore(points, t, true), strong: b === 0 });
     }
     measureTick = measureTick + measureTicks(time);
@@ -770,13 +846,16 @@ export function beatTicks(time) {
 // ----------------------------------------------------------
 export function addCountIn(result, score, startMeasure) {
   const time = timeAt(score, startMeasure);
-  const length = measureTicks(time); // カウントインの長さ（1小節ぶん）
-  const beat = beatTicks(time); // 1拍の長さ
+  // 始める小節のテンポに合わせて、伸び縮みさせる（ステップ11-6a）
+  // （拍を数えるのは伸び縮みさせる前の数で行い、クリックの時刻だけ倍にする。小数の足し算の誤差で、拍が1つ増えないようにするため）
+  const factor = makeTempoWarp(score, startMeasure, startMeasure).factorAt(0);
+  const length = measureTicks(time) * factor; // カウントインの長さ（1小節ぶん）
+  const beat = beatTicks(time); // 1拍の長さ（伸び縮みさせる前）
 
   // カウントインのクリック（1拍目は strong）
   const countInClicks = [];
-  for (let b = 0; b < length; b = b + beat) {
-    countInClicks.push({ startTick: b, strong: b === 0 });
+  for (let b = 0; b < measureTicks(time); b = b + beat) {
+    countInClicks.push({ startTick: b * factor, strong: b === 0 });
   }
 
   // 時刻を1小節ぶん後ろにずらした、新しいものを作る（もとの result は変えない）

@@ -27,7 +27,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, INSTRUMENTS, ensurePartIds } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
     canFit,
@@ -61,6 +61,8 @@
     movePart,
     deletePart,
     canGlissando,
+    setTempoChange,
+    removeTempoChange,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -1193,6 +1195,50 @@
     }
   }
 
+  // テンポを変える小節（範囲を選んでいれば範囲の最初の小節、音を選んでいればその小節。何も選んでいなければ null）（ステップ11-6a）
+  let tempoMeasure = $derived(range ? range.start.measure : selection ? selection.measure : null);
+
+  // 「小節」タブのテンポの欄に出す、その小節の今のテンポ（ステップ11-6a）
+  //   { measure: 何小節目か, tempo, tempoText, isChange: その小節でテンポが変わっているか }（何も選んでいなければ null）
+  let currentTempo = $derived(
+    tempoMeasure === null ? null : { measure: tempoMeasure, ...tempoAt(score, tempoMeasure), isChange: tempoMeasure > 0 && score.measures[tempoMeasure].tempo !== undefined },
+  );
+
+  // ----------------------------------------------------------
+  // 関数：handleTempoChange
+  // 「小節」タブの［変える］が押されたとき：選んでいる小節の頭からテンポを変える（ステップ11-6a）
+  //   tempoText … 入れた数字の文字（20〜300 の整数だけ受け付ける）
+  //   wordText  … 速度記号の文字（空でもよい）
+  // 1小節目なら、「楽譜の設定」のテンポ・速度記号が変わる
+  // ----------------------------------------------------------
+  function handleTempoChange(tempoText, wordText) {
+    if (tempoMeasure === null) return;
+    message = "";
+    const trimmed = String(tempoText).trim();
+    const tempo = Number(trimmed);
+    if (trimmed === "" || !Number.isInteger(tempo) || tempo < 20 || tempo > 300) {
+      message = "テンポは 20〜300 の数字で入れてください";
+      return;
+    }
+    // commit で範囲選択が消えるので、覚えておいて元に戻す（テンポを変えても音の並びは変わらないので、範囲はずれない）
+    const end = rangeEnd;
+    commit(setTempoChange(score, tempoMeasure, tempo, wordText.trim()));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleTempoRemove
+  // 「小節」タブの［元に戻す］が押されたとき：選んでいる小節のテンポ変更を消す（ステップ11-6a）
+  // （前の小節のテンポが続く。1小節目のテンポは消せない）
+  // ----------------------------------------------------------
+  function handleTempoRemove() {
+    if (tempoMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    commit(removeTempoChange(score, tempoMeasure));
+    rangeEnd = end;
+  }
+
   // 選んでいるパート・小節の音部記号（「小節」タブのボタンを青くするのに使う。何も選んでいないときは null）
   let currentClef = $derived(selection ? clefAt(score.parts[selection.part], selection.measure) : null);
 
@@ -1650,6 +1696,9 @@
       {currentTime}
       ontime={handleTime}
       {currentKey}
+      {currentTempo}
+      ontempo={handleTempoChange}
+      onremovetempo={handleTempoRemove}
       onkey={handleKeySignature}
       {currentClef}
       onclef={handleClef}

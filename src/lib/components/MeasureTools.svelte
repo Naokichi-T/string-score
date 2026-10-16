@@ -7,6 +7,7 @@
   // （ステップ5-4：調の変更を追加）
   // （ステップ5-5：音部記号の変更を追加）
   // （ステップ8-1b：拍子のボタンに、コモンタイム（C）・カットタイム（¢）を追加）
+  // （ステップ11-6a：途中のテンポ変更を追加）
   // ==========================================================
 
   // 親から受け取るもの
@@ -20,7 +21,46 @@
   //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
   //   currentClef … 選んでいるパート・小節の音部記号（何も選んでいないときは null。ボタンを青くするのに使う）
   //   onclef      … 音部記号のボタンが押されたときに呼ぶ関数（"treble"・"alto"・"tenor"・"bass" を渡す）
-  let { canDelete = false, onmeasure = () => {}, currentTime = { beats: 4, beatType: 4 }, ontime = () => {}, currentKey = 0, onkey = () => {}, currentClef = null, onclef = () => {} } = $props();
+  //   currentTempo … 選んでいる小節のテンポ { measure, tempo, tempoText, isChange }（何も選んでいないときは null）（ステップ11-6a）
+  //                  isChange … その小節でテンポが変わっているか（true なら［元に戻す］を押せる）
+  //   ontempo      … ［変える］が押されたときに呼ぶ関数（数字の文字と、速度記号の文字を渡す）（ステップ11-6a）
+  //   onremovetempo … ［元に戻す］が押されたときに呼ぶ関数（ステップ11-6a）
+  let {
+    canDelete = false,
+    onmeasure = () => {},
+    currentTime = { beats: 4, beatType: 4 },
+    ontime = () => {},
+    currentKey = 0,
+    onkey = () => {},
+    currentClef = null,
+    onclef = () => {},
+    currentTempo = null,
+    ontempo = () => {},
+    onremovetempo = () => {},
+  } = $props();
+
+  // 速度記号の候補（「楽譜の設定」タブと同じもの）（ステップ11-6a）
+  // 入力欄に文字を入れると、前が同じ候補が出る（datalist というしくみ）
+  const TEMPO_WORDS = ["Largo", "Lento", "Adagio", "Andante", "Andantino", "Moderato", "Allegretto", "Allegro", "Vivace", "Presto"];
+
+  // テンポの欄に入っている文字（ステップ11-6a）
+  let tempoNumber = $state("");
+  let tempoWord = $state("");
+
+  // 選んでいる小節が変わったら（テンポが変わったときも）、欄の中身を、その小節の今のテンポにする（ステップ11-6a）
+  $effect(() => {
+    tempoNumber = currentTempo ? String(currentTempo.tempo) : "";
+    tempoWord = currentTempo ? currentTempo.tempoText : "";
+  });
+
+  // ----------------------------------------------------------
+  // 関数：handleTempoKeydown
+  // テンポの欄で Enter が押されたら、［変える］と同じことをする（ステップ11-6a）
+  // （日本語の変換を決めるための Enter では動かないようにする）
+  // ----------------------------------------------------------
+  function handleTempoKeydown(event) {
+    if (event.key === "Enter" && !event.isComposing) ontempo(tempoNumber, tempoWord);
+  }
 
   // よく使う拍子（ボタンにして並べる）
   //   symbol … コモンタイム・カットタイムのときだけ付ける（ボタンには数字ではなく記号を出す）
@@ -178,6 +218,30 @@
     </select>
   </div>
 
+  <!-- テンポ：選んでいる小節の頭から変える（何も選んでいないときは使えない）（ステップ11-6a） -->
+  <div class="group">
+    <span class="label">テンポ</span>
+    <input
+      class="tempo-word"
+      type="text"
+      list="measure-tempo-words"
+      placeholder="速度記号"
+      bind:value={tempoWord}
+      disabled={!currentTempo}
+      onkeydown={handleTempoKeydown}
+      title="速度記号（Allegro など。なくてもよい）"
+    />
+    <datalist id="measure-tempo-words">
+      {#each TEMPO_WORDS as word}
+        <option value={word}></option>
+      {/each}
+    </datalist>
+    <span class="label">♩＝</span>
+    <input class="tempo-number" type="number" min="20" max="300" step="1" bind:value={tempoNumber} disabled={!currentTempo} onkeydown={handleTempoKeydown} title="テンポ（20〜300）" />
+    <button disabled={!currentTempo} onclick={() => ontempo(tempoNumber, tempoWord)} title="選んでいる小節の頭から、テンポを変える（範囲を選んでいるときは、範囲の最初の小節から）"> 変える </button>
+    <button disabled={!currentTempo?.isChange} onclick={() => onremovetempo()} title="選んでいる小節のテンポ変更を消す（前の小節のテンポが続く）"> 元に戻す </button>
+  </div>
+
   <!-- 音部記号：選んでいるパートだけに効く（何も選んでいないときは押せない） -->
   <div class="group">
     <span class="label">音部記号</span>
@@ -288,5 +352,23 @@
     padding: 0 4px;
     border: 1px solid #ccc;
     border-radius: 4px;
+  }
+  /* テンポの入力欄（ステップ11-6a） */
+  input {
+    height: 40px;
+    font-size: 14px;
+    padding: 0 6px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+  }
+  input:disabled {
+    opacity: 0.35;
+  }
+  .tempo-word {
+    width: 110px;
+  }
+  .tempo-number {
+    width: 64px;
   }
 </style>
