@@ -1,5 +1,7 @@
 <script>
   import favicon from "#lib/assets/favicon.svg";
+  // 指で長押ししたら、ボタンの説明を出す部品（アプリ全体に1つ）（ステップ12-10b）
+  import LongPressTip from "#lib/components/LongPressTip.svelte";
 
   let { children } = $props();
 </script>
@@ -9,6 +11,9 @@
 </svelte:head>
 
 {@render children()}
+
+<!-- 長押しの説明の吹き出し（ステップ12-10b） -->
+<LongPressTip />
 
 <style>
   /* タブレット（タッチ）向けの、アプリ全体の設定（ステップ12-8a） */
