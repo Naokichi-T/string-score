@@ -77,7 +77,7 @@
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn } from "#lib/score/playback.js";
-  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts } from "#lib/score/library.js";
+  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts, loadClipboard, saveClipboard, CLIPBOARD_KEY } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
@@ -507,6 +507,9 @@
 
     // 前に決めた鍵盤のたたみ方を読み込む（保存していなければ出したまま）（ステップ12-9）
     keyboardCollapsed = loadSettings().keyboardCollapsed === true;
+
+    // 前に（ほかのタブ・ほかの楽譜で）コピーした音を読み込む（なければ null のまま）（ステップ13-1）
+    clipboard = loadClipboard();
 
     // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
     loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
@@ -1596,7 +1599,8 @@
     printing = true;
   }
 
-  // コピーした音の配列（まだ何もコピーしていないときは null。ページを再読み込みすると消える）
+  // コピーした音の配列（まだ何もコピーしていないときは null）
+  // （ステップ13-1：ブラウザの中にも保存するので、ほかのタブ・ページの再読み込みのあとでも貼り付けられる）
   let clipboard = $state.raw(null);
 
   // コピー・切り取りができるか（音か範囲を選んでいるか）
@@ -1622,6 +1626,7 @@
       rangeEnd = single ? null : { part: target.part, measure: target.end.measure, note: target.end.note };
 
       clipboard = copyNotes(score, range, selection);
+      saveClipboard(clipboard); // ほかのタブでも貼り付けられるように保存する（ステップ13-1）
       // 切り取り：コピーしたあと、音符を休符にする（削除のボタンと同じ）
       if (action === "cut") handleDelete();
       return;
@@ -1639,6 +1644,18 @@
     // commit で範囲選択が消えるので、そのあとで範囲の終わりを決める（1つだけなら範囲にしない）
     const single = result.start.measure === result.end.measure && result.start.note === result.end.note;
     rangeEnd = single ? null : result.end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleStorage
+  // ほかのタブで、ブラウザの中の保存が変わったとき（ステップ13-1）
+  // （storage という合図は、自分のタブで保存したときには来ず、ほかのタブで保存したときだけ来る）
+  // ほかのタブでコピーしたら、このタブのコピーした音も入れ替える（すぐに［貼り付け］を押せるようにする）
+  //   event … 合図の中身（key に、変わった場所の名前が入っている）
+  // ----------------------------------------------------------
+  function handleStorage(event) {
+    if (event.key !== CLIPBOARD_KEY) return;
+    clipboard = loadClipboard();
   }
 
   // ----------------------------------------------------------
@@ -1767,7 +1784,7 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} onstorage={handleStorage} />
 
 <svelte:head>
   <!-- ブラウザのタブに楽譜のタイトルを出す（読み込む前は「編集」）（ステップ7-4） -->

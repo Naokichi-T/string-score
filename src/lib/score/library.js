@@ -13,6 +13,7 @@
 //   "string-score:view:（id）"    … 楽譜ごとの、隠すパートの名札（id）の配列（ステップ12-6a）
 //   "string-score:settings"      … アプリ全体の設定（楽譜とは別）（ステップ7-4）
 //       { soundType: "instrument" }（音の種類。"instrument"：楽器の音、"synth"：電子音）
+//   "string-score:clipboard"     … コピーした音の配列（タブをまたいでコピー・貼り付けするため）（ステップ13-1）
 //
 // 一覧の表と楽譜を分けておくと、トップページは小さな表を読むだけで済む
 //
@@ -298,5 +299,46 @@ export function saveSetting(name, value) {
   } catch (error) {
     // 設定を保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
     console.error("設定を保存できませんでした", error);
+  }
+}
+
+// ==========================================================
+// ここから下は、コピーした音（ステップ13-1）
+// 別のタブ・別の楽譜にも貼り付けられるように、ブラウザの中に保存する
+// （ブラウザを閉じても、次にコピーするまで残る）
+// ==========================================================
+
+// コピーした音を入れる場所の名前（+page.svelte で、ほかのタブで変わったかを調べるのにも使う）
+export const CLIPBOARD_KEY = "string-score:clipboard";
+
+// ----------------------------------------------------------
+// 関数：loadClipboard
+// コピーした音を読み込む
+// 戻り値：音の配列（まだコピーしていない・読めないときは null）
+// ----------------------------------------------------------
+export function loadClipboard() {
+  try {
+    const text = localStorage.getItem(CLIPBOARD_KEY);
+    if (!text) return null;
+    const notes = JSON.parse(text);
+    // 音が1つ以上入った配列でなければ（壊れていたら）、コピーしていないことにする
+    return Array.isArray(notes) && notes.length > 0 ? notes : null;
+  } catch (error) {
+    console.error("コピーした音を読み込めませんでした", error);
+    return null;
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：saveClipboard
+// コピーした音を保存する
+//   notes … 音の配列（copyNotes で作ったもの）
+// ----------------------------------------------------------
+export function saveClipboard(notes) {
+  try {
+    localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(notes));
+  } catch (error) {
+    // 保存できなくても、このタブの中ではコピー・貼り付けできる（ほかのタブに渡らないだけ）
+    console.error("コピーした音を保存できませんでした", error);
   }
 }
