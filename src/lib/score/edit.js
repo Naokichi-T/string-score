@@ -564,6 +564,7 @@ export function canGlissando(score, selection) {
 //            'breath'（ブレス・カエスーラ）（ステップ11-1c）
 //            'ornament'（トリルなどの装飾）（ステップ11-3a）
 //            'tremolo'（トレモロ。value は斜線の本数）（ステップ11-4）
+//            'grace'（前打音。value は "short"（短前打音）か "long"（長前打音））（ステップ11-8a）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
@@ -582,6 +583,21 @@ export function toggleNoteSymbol(score, selection, kind, value) {
         delete n.glissando;
       } else {
         n.glissando = true;
+      }
+    });
+  }
+
+  // 前打音（kind が 'grace'）（ステップ11-8a）
+  //   同じ種類が付いていれば外す。違う種類が付いていれば、高さはそのままで種類だけ入れ替える
+  //   付いていなければ、主音の2度上（調号どおりの♯♭）の高さで付ける（あとで鍵盤で高さを変える）
+  if (kind === "grace") {
+    return updateNote(score, selection, (n) => {
+      if (n.grace && n.grace.type === value) {
+        delete n.grace;
+      } else if (n.grace) {
+        n.grace = { ...n.grace, type: value };
+      } else {
+        n.grace = { type: value, pitch: stepAbove(n.pitch, keyAt(score, selection.measure)) };
       }
     });
   }
@@ -669,6 +685,38 @@ export function toggleNoteSymbol(score, selection, kind, value) {
       n.techniques = list;
       if (n.techniques.length === 0) delete n.techniques;
     }
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：stepAbove
+// 1つ上の音名（2度上）の高さを、調号どおりの♯♭で返す（前打音を付けたときの、はじめの高さ）（ステップ11-8a）
+//   例：ニ長調で ミ5 → ファ♯5、ハ長調で シ4 → ド5
+//   pitch … もとの音の高さ { step, alter, octave }
+//   key   … 調号（♯の数がプラス、♭の数がマイナス）
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+function stepAbove(pitch, key) {
+  const STEPS = ["C", "D", "E", "F", "G", "A", "B"];
+  const index = STEPS.indexOf(pitch.step);
+  const nextStep = STEPS[(index + 1) % 7];
+  // シ（B）の次はドなので、オクターブが1つ上がる
+  const octave = pitch.step === "B" ? pitch.octave + 1 : pitch.octave;
+  return { step: nextStep, alter: keyAlters(key)[nextStep], octave: octave };
+}
+
+// ----------------------------------------------------------
+// 関数：setGracePitch
+// 選んでいる音の前打音の高さを変える（ステップ11-8a）
+// 前打音が付いていない音なら、何もしない
+//   pitch … 新しい高さ { step, alter, octave }
+// 戻り値：新しい楽譜データ（前打音がなければ元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setGracePitch(score, selection, pitch) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest || !note.grace) return score;
+  return updateNote(score, selection, (n) => {
+    n.grace = { ...n.grace, pitch: { ...pitch } };
   });
 }
 

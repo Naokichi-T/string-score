@@ -51,6 +51,7 @@ const REHEARSAL_PADDING = 4; // 練習番号の文字と、まわりの四角の
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
+const GRACE_WIDTH = 18; // 前打音1つあたりに足す幅（ステップ11-8a）
 const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
 const NOTE_END_PADDING = 22; // 小節の最後の音符と、小節線の間に空けるすき間
 
@@ -121,7 +122,8 @@ export function renderScore(VF, container, score, width, selection = null, range
     for (let p = 0; p < partCount; p++) {
       const notes = score.parts[p].measures[i].notes;
       const accCount = accidentalsList[p][i].filter((a) => a !== null).length;
-      const w = MEASURE_BASE_WIDTH + notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH;
+      const graceCount = notes.filter((n) => !n.rest && n.grace).length; // 前打音の数（ステップ11-8a）
+      const w = MEASURE_BASE_WIDTH + notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH + graceCount * GRACE_WIDTH;
       if (w > maxNotes) maxNotes = w;
     }
     // くり返しの小節線（点の付いた太い線）があれば、そのぶん少し広くする（ステップ11-7a）
@@ -349,7 +351,7 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       score.parts.forEach((part, p) => {
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
-          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j]);
+          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key); // 調号は前打音の臨時記号に使う（ステップ11-8a）
           // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
           if (playingKeys.has(`${p}-${i}-${j}`)) {
             staveNote.setStyle({ fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR });

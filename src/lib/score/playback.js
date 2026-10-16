@@ -493,6 +493,23 @@ function computeWedges(part) {
   return wedges;
 }
 
+// 短前打音を鳴らす長さ（ティック）：32分音符1つ分（ステップ11-8a）
+const SHORT_GRACE_TICKS = TICKS_PER_16TH / 2;
+
+// ----------------------------------------------------------
+// 関数：graceLength
+// 前打音を鳴らす長さ（ティック）を決める（ステップ11-8a）
+//   ・短前打音 … 32分音符の長さ。ただし主音の半分より長くはしない
+//   ・長前打音 … 主音の半分。付点の音符なら3分の2（付点4分音符なら4分音符ぶん）
+//   note   … 主音のデータ（note.grace に前打音が入っている）
+//   length … 主音の長さ（ティック）
+// 戻り値：前打音の長さ（ティック）
+// ----------------------------------------------------------
+export function graceLength(note, length) {
+  if (note.grace.type === "short") return Math.min(SHORT_GRACE_TICKS, length / 2);
+  return (note.dots ?? 0) > 0 ? (length * 2) / 3 : length / 2;
+}
+
 // ----------------------------------------------------------
 // 関数：playOrder
 // 楽譜のくり返し（‖: 〜 :‖）をたどって、鳴らす小節の順番を作る（ステップ11-7a）
@@ -904,6 +921,30 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
             glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
             glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
           };
+          // 前打音：主音の頭の一部を借りて、先に前打音を鳴らす（ステップ11-8a）
+          //   短前打音 … 32分音符の長さ（主音が短いときは、主音の半分まで）
+          //   長前打音 … 主音の半分（付点の音符なら3分の2）
+          if (note.grace) {
+            const graceTicks = graceLength(note, length);
+            events.push({
+              ...event,
+              pitch: note.grace.pitch,
+              ticks: graceTicks,
+              soundTicks: graceTicks,
+              connected: true, // 主音とつなげて鳴らす
+              fermataEnd: false,
+              ornament: null, // 装飾・トレモロ・グリッサンドは主音のほうだけ
+              upper: null,
+              lower: null,
+              tremoloStep: null,
+              glissTo: null,
+            });
+            // 主音は、借りたぶんだけ遅く始めて、短くする
+            event.startTick = event.startTick + graceTicks;
+            event.ticks = event.ticks - graceTicks;
+            event.soundTicks = Math.max(event.soundTicks - graceTicks, 1);
+            event.glissLastTicks = event.glissLastTicks - graceTicks;
+          }
           events.push(event);
           tiedEvent = event;
         }

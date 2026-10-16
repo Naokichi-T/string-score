@@ -43,6 +43,7 @@
     insertAt,
     resizeAt,
     toggleNoteSymbol,
+    setGracePitch,
     canSpan,
     getSpanState,
     toggleSpanner,
@@ -907,6 +908,16 @@
   //   pitch … 音の高さ { step, alter, octave }
   // ----------------------------------------------------------
   function inputPitch(pitch) {
+    // 「前打音の高さを入れる」状態なら、主音ではなく前打音の高さを変える（ステップ11-8a）
+    if (graceTarget) {
+      const pizzAtGrace = isPizzAt(score, selection);
+      commit(setGracePitch(score, selection, pitch));
+      graceTarget = null;
+      message = "";
+      playPitch(pitch, currentInstrument, 0.5, pizzAtGrace);
+      return;
+    }
+
     const dots = dotted ? 1 : 0;
     // 入れる場所がピチカートの範囲かどうか（入れる前に調べる。入れると選択が次の音に進むため）
     const pizz = selection ? isPizzAt(score, selection) : false;
@@ -1052,7 +1063,27 @@
     if (!noteSelected) return;
     message = "";
     commit(toggleNoteSymbol(score, selection, kind, value));
+
+    // 前打音を付けた（種類を変えた）ときは、「前打音の高さを入れる」状態にする（ステップ11-8a）
+    // 外したときは、その状態をやめる
+    graceTarget = null;
+    if (kind === "grace" && getSelectedNote(score, selection)?.grace) {
+      graceTarget = { ...selection };
+      message = "鍵盤（か音名のキー）で、前打音の高さを選んでください";
+    }
   }
+
+  // 「前打音の高さを入れる」状態の音の場所（その状態でなければ null）（ステップ11-8a）
+  // この音を選んでいる間に鍵盤を押すと、主音ではなく前打音の高さが変わる（1回押したら、ふつうに戻る）
+  let graceTarget = $state(null);
+
+  // ほかの音を選んだら、「前打音の高さを入れる」状態はやめる（ステップ11-8a）
+  $effect(() => {
+    const now = selection; // selection が変わったら、ここがもう一度動く
+    if (graceTarget && !(now && now.part === graceTarget.part && now.measure === graceTarget.measure && now.note === graceTarget.note)) {
+      graceTarget = null;
+    }
+  });
 
   // ----------------------------------------------------------
   // 関数：handleSpanner

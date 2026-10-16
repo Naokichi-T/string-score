@@ -102,6 +102,18 @@ export const FERMATA = { label: "フェルマータ", vf: "a@a", musicxml: "ferm
 export const GLISSANDO = { label: "グリッサンド（次の音まですべらせる）", text: "gliss.", musicxml: "glissando" };
 
 // ----------------------------------------------------------
+// 前打音（データの grace に { type, pitch } を入れる。1つの音に1つだけ）（ステップ11-8a）
+//   type  … "short"（短前打音）・"long"（長前打音）
+//   pitch … 前打音の高さ（主音と同じ形 { step, alter, octave }）
+//   glyph … ボタンに出す楽譜用フォント（Bravura）の文字
+//   slash … 小さな音符に斜線を付けるか（MusicXML の <grace slash="yes"> にも使う）
+// ----------------------------------------------------------
+export const GRACES = {
+  short: { label: "短前打音（斜線のある小さな音符。主音の頭でごく短く鳴らす）", glyph: "\uE560", slash: true },
+  long: { label: "長前打音（斜線のない小さな音符。主音の長さの半分を使って鳴らす）", glyph: "\uE562", slash: false },
+};
+
+// ----------------------------------------------------------
 // 指番号（データの fingerings に数字の並びを入れる。いくつでも付けられる）
 // 例：fingerings: [1, 2] → 下から「1」「2」と積み重ねて表示
 // ----------------------------------------------------------

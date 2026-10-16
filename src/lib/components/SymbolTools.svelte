@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, GRACES, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -113,6 +113,15 @@
     </button>
   </div>
 
+  <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
+  <div class="group">
+    {#each Object.entries(GRACES) as [name, symbol] (name)}
+      <button class="tool" class:on={note?.grace?.type === name} {disabled} onclick={() => onsymbol("grace", name)} title={symbol.label} aria-label={symbol.label}>
+        <span class="icon grace">{symbol.glyph}</span>
+      </button>
+    {/each}
+  </div>
+
   <!-- スラー・松葉（範囲を選んだときだけ押せる） -->
   <div class="group">
     <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（S）（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
@@ -207,6 +216,9 @@
   }
   .icon.dynamic {
     top: -2px;
+  }
+  .icon.grace {
+    top: 6px; /* ステップ11-8a */
   }
   .gliss-text {
     font-style: italic; /* 楽譜の「gliss.」と同じく斜めの文字 ステップ11-5a */
