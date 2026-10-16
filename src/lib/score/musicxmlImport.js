@@ -37,7 +37,7 @@
 // ==========================================================
 
 import { unzipSync } from "fflate";
-import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups, createPartId } from "./model.js";
+import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups, createPartId, tempoAt } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
@@ -604,6 +604,105 @@ function addTechnique(list, name) {
   return [...others, name];
 }
 
+// 文字の指示（normalizeWords したもの） → テンポの印の種類 の表（ステップ11-6c）
+//   "rit" … rit.（だんだん遅く）、"accel" … accel.（だんだん速く）、"aTempo" … a tempo（元の速さに戻す）
+const TEMPO_WORDS = {
+  rit: "rit",
+  ritard: "rit",
+  ritardando: "rit",
+  rall: "rit",
+  rallentando: "rit",
+  accel: "accel",
+  accelerando: "accel",
+  "a tempo": "aTempo",
+  "tempo i": "aTempo",
+  "tempo primo": "aTempo",
+};
+
+// ----------------------------------------------------------
+// 関数：tempoWordKind
+// 文字の指示が、テンポの印（rit.・accel.・a tempo）なら、その種類を返す（ステップ11-6c）
+// 例："ritard." → "rit"、"A tempo" → "aTempo"、"dolce" → null
+// ----------------------------------------------------------
+function tempoWordKind(text) {
+  return TEMPO_WORDS[normalizeWords(text)] ?? null;
+}
+
+// ----------------------------------------------------------
+// 関数：readTempoMarks
+// 2小節目からの、テンポの指示を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-6c）
+// 一番上のパートの小節だけを見る（テンポの指示は全パート共通なので）
+//   ・♩＝○○（<metronome> か <sound tempo>）… その小節のテンポ変更（今と同じテンポなら付けない）
+//                                            文字が a tempo なら、a tempo にする
+//   ・文字が rit.・accel.・a tempo など       … その印
+//   ・rit.・accel. の範囲の終わり             … <dashes type="stop">（点線の終わり）の小節
+//       点線がない rit.・accel. は、その小節だけの範囲にする
+//       点線の終わりが来ないうちに、次の rit.・テンポ変更などが来たら、その前の小節で終わりにする
+//   measureElements … 一番上のパートの <measure> の並び
+//   score           … 作った楽譜データ（measures に書き足す）
+// ----------------------------------------------------------
+function readTempoMarks(measureElements, score) {
+  let openFrom = null; // 点線の終わりを待っている rit.・accel. の始まりの小節（なければ null）
+
+  // ----------------------------------------------------------
+  // 関数：closeOpen（readTempoMarks の中だけで使う）
+  // 待っている rit.・accel. を、end 小節目で終わりにする
+  // ----------------------------------------------------------
+  function closeOpen(end) {
+    if (openFrom === null) return;
+    score.measures[Math.max(openFrom, end)].gradualEnd = true;
+    openFrom = null;
+  }
+
+  measureElements.forEach((measureElement, i) => {
+    if (i === 0 || i >= score.measures.length) return; // 1小節目は readTempo で読んである
+    const info = score.measures[i];
+
+    // ① テンポ変更（文字が a tempo なら a tempo）
+    const { tempo, tempoText } = readTempo(measureElement);
+    if (tempo !== null) {
+      closeOpen(i - 1); // テンポが変わる所で、rit.・accel. は終わる
+      if (tempoWordKind(tempoText) === "aTempo") {
+        info.aTempo = true;
+      } else {
+        const rounded = Math.min(300, Math.max(20, Math.round(tempo))); // このアプリで使える 20〜300 に収める
+        const now = tempoAt(score, i);
+        if (rounded !== now.tempo || tempoText !== now.tempoText) {
+          info.tempo = rounded;
+          if (tempoText) info.tempoText = tempoText;
+        }
+      }
+    }
+
+    // ② 文字（rit.・accel.・a tempo）と、点線の終わり
+    childElements(measureElement, "direction").forEach((direction) => {
+      const types = childElements(direction, "direction-type");
+      // 点線の始まりがあるか（あれば、終わりの印が来るまで範囲が続く）
+      const hasDashes = types.some((type) => childElements(type, "dashes").some((d) => d.getAttribute("type") === "start"));
+      types.forEach((type) => {
+        childElements(type, "words").forEach((words) => {
+          const kind = tempoWordKind(words.textContent);
+          if (kind === "aTempo") {
+            closeOpen(i - 1);
+            info.aTempo = true;
+          } else if (kind === "rit" || kind === "accel") {
+            closeOpen(i - 1);
+            info.gradual = kind;
+            if (hasDashes) openFrom = i;
+            else info.gradualEnd = true; // 点線がない：この小節だけ
+          }
+        });
+        childElements(type, "dashes").forEach((dashes) => {
+          if (dashes.getAttribute("type") === "stop") closeOpen(i);
+        });
+      });
+    });
+  });
+
+  // 最後まで点線の終わりが来なかったら、最後の小節で終わりにする
+  closeOpen(score.measures.length - 1);
+}
+
 // ----------------------------------------------------------
 // 関数：readDirection
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
@@ -629,6 +728,7 @@ function readDirection(direction, state, counter) {
     childElements(type, "words").forEach((words) => {
       const text = normalizeWords(words.textContent);
       if (text === "") return;
+      if (tempoWordKind(words.textContent)) return; // rit.・a tempo などは、楽譜全体の印として readTempoMarks で読む（ステップ11-6c）
       const name = WORDS_TO_TECHNIQUE[text];
       if (name) state.pending.techniques = addTechnique(state.pending.techniques, name);
       else report(counter, "文字の指示（dolce・cresc. など）");
@@ -1019,5 +1119,9 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     measures: measures,
     parts: parts,
   };
+
+  // ⑧ 2小節目からのテンポの指示（途中のテンポ変更・rit.・accel.・a tempo）（ステップ11-6c）
+  readTempoMarks(childElements(partElements[0], "measure"), score);
+
   return { score: score, warnings: warnings };
 }

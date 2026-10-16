@@ -30,7 +30,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -205,6 +205,59 @@ function attributesXml(isFirst, key, time, clef, divisions) {
   }
   lines.push("      </attributes>");
   return lines;
+}
+
+// ----------------------------------------------------------
+// 関数：tempoMarksXml
+// 2小節目からの、テンポの指示の <direction> を作る（いちばん上のパートの、小節の頭に書く）（ステップ11-6c）
+//   ・途中のテンポ変更 … 1小節目と同じ形（tempoXml）
+//   ・a tempo          … <words>a tempo</words>
+//   ・rit.・accel.     … <words>rit.</words> と、点線の始まり <dashes type="start"/>
+//                        （点線の終わりは、範囲の終わりの小節の最後に gradualEndXml で書く）
+// rit.・accel. のだんだん変わる速さは、MusicXML に再生の速さとして書く決まった形がないので、文字と点線だけ書く
+//   score … 楽譜データ
+//   i     … 何小節目か（0 から。1小節目は tempoXml で書くので、ここでは何も書かない）
+// 戻り値：XML の行の配列（何もなければ空の配列）
+// ----------------------------------------------------------
+function tempoMarksXml(score, i) {
+  const lines = [];
+  if (i === 0) return lines;
+  const info = score.measures[i];
+
+  // ① 途中のテンポ変更
+  if (info.tempo !== undefined) lines.push(...tempoXml(tempoAt(score, i)));
+
+  // ② a tempo
+  if (info.aTempo) {
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push("          <words>a tempo</words>");
+    lines.push("        </direction-type>");
+    lines.push("      </direction>");
+  }
+
+  // ③ rit.・accel. の始まり（文字と、点線の始まり）
+  if (info.gradual) {
+    const text = info.gradual === "rit" ? "rit." : "accel.";
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <words font-style="italic">${text}</words>`);
+    lines.push("        </direction-type>");
+    lines.push("        <direction-type>");
+    lines.push(`          <dashes type="start" number="1"/>`);
+    lines.push("        </direction-type>");
+    lines.push("      </direction>");
+  }
+  return lines;
+}
+
+// ----------------------------------------------------------
+// 関数：gradualEndXml
+// rit.・accel. の点線の終わり <dashes type="stop"/> を作る（範囲の終わりの小節の、最後の音のあとに書く）（ステップ11-6c）
+// 戻り値：XML の行の配列
+// ----------------------------------------------------------
+function gradualEndXml() {
+  return ["      <direction>", "        <direction-type>", `          <dashes type="stop" number="1"/>`, "        </direction-type>", "      </direction>"];
 }
 
 // ----------------------------------------------------------
@@ -520,6 +573,8 @@ function partXml(score, p, divisions) {
 
     // テンポは1小節目の一番上のパートにだけ書く
     if (isFirst && p === 0) lines.push(...tempoXml(score));
+    // 2小節目からのテンポの指示（途中のテンポ変更・a tempo・rit.・accel.）も、一番上のパートにだけ書く（ステップ11-6c）
+    if (p === 0) lines.push(...tempoMarksXml(score, i));
 
     // 臨時記号を、五線譜の表示と同じ決め方で決める
     const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedIn);
@@ -555,6 +610,9 @@ function partXml(score, p, divisions) {
       prevTie = !note.rest && !!note.tie;
     });
     tiedIn = prevTie; // 次の小節へ引き継ぐ
+
+    // rit.・accel. の範囲の終わりの小節なら、最後の音のあとに点線の終わりを書く（一番上のパートだけ）（ステップ11-6c）
+    if (p === 0 && score.measures[i].gradualEnd) lines.push(...gradualEndXml());
 
     // 小節の終わりの線
     const isLast = i === lastIndex;
