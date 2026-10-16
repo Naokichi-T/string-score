@@ -195,6 +195,19 @@
     }
   }
 
+  // 拍の線を描くか（ステップ12-7）
+  // アプリ全体で1つ（設定として保存する）。ページを開いたときに読み込む
+  let beatLines = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleToggleBeats
+  // 「パート」タブの［拍の線］が押されたとき：入・切を変えて保存する（ステップ12-7）
+  // ----------------------------------------------------------
+  function handleToggleBeats() {
+    beatLines = !beatLines;
+    saveSetting("beatLines", beatLines);
+  }
+
   // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
   // アプリ全体で1つ（音の種類と同じく、設定として保存する）。ページを開いたときに読み込む
   let metronome = $state({ on: false, volume: 70, countIn: false });
@@ -461,6 +474,9 @@
     if (savedMetronome && typeof savedMetronome === "object") {
       metronome = { ...metronome, ...savedMetronome };
     }
+
+    // 前に決めた拍の線の入・切を読み込む（保存していなければ切のまま）（ステップ12-7）
+    beatLines = loadSettings().beatLines === true;
 
     // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
     loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
@@ -1596,6 +1612,8 @@
       onrepeat={handleRepeat}
       {hiddenParts}
       ontoggleview={handleToggleView}
+      {beatLines}
+      ontogglebeats={handleToggleBeats}
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}
@@ -1607,7 +1625,8 @@
     <!-- 五線譜の部分だけスクロールする -->
     <main class="score-area">
       <!-- visibleParts：表示するパートだけを描く（ステップ12-6a） -->
-      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} />
+      <!-- beatLines：拍の線（ステップ12-7） -->
+      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} {beatLines} />
     </main>
 
     <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />

@@ -11,6 +11,7 @@
 //   render/ties.js     … タイを描く
 //   render/spanners.js … スラー・松葉を描く
 //   render/spacing.js  … パートの間・段の間を中身に合わせて決める（パートの間の自動調整）
+//   render/beatLines.js … 拍の線を描く（ステップ12-7）
 // ==========================================================
 
 import { computeAccidentals } from "./accidentals.js";
@@ -23,6 +24,7 @@ import { drawSpanners } from "./render/spanners.js";
 import { measureExtents, computePositions } from "./render/spacing.js";
 import { isInRange } from "./selection.js";
 import { createTuplets, createBeams, placeTuplets } from "./render/tuplets.js";
+import { drawBeatLines } from "./render/beatLines.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -61,6 +63,7 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   selection … 選択中の場所 { part, measure, note }（選んでいなければ null）
 //   range     … 範囲選択 { part, start, end }（範囲を選んでいなければ null）
 //   playingNotes … 再生中に鳴っている音符の場所の一覧 [{ part, measure, note }, ...]（ステップ6-2）
+//   beatLines … true なら拍の線を描く（ステップ12-7）
 // 戻り値：{ hitBoxes, lineTops, lineBottoms, totalHeight }
 //   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
 //                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
@@ -69,7 +72,7 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   lineBottoms … 段ごとの下端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
 //   totalHeight … 楽譜全体の高さ（ステップ9）
 // ----------------------------------------------------------
-export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = []) {
+export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = [], beatLines = false) {
   // 鳴っている音符を「パート-小節-番号」の文字にして、すぐに探せるようにしておく
   const playingKeys = new Set(playingNotes.map((n) => `${n.part}-${n.measure}-${n.note}`));
   // 前に描いたものを消す
@@ -137,6 +140,7 @@ export function renderScore(VF, container, score, width, selection = null, range
     selection: selection,
     range: range,
     playingKeys: playingKeys,
+    beatLines: beatLines, // 拍の線を描くか（ステップ12-7）
   };
 
   // ----- 5. 下書きを描いて、段ごと・パートごとに、五線の上下にどれだけはみ出すかを測る -----
@@ -340,6 +344,18 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       voices.forEach((voice, p) => voice.draw(context, staves[p]));
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
+
+      // 拍の線（入のときだけ。下書きでは描かない）（ステップ12-7）
+      // 音符の横の位置が決まったあとでないと描けないので、ここで描く（中で、音符の後ろに動かす）
+      if (!isDraft && info.beatLines) {
+        drawBeatLines(
+          context,
+          staves,
+          voices,
+          score.parts.map((part) => part.measures[i]),
+          state.time,
+        );
+      }
 
       // 強弱・ブレス・カエスーラ・トリルの波線を描く（音符の横の位置が決まったあとでないと描けないので、ここで描く）
       // （ブレス・カエスーラはステップ11-1c、トリルの波線はステップ11-3a）

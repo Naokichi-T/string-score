@@ -76,12 +76,16 @@
   //   onmetronome  … メトロノームの設定が変わったときに呼ぶ関数（「再生」タブで使う）（ステップ12-4a）
   //   hiddenParts  … 隠すパートの名札（id）の配列（「パート」タブで使う）（ステップ12-6a）
   //   ontoggleview … 表示のチェックが押されたときに呼ぶ関数（「パート」タブで使う）（ステップ12-6a）
+  //   beatLines    … 拍の線が入っているか（「パート」タブで使う）（ステップ12-7）
+  //   ontogglebeats … ［拍の線］が押されたときに呼ぶ関数（「パート」タブで使う）（ステップ12-7）
   //   repeatOn     … 区間リピートが入っているか（「再生」タブで使う）（ステップ12-5b）
   //   repeatText   … くり返す範囲の文字（例："3〜5小節目"）（「再生」タブで使う）（ステップ12-5b）
   //   onrepeat     … ［区間リピート］が押されたときに呼ぶ関数（「再生」タブで使う）（ステップ12-5b）
   let {
     hiddenParts = [],
     ontoggleview = () => {},
+    beatLines = false,
+    ontogglebeats = () => {},
     repeatOn = false,
     repeatText = "",
     onrepeat = () => {},
@@ -298,7 +302,7 @@
     {:else if activeTab === "measure"}
       <MeasureTools canDelete={canDeleteMeasure} {onmeasure} {currentTime} {ontime} {currentKey} {onkey} {currentClef} {onclef} />
     {:else if activeTab === "part"}
-      <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} {hiddenParts} {ontoggleview} />
+      <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} {hiddenParts} {ontoggleview} {beatLines} {ontogglebeats} />
     {:else if activeTab === "playback"}
       <PlaybackTools parts={score.parts} {mixer} {onmixer} {metronome} {onmetronome} {repeatOn} {repeatText} {onrepeat} />
     {:else if activeTab === "settings"}

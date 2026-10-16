@@ -23,7 +23,8 @@
   //   onselect     … 音符がクリックされたときに呼ぶ関数
   //                  （選ばれた場所か null と、Shift キーを押していたか true / false を渡す）
   //   visibleParts … 表示するパートの本当の番号の配列（例：[0, 2]。null なら全部表示）（ステップ12-6a）
-  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {}, visibleParts = null } = $props();
+  //   beatLines    … true なら拍の線を描く（ステップ12-7）
+  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {}, visibleParts = null, beatLines = false } = $props();
 
   // 表示するパートの本当の番号の配列（null のときは全部）（ステップ12-6a）
   let shownParts = $derived(visibleParts ?? score.parts.map((_, p) => p));
@@ -80,7 +81,7 @@
     const viewRange = range && toViewPart(range.part) >= 0 ? { ...range, part: toViewPart(range.part) } : null;
     const viewPlaying = playingNotes.filter((n) => toViewPart(n.part) >= 0).map((n) => ({ ...n, part: toViewPart(n.part) }));
     // renderScore は段の位置なども返すが、ここで使うのは当たり判定の四角だけ（ステップ9）
-    const boxes = renderScore(VF, container, viewScore, width, viewSelection, viewRange, viewPlaying).hitBoxes;
+    const boxes = renderScore(VF, container, viewScore, width, viewSelection, viewRange, viewPlaying, beatLines).hitBoxes; // beatLines：拍の線（ステップ12-7）
     // 当たり判定のパートの番号は、本当の番号に戻しておく（クリック・自動スクロールで使うため）（ステップ12-6a）
     hitBoxes = boxes.map((box) => ({ ...box, part: shownParts[box.part] }));
     followPlaying();
@@ -171,6 +172,7 @@
   // ----------------------------------------------------------
   $effect(() => {
     viewScore; // 楽譜データ・表示するパート（ステップ12-6a：score から変えた）
+    beatLines; // 拍の線の入・切（ステップ12-7）
     selection;
     range;
     playingNotes;

@@ -652,8 +652,9 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
 //   ・ふつうは、拍子の下の数字の音符1つ分（4/4 → 4分音符、2/2 → 2分音符、3/8 → 8分音符）
 //   ・6/8・9/8・12/8 のように、下が 8 で上が 6 以上の 3 の倍数のときは、付点4分音符1つ分
 //     （6/8 は「8分音符3つ」を1拍として2拍で数えるため）
+// （ステップ12-7：拍の線でも使うので、ほかのファイルから使えるようにした（export））
 // ----------------------------------------------------------
-function beatTicks(time) {
+export function beatTicks(time) {
   const unit = (16 * TICKS_PER_16TH) / time.beatType; // 拍子の下の数字の音符1つ分
   if (time.beatType === 8 && time.beats >= 6 && time.beats % 3 === 0) {
     return unit * 3; // 付点4分音符1つ分

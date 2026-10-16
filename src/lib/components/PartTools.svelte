@@ -14,7 +14,19 @@
   //   ondeletepart … 削除が押されたときに呼ぶ関数（パートの番号を渡す）
   //   hiddenParts  … 隠すパートの名札（id）の配列（ステップ12-6a）
   //   ontoggleview … 表示のチェックが押されたときに呼ぶ関数（パートの名札を渡す）（ステップ12-6a）
-  let { parts = [], selectedPart = null, onaddpart = () => {}, onmovepart = () => {}, ondeletepart = () => {}, hiddenParts = [], ontoggleview = () => {} } = $props();
+  //   beatLines      … 拍の線が入っているか（ステップ12-7）
+  //   ontogglebeats  … ［拍の線］が押されたときに呼ぶ関数（ステップ12-7）
+  let {
+    parts = [],
+    selectedPart = null,
+    onaddpart = () => {},
+    onmovepart = () => {},
+    ondeletepart = () => {},
+    hiddenParts = [],
+    ontoggleview = () => {},
+    beatLines = false,
+    ontogglebeats = () => {},
+  } = $props();
 
   // 表示しているパートの数（最後の1つはチェックを外せないようにするため）（ステップ12-6a）
   let visibleCount = $derived(parts.filter((part) => !hiddenParts.includes(part.id)).length);
@@ -30,6 +42,11 @@
     {#each INSTRUMENT_IDS as id}
       <button onclick={() => onaddpart(id)} title={`${INSTRUMENTS[id].label}のパートを一番下に足す`}> ＋{INSTRUMENTS[id].label} </button>
     {/each}
+  </div>
+
+  <!-- 拍の線（押すたびに入・切）（ステップ12-7） -->
+  <div class="group">
+    <button class:on={beatLines} onclick={() => ontogglebeats()} title="拍の頭ごとに、五線に色の線を引く（1拍目は赤、ほかは青。PDF には出ない）"> 拍の線 </button>
   </div>
 
   <!-- パートの一覧（上から楽譜と同じ順番） -->
@@ -80,6 +97,12 @@
     border-radius: 4px;
     background: #fff;
     cursor: pointer;
+  }
+  /* 入っているボタンは青（ステップ12-7） */
+  button.on {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
   }
   button:disabled {
     opacity: 0.35; /* 押せないものはうすく */
