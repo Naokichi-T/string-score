@@ -30,7 +30,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest } from "./model.js";
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -367,14 +367,17 @@ function tempoXml(score) {
 //   divisions  … 4分音符をいくつに分けるか（ステップ10-5）
 //   tupletMark … 連符の中の音なら { actual, normal, start, stop, bracket }、そうでなければ null（ステップ10-5）
 //                start … 連符の最初の音か　stop … 連符の最後の音か　bracket … 括弧を付けるか
+//   measureRest … 小節まるごとの休符か（true なら <rest measure="yes"/> にして、形 <type> は書かない）（ステップ13-3）
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function noteXml(note, accidental, tieStop, divisions, tupletMark) {
+function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false) {
   const lines = [];
   lines.push("      <note>");
 
-  // 高さ（休符なら <rest/>）
-  if (note.rest) {
+  // 高さ（休符なら <rest/>。小節まるごとの休符なら <rest measure="yes"/>（ステップ13-3））
+  if (measureRest) {
+    lines.push(`        <rest measure="yes"/>`);
+  } else if (note.rest) {
     lines.push("        <rest/>");
   } else {
     const alter = note.pitch.alter ?? 0;
@@ -398,9 +401,12 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark) {
   lines.push("        <voice>1</voice>");
 
   // 音符の形（データの名前は MusicXML と同じなので、そのまま書ける）と付点
-  lines.push(`        <type>${note.duration}</type>`);
-  for (let i = 0; i < (note.dots ?? 0); i++) {
-    lines.push("        <dot/>");
+  // 小節まるごとの休符は、形を書かない（長さ <duration> だけで決まる。ほかのアプリもこの書き方で全休符を描く）（ステップ13-3）
+  if (!measureRest) {
+    lines.push(`        <type>${note.duration}</type>`);
+    for (let i = 0; i < (note.dots ?? 0); i++) {
+      lines.push("        <dot/>");
+    }
   }
 
   // 臨時記号（楽譜に表示するもの。このアプリの表示と同じものを書く）
@@ -766,7 +772,8 @@ function partXml(score, p, divisions) {
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
       // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
       if (!note.rest && note.grace) lines.push(...graceXml(note, keyAt(score, i)));
-      lines.push(...noteXml(xmlNote, accidentals[k], tieStop, divisions, tupletMark));
+      // 小節まるごとの休符なら、その印も渡す（ステップ13-3）
+      lines.push(...noteXml(xmlNote, accidentals[k], tieStop, divisions, tupletMark, isMeasureRest(measure.notes)));
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
     });

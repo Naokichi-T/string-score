@@ -15,7 +15,7 @@
 //   render/widths.js   … 小節ごとの、音符を並べるのに要る幅を決める（ステップ13-2）
 // ==========================================================
 
-import { tempoAt, JUMP_TEXTS, rehearsalLabel } from "./model.js";
+import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -362,7 +362,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       score.parts.forEach((part, p) => {
         const measure = part.measures[i];
         const notes = measure.notes.map((note, j) => {
-          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key); // 調号は前打音の臨時記号に使う（ステップ11-8a）
+          // 調号は前打音の臨時記号に使う（ステップ11-8a）。小節まるごとの休符なら全休符で描く（ステップ13-3）
+          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes));
           // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
           if (playingKeys.has(`${p}-${i}-${j}`)) {
             staveNote.setStyle({ fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR });

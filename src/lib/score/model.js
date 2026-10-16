@@ -55,12 +55,13 @@ export const DURATIONS = {
 // 音部記号の表
 //   vf      … VexFlow で使う名前
 //   restKey … 休符を置く高さ（五線のまん中の線＝第3線にあたる音）
+//   measureRestKey … 小節まるごとの休符（全休符）を置く高さ（第4線にあたる音。全休符は第4線からぶら下げる）（ステップ13-3）
 // ----------------------------------------------------------
 export const CLEFS = {
-  treble: { vf: "treble", restKey: "b/4" }, // ト音記号
-  alto: { vf: "alto", restKey: "c/4" }, // アルト記号（ハ音記号・第3線）
-  tenor: { vf: "tenor", restKey: "a/3" }, // テノール記号（ハ音記号・第4線）
-  bass: { vf: "bass", restKey: "d/3" }, // ヘ音記号
+  treble: { vf: "treble", restKey: "b/4", measureRestKey: "d/5" }, // ト音記号
+  alto: { vf: "alto", restKey: "c/4", measureRestKey: "e/4" }, // アルト記号（ハ音記号・第3線）
+  tenor: { vf: "tenor", restKey: "a/3", measureRestKey: "c/4" }, // テノール記号（ハ音記号・第4線）
+  bass: { vf: "bass", restKey: "d/3", measureRestKey: "f/3" }, // ヘ音記号
 };
 
 // ----------------------------------------------------------
@@ -245,6 +246,18 @@ export function tempoAt(score, i) {
     if (info.tempo !== undefined) return { tempo: info.tempo, tempoText: info.tempoText ?? "" };
   }
   return { tempo: score.tempo, tempoText: score.tempoText ?? "" };
+}
+
+// ----------------------------------------------------------
+// 関数：isMeasureRest
+// その小節（1つのパートの1小節）が「小節まるごとの休符」かどうかを調べる（ステップ13-3）
+// 休符に measureRest: true の印が付いていて、しかも小節の中にその休符1つだけのときに true
+// （長さを変えたり、ほかの音が入ったりして1つではなくなったら、印が残っていても、ふつうの休符として扱う）
+//   notes … 小節の音の並び（part.measures[i].notes）
+// 戻り値：true か false
+// ----------------------------------------------------------
+export function isMeasureRest(notes) {
+  return notes.length === 1 && !!notes[0].rest && !!notes[0].measureRest;
 }
 
 // ----------------------------------------------------------

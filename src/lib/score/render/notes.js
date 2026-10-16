@@ -24,8 +24,12 @@ const ALTER_TO_VF = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 //   clef       … 今の音部記号（'treble' など）
 //   accidental … 付ける臨時記号（'#'・'b'・'n' など。付けないときは null）
 //   keySignature … 今の調号（前打音の臨時記号を決めるのに使う）（ステップ11-8a）
+//   measureRest  … 小節まるごとの休符として描くか（model.js の isMeasureRest で調べたもの）（ステップ13-3）
 // ----------------------------------------------------------
-export function createNote(VF, note, clef, accidental, keySignature = 0) {
+export function createNote(VF, note, clef, accidental, keySignature = 0, measureRest = false) {
+  // 小節まるごとの休符：拍子に関係なく、全休符を小節のまん中に描く（ステップ13-3）
+  if (measureRest) return createMeasureRest(VF, note, clef);
+
   // VexFlow での長さの書き方（例：'q'）
   let duration = DURATIONS[note.duration].vf;
   // 付点の数だけ 'd' を付ける（例：'qd' は付点4分音符）
@@ -67,6 +71,31 @@ export function createNote(VF, note, clef, accidental, keySignature = 0) {
     addGraceNote(VF, staveNote, note, clef, keySignature);
   }
 
+  return staveNote;
+}
+
+// ----------------------------------------------------------
+// 関数：createMeasureRest
+// 小節まるごとの休符を作る（ステップ13-3）
+//   ・見た目は全休符（第4線からぶら下げる）で、小節のまん中に置く（alignCenter）
+//   ・長さは、データの長さ（3拍子なら付点2分休符の長さ）にする
+//     （全休符の長さのままだと、3拍子の小節に入りきらないと VexFlow に言われてしまうため。setIntrinsicTicks で長さだけ入れ替える）
+//   note … 休符のデータ
+//   clef … 今の音部記号
+// ----------------------------------------------------------
+function createMeasureRest(VF, note, clef) {
+  // データどおりの長さの休符を仮に作って、その長さ（VexFlow のティック）を調べる
+  const duration = DURATIONS[note.duration].vf + "d".repeat(note.dots ?? 0) + "r";
+  const ticks = new VF.StaveNote({ keys: [CLEFS[clef].restKey], duration: duration, clef: CLEFS[clef].vf }).getTicks().value();
+
+  // 全休符を作って、長さだけデータどおりにする
+  const staveNote = new VF.StaveNote({
+    keys: [CLEFS[clef].measureRestKey],
+    duration: "wr",
+    clef: CLEFS[clef].vf,
+    alignCenter: true, // 小節のまん中に置く
+  });
+  staveNote.setIntrinsicTicks(ticks);
   return staveNote;
 }
 

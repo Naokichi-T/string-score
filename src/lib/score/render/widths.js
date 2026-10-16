@@ -13,6 +13,7 @@
 // ==========================================================
 
 import { createNote } from "./notes.js";
+import { isMeasureRest } from "../model.js";
 import { createTuplets, createBeams } from "./tuplets.js";
 
 // ゆとりの付け方：最低の幅 × SPACE_RATE ＋ SPACE_EXTRA
@@ -42,7 +43,9 @@ export function measureNoteWidths(VF, score, states, accidentalsList) {
     // パートごとに、この小節の音符を作って「声部（Voice）」にまとめる（描くときと同じ作り方）
     const voices = score.parts.map((part, p) => {
       const measure = part.measures[i];
-      const staveNotes = measure.notes.map((note, j) => createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key));
+      // 小節まるごとの休符は、描くときと同じく全休符で作る（ステップ13-3）
+      const measureRest = isMeasureRest(measure.notes);
+      const staveNotes = measure.notes.map((note, j) => createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, measureRest));
       createTuplets(VF, measure.notes, staveNotes); // 連符の音符は、連符にしてから声部に入れる（長さが正しくなる）
       // 連桁も作る（連桁でつながった8分音符は旗がなくなるので、そのぶん幅が狭くなる。描くときと同じ幅で計算するため）
       createBeams(VF, measure.notes, staveNotes, state.time);

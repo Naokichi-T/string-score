@@ -400,9 +400,13 @@ function readNote(noteElement, divisions) {
   if (!shape) return { note: null, ticks: ticks };
 
   // 休符（連符の中なら、連符の印も付ける）
-  if (childElement(noteElement, "rest")) {
+  const restElement = childElement(noteElement, "rest");
+  if (restElement) {
     const rest = { rest: true, duration: shape.duration, dots: shape.dots };
     if (tuplet) rest.tuplet = tuplet;
+    // 小節まるごとの休符（<rest measure="yes"/>）なら、その印を付ける（全休符で描く）（ステップ13-3）
+    // （小節の中にこの休符1つだけにならなかったときは、fitMeasure で印を外す）
+    if (restElement.getAttribute("measure") === "yes") rest.measureRest = true;
     return { note: rest, ticks: ticks };
   }
 
@@ -1109,6 +1113,14 @@ function readPart(partElement, counter, skipped) {
           continue;
         }
 
+        // 小節まるごとの休符で、このアプリで1つの休符にできない長さ（5拍子など）のときは、読まずに飛ばす（ステップ13-3）
+        // （fitMeasure で、足りないぶんを1拍ずつの休符でうめるので、小節の休符になる）
+        const restElement = childElement(element, "rest");
+        if (restElement && restElement.getAttribute("measure") === "yes" && !childElement(element, "time-modification")) {
+          const sixteenths = (Number(childText(element, "duration")) * 4) / divisions;
+          if (!TICKS_TO_DURATION[sixteenths]) continue;
+        }
+
         const { note, ticks } = readNote(element, divisions);
 
         // 前打音を、この音に付ける（休符や読めない音には付けられないので、数を知らせる）（ステップ11-8b）
@@ -1174,6 +1186,12 @@ function fitMeasure(read, time, isPickup = false) {
     const last = notes[notes.length - 1];
     if (last && last.tie) last.tie = false;
     notes.push(...restsForSpan(read.ticks, total - read.ticks, time));
+  }
+  // 小節まるごとの休符の印は、小節の中にその休符1つだけのときだけ残す（ステップ13-3）
+  if (notes.length !== 1) {
+    notes.forEach((note) => {
+      delete note.measureRest;
+    });
   }
   return { notes: notes, ok: true };
 }
