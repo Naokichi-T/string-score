@@ -116,11 +116,12 @@
     display: flex; /* 横に並べる */
     align-items: center;
     gap: 16px;
-    padding: 8px 16px;
+    padding: 6px 16px; /* ボタンを高くした分、上下の余白を少しつめた（ステップ12-8d） */
     background: #f3f4f6; /* うすいグレー */
     border-bottom: 1px solid #ddd;
   }
   .app-name {
+    white-space: nowrap; /* 文字を途中で折り返さない（ステップ12-8d） */
     font-weight: bold;
     color: #111;
     text-decoration: none;
@@ -134,6 +135,7 @@
     flex: 1; /* 残りの幅を全部使って、右側のボタンを右端に寄せる */
   }
   .tempo {
+    white-space: nowrap; /* 文字を途中で折り返さない（ステップ12-8d） */
     font-size: 14px;
     color: #333;
   }
@@ -145,6 +147,7 @@
     color: #dc2626; /* 赤 */
   }
   .save-status {
+    white-space: nowrap; /* 文字を途中で折り返さない（ステップ12-8d） */
     font-size: 12px;
     color: #6b7280; /* うすいグレーの文字 */
   }
@@ -153,14 +156,17 @@
     font-weight: bold;
   }
   button {
-    padding: 4px 10px;
+    height: 40px; /* 指で押しやすい高さ（ステップ12-8d） */
+    padding: 0 12px;
     font-size: 14px;
+    white-space: nowrap; /* 文字を途中で折り返さない */
   }
   .play {
     min-width: 72px; /* 「再生」と「停止」でボタンの幅が変わらないようにする */
   }
   select {
+    height: 40px; /* ボタンと同じ高さ（ステップ12-8d） */
     font-size: 14px;
-    padding: 3px 4px;
+    padding: 0 4px;
   }
 </style>

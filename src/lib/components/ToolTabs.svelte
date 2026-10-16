@@ -333,7 +333,9 @@
     padding: 6px 16px 0;
   }
   .tab {
-    padding: 6px 16px;
+    height: 40px; /* 指で押しやすい高さ（ステップ12-8d） */
+    padding: 0 18px;
+    white-space: nowrap; /* 「楽譜の設定」を途中で折り返さない */
     border: 1px solid #ddd;
     border-bottom: none;
     border-radius: 6px 6px 0 0; /* 上の角だけ丸くする */
