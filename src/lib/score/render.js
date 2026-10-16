@@ -14,7 +14,7 @@
 //   render/beatLines.js … 拍の線を描く（ステップ12-7）
 // ==========================================================
 
-import { tempoAt } from "./model.js";
+import { tempoAt, JUMP_TEXTS } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -42,6 +42,11 @@ const TEMPO_MARK_SPACE = 10; // テンポ変更・a tempo・rit. を同じ小節
 const GRADUAL_DASH_GAP = 6; // 「rit.」の文字と点線の間（ステップ11-6b）
 const GRADUAL_TEXTS = { rit: "rit.", accel: "accel." }; // rit.・accel. で書く文字（ステップ11-6b）
 const REPEAT_BAR_WIDTH = 14; // くり返しの小節線のために、小節に足す幅（ステップ11-7a）
+const SEGNO_GLYPH = "\uE047"; // 𝄋（Segno）の楽譜用フォントの文字（ステップ11-7c）
+const CODA_GLYPH = "\uE048"; // 𝄌（Coda）の楽譜用フォントの文字（ステップ11-7c）
+const JUMP_GLYPH_SIZE = 24; // 𝄋・𝄌 の大きさ（ステップ11-7c）
+// 𝄋・𝄌・To Coda・Fine・D.C.・D.S. のある小節で、記号が小節からはみ出さないように確保する幅のめやす（ステップ11-7c）
+const JUMP_MARK_WIDTHS = { segno: 26, coda: 26, toCoda: 90, fine: 45, jump: 105 };
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -121,6 +126,9 @@ export function renderScore(VF, container, score, width, selection = null, range
     // くり返しの小節線（点の付いた太い線）があれば、そのぶん少し広くする（ステップ11-7a）
     if (score.measures[i].repeatStart) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
     if (score.measures[i].repeatEnd) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
+    // 𝄋・𝄌・To Coda・Fine・D.C.・D.S. があれば、記号が小節に入りきる幅を確保する（ステップ11-7c）
+    const markWidth = jumpMarksWidth(score.measures[i]);
+    if (markWidth > 0) maxNotes = Math.max(maxNotes, MEASURE_BASE_WIDTH + markWidth);
     noteWidths.push(maxNotes);
 
     // 記号の幅（段の頭のときと、途中のときの2通り）
@@ -623,6 +631,9 @@ function drawEndings(context, lineEndings) {
 //   ・a tempo          … 「a tempo」
 //   ・rit.・accel.     … 「rit.」のあと、範囲の終わりの小節の終わりまで点線（段をまたぐときは、次の段の頭から続ける）
 // 同じ小節にいくつかあるときは、この順に左から並べる
+// （ステップ11-7c：D.C.・D.S. で使う印も、同じ高さに描く）
+//   ・𝄋・𝄌（小節の頭）           … テンポの指示より左（小節のいちばん左）
+//   ・To Coda・Fine・D.C.・D.S.（小節の終わり） … 小節の右端に寄せる。rit.・accel. の点線は、その手前で止める
 // 高さ：五線から少し上（音符が五線より上に出ているときは、その上）。点線は同じ段の中では同じ高さで続ける
 //   stave       … いちばん上のパートの、その小節の五線
 //   tickables   … その小節の音符（並べ終わったもの。いちばん高い所を調べる）
@@ -638,7 +649,8 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   const hasTempo = i > 0 && info.tempo !== undefined; // 途中のテンポ変更（1小節目は楽譜のいちばん上に描くので除く）
   const resets = hasTempo || !!info.aTempo; // テンポ変更・a tempo のあとは、rit.・accel. の点線を続けない
   if (resets) gradualLine = null;
-  if (!hasTempo && !info.aTempo && !info.gradual && !gradualLine) return null; // この小節には何もない
+  const hasJumpMarks = jumpMarksWidth(info) > 0; // 𝄋・𝄌・To Coda・Fine・D.C.・D.S. があるか（ステップ11-7c）
+  if (!hasTempo && !info.aTempo && !info.gradual && !gradualLine && !hasJumpMarks) return null; // この小節には何もない
 
   // 文字の下端の高さ：五線の一番上の線より TEMPO_CHANGE_RAISE だけ上
   // 音符（符尾・加線も入る）がそれより上に出ているときは、音符の上端よりさらに上
@@ -655,11 +667,20 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   // 書き始める横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
   let x = stave.getNoteStartX() - 4;
 
+  // ⓪ 𝄋・𝄌（小節の頭）（ステップ11-7c）
+  if (info.segno) x = drawJumpGlyph(context, SEGNO_GLYPH, x, y) + TEMPO_MARK_SPACE;
+  if (info.coda) x = drawJumpGlyph(context, CODA_GLYPH, x, y) + TEMPO_MARK_SPACE;
+
   // ① 途中のテンポ変更
   if (hasTempo) x = drawTempo(context, tempoAt(score, i), x, y) + TEMPO_MARK_SPACE;
 
   // ② a tempo
   if (info.aTempo) x = drawTempoWords(context, "a tempo", x, y) + TEMPO_MARK_SPACE;
+
+  // ②-2 To Coda・Fine・D.C.・D.S.（小節の右端に寄せる）（ステップ11-7c）
+  // 戻り値は書いた所の左端（何も書かなければ、小節の右端）
+  const measureEnd = stave.getX() + stave.getWidth();
+  const endMarksLeft = drawEndJumpMarks(context, info, measureEnd - 6, y);
 
   // ③ rit.・accel. の始まり：文字を書いて、そのすぐ右から点線を始める
   let dashFrom;
@@ -673,8 +694,9 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   }
 
   // ④ 点線を、この小節の終わりまで引く（範囲の終わりの小節では、小節線の少し手前まで）
-  const measureEnd = stave.getX() + stave.getWidth();
-  const dashTo = info.gradualEnd ? measureEnd - 8 : measureEnd;
+  // To Coda・Fine・D.C.・D.S. があるときは、その文字の手前で止める（ステップ11-7c）
+  let dashTo = info.gradualEnd ? measureEnd - 8 : measureEnd;
+  if (endMarksLeft < measureEnd - 6) dashTo = Math.min(dashTo, endMarksLeft - GRADUAL_DASH_GAP);
   if (dashTo > dashFrom) {
     context.save();
     context.setLineWidth(1);
@@ -689,6 +711,87 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   // 範囲の終わりなら点線はここまで。そうでなければ、次の小節へ続ける
   if (info.gradualEnd) return null;
   return { line: l, y: y, x: measureEnd };
+}
+
+// ----------------------------------------------------------
+// 関数：jumpMarksWidth
+// その小節の 𝄋・𝄌・To Coda・Fine・D.C.・D.S. を書くのに要る幅のめやすを返す（ステップ11-7c）
+// （小節の幅を決めるときと、印があるかを調べるときに使う）
+//   info … 小節の情報（score.measures[i]）
+// 戻り値：幅（ピクセル）。印が1つもなければ 0
+// ----------------------------------------------------------
+function jumpMarksWidth(info) {
+  let width = 0;
+  if (info.segno) width = width + JUMP_MARK_WIDTHS.segno;
+  if (info.coda) width = width + JUMP_MARK_WIDTHS.coda;
+  if (info.toCoda) width = width + JUMP_MARK_WIDTHS.toCoda;
+  if (info.fine) width = width + JUMP_MARK_WIDTHS.fine;
+  if (info.jump) width = width + JUMP_MARK_WIDTHS.jump;
+  return width;
+}
+
+// ----------------------------------------------------------
+// 関数：drawJumpGlyph
+// 𝄋（Segno）か 𝄌（Coda）を、楽譜用フォントで描く（ステップ11-7c）
+//   glyph … SEGNO_GLYPH か CODA_GLYPH
+//   x     … 書き始める横の位置
+//   y     … 記号の下端（ベースライン）の位置
+// 戻り値：書き終わった右端の横の位置
+// ----------------------------------------------------------
+function drawJumpGlyph(context, glyph, x, y) {
+  context.save();
+  context.setFont("Bravura", JUMP_GLYPH_SIZE);
+  context.fillText(glyph, x, y);
+  const width = context.measureText(glyph).width;
+  context.restore();
+  return x + width;
+}
+
+// ----------------------------------------------------------
+// 関数：drawEndJumpMarks
+// 小節の終わりの印（To Coda・Fine・D.C.・D.S.）を、右端に寄せて描く（ステップ11-7c）
+// 同じ小節にいくつかあるときは、左から「To Coda 𝄌」「Fine」「D.S. al Coda」の順に並べる
+//   info  … 小節の情報（score.measures[i]）
+//   right … 書き終わる右端の横の位置
+//   y     … 文字の下端（ベースライン）の位置
+// 戻り値：書いた所の左端の横の位置（何も書かなければ right）
+// ----------------------------------------------------------
+function drawEndJumpMarks(context, info, right, y) {
+  // 書くものを、左から順に並べる（{ text: 文字, glyph: 文字のあとに付ける記号 }）
+  const items = [];
+  if (info.toCoda) items.push({ text: "To Coda", glyph: CODA_GLYPH });
+  if (info.fine) items.push({ text: "Fine", glyph: null });
+  if (info.jump) items.push({ text: JUMP_TEXTS[info.jump] ?? info.jump, glyph: null });
+  if (items.length === 0) return right;
+
+  context.save();
+  // それぞれの幅を測る（文字は斜めの字、記号は楽譜用フォント）
+  const widths = items.map((item) => {
+    context.setFont("Academico", 15, "normal", "italic");
+    let width = context.measureText(item.text).width;
+    if (item.glyph) {
+      context.setFont("Bravura", JUMP_GLYPH_SIZE);
+      width = width + 4 + context.measureText(item.glyph).width; // 文字と記号の間は 4
+    }
+    return width;
+  });
+  const total = widths.reduce((sum, width) => sum + width, 0) + TEMPO_MARK_SPACE * (items.length - 1);
+
+  // 右端から全体の幅だけ左に戻った所から、順に書く
+  const left = right - total;
+  let x = left;
+  items.forEach((item, k) => {
+    context.setFont("Academico", 15, "normal", "italic");
+    context.fillText(item.text, x, y);
+    if (item.glyph) {
+      const textWidth = context.measureText(item.text).width;
+      context.setFont("Bravura", JUMP_GLYPH_SIZE);
+      context.fillText(item.glyph, x + textWidth + 4, y);
+    }
+    x = x + widths[k] + TEMPO_MARK_SPACE;
+  });
+  context.restore();
+  return left;
 }
 
 // ----------------------------------------------------------

@@ -505,6 +505,14 @@ function computeWedges(part) {
 //     例：‖: 1 2 [1. 3 :‖] [2. 4] 5 → 1 2 3 1 2 4 5
 //   ・2番かっこを弾き終わったら、1回目に戻す（その先に別のくり返しがあってもよいように）
 //   ・‖: に、戻ってきたのではなく前から進んできたときも、1回目に戻す
+// （ステップ11-7c：D.C.・D.S.・Fine・To Coda・Coda）
+//   ・D.C.・D.S. の小節を弾き終わったら、D.C. は曲の頭、D.S. は 𝄋 の小節へ戻る（戻るのは1回だけ）
+//     𝄋 がないときは、曲の頭へ戻る
+//   ・戻ったあとは、くり返し（:‖）では戻らず、かっこは2番だけ弾く（いつも2回目として数える）
+//   ・戻ったあとで、Fine の小節を弾き終わったら終わり。To Coda の小節を弾き終わったら 𝄌 の小節へ飛ぶ
+//     （𝄌 がないときは、飛ばずにそのまま進む）
+//   ・戻る前の Fine・To Coda は、何もせずにそのまま進む
+//     例：1 2 3 [𝄋 4] 5 [6 To Coda] 7 [8 D.S. al Coda] [𝄌 9] 10 → 1 2 3 4 5 6 7 8 4 5 6 9 10
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（そこから順番を作る。前の ‖: へ戻ることもある）
 //   endMeasure   … 何小節目まで鳴らすか（区間リピートのとき）。指定したときは、くり返しはたどらず、まっすぐ並べる
@@ -522,12 +530,18 @@ export function playOrder(score, startMeasure, endMeasure = null) {
   const repeated = new Set(); // もうくり返した :‖ の小節（2回目は戻らない）
   let pass = 1; // 今が何回目か（1番・2番かっこで使う）（ステップ11-7b）
   let jumpedTo = null; // :‖ で戻った先の小節（そこの ‖: では、回数を1に戻さない）
+  let jumped = false; // D.C.・D.S. で戻ったあとか（ステップ11-7c）
+  let codaJumped = false; // To Coda から 𝄌 へ飛んだあとか（2回は飛ばない）（ステップ11-7c）
+  // 𝄋・𝄌 の小節（なければ -1）（ステップ11-7c）
+  const segnoMeasure = measures.findIndex((info) => info.segno);
+  const codaMeasure = measures.findIndex((info) => info.coda);
   let i = startMeasure;
   while (i < measures.length) {
     const info = measures[i];
 
     // 前から進んできて ‖: に来た：新しいくり返しなので、1回目にする（ステップ11-7b）
-    if (info.repeatStart && i !== jumpedTo) pass = 1;
+    // （D.C.・D.S. で戻ったあとは、いつも2回目のまま）（ステップ11-7c）
+    if (info.repeatStart && i !== jumpedTo && !jumped) pass = 1;
     jumpedTo = null;
 
     // その回と番号の違うかっこ：かっこの終わりの小節まで飛ばす（ステップ11-7b）
@@ -539,7 +553,8 @@ export function playOrder(score, startMeasure, endMeasure = null) {
     }
 
     order.push(i);
-    if (info.repeatEnd && !repeated.has(i)) {
+    // くり返しの終わり：まだくり返していなければ戻る（D.C.・D.S. で戻ったあとは戻らない）
+    if (info.repeatEnd && !repeated.has(i) && !jumped) {
       repeated.add(i);
       // 戻る先を探す：前へさかのぼって ‖: を探す（別の :‖ に当たったら、そのすぐあと）
       let target = 0;
@@ -559,8 +574,28 @@ export function playOrder(score, startMeasure, endMeasure = null) {
       continue;
     }
 
+    // D.C.・D.S. で戻ったあと：Fine なら終わり、To Coda なら 𝄌 へ飛ぶ（ステップ11-7c）
+    if (jumped && info.fine) break;
+    if (jumped && info.toCoda && !codaJumped && codaMeasure >= 0) {
+      codaJumped = true;
+      i = codaMeasure;
+      continue;
+    }
+
+    // D.C.・D.S.：まだ戻っていなければ、曲の頭か 𝄋 へ戻る（ステップ11-7c）
+    if (info.jump && !jumped) {
+      jumped = true;
+      pass = 2; // 戻ったあとは、いつも2回目として数える（かっこは2番だけ）
+      const isSegno = info.jump.startsWith("ds");
+      const target = isSegno && segnoMeasure >= 0 ? segnoMeasure : 0;
+      jumpedTo = target;
+      i = target;
+      continue;
+    }
+
     // 2番かっこ（1番より後ろの番号のかっこ）を弾き終わったら、1回目に戻す（ステップ11-7b）
-    if (info.endingEnd && info.endingEnd >= 2) pass = 1;
+    // （D.C.・D.S. で戻ったあとは、2回目のまま）（ステップ11-7c）
+    if (info.endingEnd && info.endingEnd >= 2 && !jumped) pass = 1;
     i = i + 1;
   }
   return order;

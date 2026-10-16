@@ -5,8 +5,11 @@
   //   ・小節の終わりの線：ふつう・複縦線・終止線
   //   ・くり返し：くり返しの始まり（‖:）・くり返しの終わり（:‖）
   //   ・1番・2番かっこ（ステップ11-7b）
+  //   ・𝄋・𝄌・To Coda・Fine、D.C.・D.S.（ステップ11-7c）
   // 今付いているもののボタンは青くなる。くり返しのボタンは、もう一度押すと外れる
   // ==========================================================
+
+  import { JUMP_TEXTS } from "#lib/score/model.js"; // D.C.・D.S. の種類と文字（ステップ11-7c）
 
   // 親から受け取るもの
   //   current     … 選んでいる所の小節線の情報（何も選んでいないときは null）
@@ -16,7 +19,13 @@
   //   onrepeatmark … くり返しのボタンが押されたときに呼ぶ関数（"start" か "end" を渡す）
   //   （ステップ11-7b）current には ending（範囲の最初の小節から始まるかっこの番号。なければ null）も入る
   //   onending    … 1番・2番かっこのボタンが押されたときに呼ぶ関数（1 か 2 を渡す）（ステップ11-7b）
-  let { current = null, onbarline = () => {}, onrepeatmark = () => {}, onending = () => {} } = $props();
+  //   （ステップ11-7c）current には次のものも入る
+  //     segno・coda   … 範囲の最初の小節（音1つならその小節）の頭に 𝄋・𝄌 があるか
+  //     toCoda・fine  … 範囲の最後の小節（音1つならその小節）の終わりに To Coda・Fine があるか
+  //     jump          … 範囲の最後の小節の終わりの D.C.・D.S. の種類（なければ null）
+  //   onjumpmark  … 𝄋・𝄌・To Coda・Fine のボタンが押されたときに呼ぶ関数（"segno"・"coda"・"toCoda"・"fine" を渡す）（ステップ11-7c）
+  //   onjump      … D.C.・D.S. のプルダウンで選んだときに呼ぶ関数（null か "dc" などを渡す）（ステップ11-7c）
+  let { current = null, onbarline = () => {}, onrepeatmark = () => {}, onending = () => {}, onjumpmark = () => {}, onjump = () => {} } = $props();
 
   // 何も選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!current);
@@ -30,6 +39,28 @@
     { type: "double", label: "複縦線", title: "小節の終わりを、複縦線（細い線2本）にする" },
     { type: "final", label: "終止線", title: "小節の終わりを、終止線（細い線＋太い線）にする" },
   ];
+
+  // 𝄋・𝄌・To Coda・Fine のボタン（ステップ11-7c）
+  //   kind  … onjumpmark に渡すもの（小節の情報の名前と同じ）
+  //   glyph … ボタンに書く記号（楽譜用フォント。なければ null）
+  //   label … ボタンに書く名前
+  //   title … マウスを乗せたときの説明
+  const MARK_BUTTONS = [
+    { kind: "segno", glyph: "\uE047", label: "Segno", title: "𝄋（Segno）：選んでいる小節の頭に付ける。D.S. でここへ戻る（楽譜に1つだけ）" },
+    { kind: "coda", glyph: "\uE048", label: "Coda", title: "𝄌（Coda）：コーダの始まりの小節の頭に付ける。To Coda からここへ飛ぶ（楽譜に1つだけ）" },
+    { kind: "toCoda", glyph: null, label: "To Coda", title: "To Coda：選んでいる小節の終わりに付ける。D.C.・D.S. で戻ったあと、ここから 𝄌 へ飛ぶ" },
+    { kind: "fine", glyph: null, label: "Fine", title: "Fine：選んでいる小節の終わりに付ける。D.C.・D.S. で戻ったあと、ここで終わる" },
+  ];
+
+  // ----------------------------------------------------------
+  // 関数：handleJumpChange
+  // D.C.・D.S. のプルダウンで選んだとき（ステップ11-7c）
+  // 「なし」は空の文字なので、null にして渡す
+  // ----------------------------------------------------------
+  function handleJumpChange(event) {
+    const value = event.currentTarget.value;
+    onjump(value === "" ? null : value);
+  }
 
   // ----------------------------------------------------------
   // 関数：isEndActive
@@ -120,6 +151,35 @@
       </button>
     {/each}
   </div>
+
+  <!-- 𝄋・𝄌（小節の頭）と To Coda・Fine（小節の終わり）。もう一度押すと外れる（ステップ11-7c） -->
+  <div class="group">
+    <span class="label">記号</span>
+    {#each MARK_BUTTONS as button (button.kind)}
+      <button class:active={!!current?.[button.kind]} {disabled} onclick={() => onjumpmark(button.kind)} title={button.title}>
+        {#if button.glyph}
+          <span class="glyph">{button.glyph}</span>
+        {/if}
+        <span class="text">{button.label}</span>
+      </button>
+    {/each}
+  </div>
+
+  <!-- D.C.・D.S.（選んでいる小節の終わりに付ける）（ステップ11-7c） -->
+  <div class="group">
+    <span class="label">D.C.・D.S.</span>
+    <select
+      {disabled}
+      value={current?.jump ?? ""}
+      onchange={handleJumpChange}
+      title="D.C.・D.S.：選んでいる小節の終わりに付ける（範囲を選んでいるときは、範囲の最後の小節）。再生では、ここから曲の頭（D.C.）か 𝄋（D.S.）へ1回だけ戻る"
+    >
+      <option value="">なし</option>
+      {#each Object.entries(JUMP_TEXTS) as [type, text] (type)}
+        <option value={type}>{text}</option>
+      {/each}
+    </select>
+  </div>
 </div>
 
 <style>
@@ -167,8 +227,30 @@
     font-weight: bold;
     fill: currentColor;
   }
+  /* 𝄋・𝄌 の記号（楽譜用フォント）（ステップ11-7c） */
+  .glyph {
+    font-family: "Bravura"; /* 楽譜用フォント */
+    font-size: 22px;
+    line-height: 1;
+    position: relative;
+    top: 9px; /* Bravura の記号は文字の基準線より上に寄っているので、まん中に見えるよう下げる */
+  }
+  /* D.C.・D.S. のプルダウン（ほかのボタンと同じ高さ）（ステップ11-7c） */
+  select {
+    height: 40px;
+    padding: 0 6px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+  }
+  select:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
   /* 中の SVG と文字では、マウスの操作を受け取らず、下のボタンに通す */
   button svg,
+  button .glyph,
   button .text {
     pointer-events: none;
   }

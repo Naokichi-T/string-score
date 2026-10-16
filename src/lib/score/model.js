@@ -247,6 +247,17 @@ export function tempoAt(score, i) {
   return { tempo: score.tempo, tempoText: score.tempoText ?? "" };
 }
 
+// D.C.・D.S. の種類と、楽譜に書く文字（ステップ11-7c）
+// 小節の情報の jump に、この左側の名前（"dc" など）を入れる
+export const JUMP_TEXTS = {
+  dc: "D.C.", // 曲の頭へ戻る
+  dcFine: "D.C. al Fine", // 曲の頭へ戻って、Fine で終わる
+  dcCoda: "D.C. al Coda", // 曲の頭へ戻って、To Coda からコーダ（𝄌）へ飛ぶ
+  ds: "D.S.", // 𝄋（Segno）へ戻る
+  dsFine: "D.S. al Fine", // 𝄋 へ戻って、Fine で終わる
+  dsCoda: "D.S. al Coda", // 𝄋 へ戻って、To Coda からコーダ（𝄌）へ飛ぶ
+};
+
 // ----------------------------------------------------------
 // 関数：keyAt
 // i 小節目（0 から数える）の調号を返す（さかのぼって探す）

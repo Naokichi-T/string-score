@@ -1136,6 +1136,50 @@ export function toggleEnding(score, from, to, number) {
   return newScore;
 }
 
+// ----------------------------------------------------------
+// 関数：toggleJumpMark
+// i 小節目に、D.C.・D.S. で使う印を付ける・外す（ステップ11-7c）
+//   kind … "segno"（𝄋：小節の頭）・"coda"（𝄌：コーダの始まり。小節の頭）
+//           "toCoda"（To Coda：小節の終わり）・"fine"（Fine：小節の終わり）
+// もう付いていたら外す
+// 𝄋 と 𝄌 は楽譜に1つだけ：ほかの小節に付いていたら、そこからは外す（＝押した小節へ移る）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleJumpMark(score, i, kind) {
+  const newScore = cloneScore(score);
+  const info = newScore.measures[i];
+  if (info[kind]) {
+    // もう付いている：外す
+    delete info[kind];
+    return newScore;
+  }
+  // 𝄋・𝄌 は1つだけなので、ほかの小節のものを外してから付ける
+  if (kind === "segno" || kind === "coda") {
+    newScore.measures.forEach((other) => {
+      delete other[kind];
+    });
+  }
+  info[kind] = true;
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：setJump
+// i 小節目の終わりに、D.C.・D.S. を付ける（ステップ11-7c）
+//   type … null（なし）・"dc"・"dcFine"・"dcCoda"・"ds"・"dsFine"・"dsCoda"（種類は model.js の JUMP_TEXTS）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function setJump(score, i, type) {
+  const newScore = cloneScore(score);
+  const info = newScore.measures[i];
+  if (type) {
+    info.jump = type;
+  } else {
+    delete info.jump;
+  }
+  return newScore;
+}
+
 // ==========================================================
 // ここから下は、小節を足す・消す関数（ステップ5-2）
 // ==========================================================

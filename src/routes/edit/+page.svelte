@@ -69,6 +69,8 @@
     toggleRepeatStart,
     toggleRepeatEnd,
     toggleEnding,
+    toggleJumpMark,
+    setJump,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -1291,6 +1293,12 @@
           repeatEnd: !!score.measures[barlineEndMeasure].repeatEnd,
           repeatStart: !!score.measures[barlineStartMeasure].repeatStart,
           ending: score.measures[barlineStartMeasure].ending ?? null, // 範囲の最初の小節から始まるかっこの番号（ステップ11-7b）
+          // 𝄋・𝄌 は範囲の最初の小節の頭、To Coda・Fine・D.C.・D.S. は範囲の最後の小節の終わり（ステップ11-7c）
+          segno: !!score.measures[barlineStartMeasure].segno,
+          coda: !!score.measures[barlineStartMeasure].coda,
+          toCoda: !!score.measures[barlineEndMeasure].toCoda,
+          fine: !!score.measures[barlineEndMeasure].fine,
+          jump: score.measures[barlineEndMeasure].jump ?? null,
         },
   );
 
@@ -1334,6 +1342,33 @@
     message = "";
     const end = rangeEnd;
     commit(toggleEnding(score, barlineStartMeasure, barlineEndMeasure, number));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleJumpMark
+  // 「小節線」タブの［Segno］［Coda］［To Coda］［Fine］が押されたとき：付ける・外す（ステップ11-7c）
+  //   kind … "segno"・"coda"（範囲の最初の小節の頭に）か "toCoda"・"fine"（範囲の最後の小節の終わりに）
+  // ----------------------------------------------------------
+  function handleJumpMark(kind) {
+    if (barlineEndMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    const measure = kind === "segno" || kind === "coda" ? barlineStartMeasure : barlineEndMeasure;
+    commit(toggleJumpMark(score, measure, kind));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleJump
+  // 「小節線」タブの D.C.・D.S. のプルダウンで選んだとき：範囲の最後の小節の終わりに付ける（ステップ11-7c）
+  //   type … null（なし）・"dc"・"dcFine"・"dcCoda"・"ds"・"dsFine"・"dsCoda"
+  // ----------------------------------------------------------
+  function handleJump(type) {
+    if (barlineEndMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    commit(setJump(score, barlineEndMeasure, type));
     rangeEnd = end;
   }
 
@@ -1804,6 +1839,8 @@
       onbarline={handleBarline}
       onrepeatmark={handleRepeatMark}
       onending={handleEnding}
+      onjumpmark={handleJumpMark}
+      onjump={handleJump}
       onkey={handleKeySignature}
       {currentClef}
       onclef={handleClef}
