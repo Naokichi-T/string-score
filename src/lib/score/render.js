@@ -12,6 +12,7 @@
 //   render/spanners.js … スラー・松葉を描く
 //   render/spacing.js  … パートの間・段の間を中身に合わせて決める（パートの間の自動調整）
 //   render/beatLines.js … 拍の線を描く（ステップ12-7）
+//   render/widths.js   … 小節ごとの、音符を並べるのに要る幅を決める（ステップ13-2）
 // ==========================================================
 
 import { tempoAt, JUMP_TEXTS, rehearsalLabel } from "./model.js";
@@ -26,6 +27,7 @@ import { measureExtents, computePositions } from "./render/spacing.js";
 import { isInRange } from "./selection.js";
 import { createTuplets, createBeams, placeTuplets } from "./render/tuplets.js";
 import { drawBeatLines } from "./render/beatLines.js";
+import { measureNoteWidths } from "./render/widths.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -49,15 +51,18 @@ const JUMP_GLYPH_SIZE = 24; // 𝄋・𝄌 の大きさ（ステップ11-7c）
 const JUMP_MARK_WIDTHS = { segno: 26, coda: 26, toCoda: 90, fine: 45, jump: 105, rehearsal: 30 };
 const REHEARSAL_PADDING = 4; // 練習番号の文字と、まわりの四角のすき間（ステップ11-7d）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
-const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
-const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
-const GRACE_WIDTH = 18; // 前打音1つあたりに足す幅（ステップ11-8a）
+// （ステップ13-2：音符1つ・臨時記号1つ・前打音1つあたりに決まった幅を足す決め方はやめて、render/widths.js で決める）
 const MIN_WIDTH = 600; // 楽譜の最低限の幅（これより狭い画面でも、この幅で描く）
 const NOTE_END_PADDING = 22; // 小節の最後の音符と、小節線の間に空けるすき間
 
 // 選択中の音符の色（青）と、範囲選択の中の音符の色（明るい青）
 const SELECTED_COLOR = "#2563eb";
 const RANGE_COLOR = "#60a5fa";
+
+// 段の頭の小節番号（2段目から、いちばん上のパートの五線の左上に書く）（ステップ13-2）
+const MEASURE_NUMBER_SIZE = 12; // 文字の大きさ
+const MEASURE_NUMBER_RAISE = 22; // 文字の下端を、五線の一番上の線からどれだけ上にするか（括弧の上の折り返しより上）
+const MEASURE_NUMBER_SHIFT = 4; // 文字の左端を、五線の左端からどれだけ右にするか
 
 // 再生中に鳴っている音符の色（緑）（ステップ6-2）
 const PLAYING_COLOR = "#16a34a";
@@ -78,6 +83,9 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   range     … 範囲選択 { part, start, end }（範囲を選んでいなければ null）
 //   playingNotes … 再生中に鳴っている音符の場所の一覧 [{ part, measure, note }, ...]（ステップ6-2）
 //   beatLines … true なら拍の線を描く（ステップ12-7）
+//   options   … 見た目の細かい指定（PDF 出力で使う。省略したら画面と同じ）（ステップ13-2）
+//                 titleSize … タイトルの文字の大きさ（省略したら 24）
+//                 titleBold … タイトルを太字にするか（省略したら true）
 // 戻り値：{ hitBoxes, lineTops, lineBottoms, totalHeight }
 //   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
 //                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
@@ -86,7 +94,7 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   lineBottoms … 段ごとの下端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
 //   totalHeight … 楽譜全体の高さ（ステップ9）
 // ----------------------------------------------------------
-export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = [], beatLines = false) {
+export function renderScore(VF, container, score, width, selection = null, range = null, playingNotes = [], beatLines = false, options = {}) {
   // 鳴っている音符を「パート-小節-番号」の文字にして、すぐに探せるようにしておく
   const playingKeys = new Set(playingNotes.map((n) => `${n.part}-${n.measure}-${n.note}`));
 
@@ -114,18 +122,13 @@ export function renderScore(VF, container, score, width, selection = null, range
 
   // ----- 3. 小節ごとに必要な幅を計算する -----
   const noteWidths = []; // 音符のための幅（全パートの中で一番広いもの）
+  const noteAreaWidths = measureNoteWidths(VF, score, states, accidentalsList); // 音符を並べるのに要る幅（ステップ13-2）
   const startWidths = []; // 段の頭に来たときの記号の幅
   const middleWidths = []; // 段の途中に来たときの記号の幅
   for (let i = 0; i < measureCount; i++) {
-    // 音符と臨時記号の幅
-    let maxNotes = 0;
-    for (let p = 0; p < partCount; p++) {
-      const notes = score.parts[p].measures[i].notes;
-      const accCount = accidentalsList[p][i].filter((a) => a !== null).length;
-      const graceCount = notes.filter((n) => !n.rest && n.grace).length; // 前打音の数（ステップ11-8a）
-      const w = MEASURE_BASE_WIDTH + notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH + graceCount * GRACE_WIDTH;
-      if (w > maxNotes) maxNotes = w;
-    }
+    // 音符を並べるのに要る幅（VexFlow に計算させたもの）＋ 小節の終わりのすき間（ステップ13-2）
+    // 全パートの音符を縦にそろえたときの幅なので、パートごとに比べる必要はない
+    let maxNotes = Math.max(MEASURE_BASE_WIDTH, noteAreaWidths[i] + NOTE_END_PADDING);
     // くり返しの小節線（点の付いた太い線）があれば、そのぶん少し広くする（ステップ11-7a）
     if (score.measures[i].repeatStart) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
     if (score.measures[i].repeatEnd) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
@@ -191,7 +194,8 @@ export function renderScore(VF, container, score, width, selection = null, range
   // ----- 8. タイトルと作曲者を描く -----
   context.save();
   if (score.title) {
-    context.setFont("Academico", 24, "bold");
+    // 大きさと太さは options で変えられる（PDF では大きく、太字にしない）（ステップ13-2）
+    context.setFont("Academico", options.titleSize ?? 24, options.titleBold === false ? "normal" : "bold");
     const titleWidth = context.measureText(score.title).width;
     context.fillText(score.title, (totalWidth - titleWidth) / 2, 40); // 中央
   }
@@ -290,6 +294,13 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
     // この段の、テンポの指示を描く小節の一覧（かっこを描いてから描くので、ためておく）（ステップ11-7b）
     // （かっこの小節では、テンポの指示をかっこより上に書くため、かっこの高さが決まってから描く）
     const tempoQueue = [];
+
+    // 2段目からは、段の頭の小節番号を書く（ステップ13-2）
+    // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段と重ならないように間があく）
+    if (l > 0) {
+      const topY = staveYs[l][0]; // いちばん上のパートの五線を置く高さ
+      drawMeasureNumber(VF, context, line.measures[0] + 1, otherLeft, topY);
+    }
 
     line.measures.forEach((i, m) => {
       const state = states[i];
@@ -516,6 +527,22 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   drawSpanners(VF, context, allNotes, lineBounds);
 
   return allNotes;
+}
+
+// ----------------------------------------------------------
+// 関数：drawMeasureNumber
+// 段の頭の小節番号を、いちばん上のパートの五線の左上に、小さな斜めの字で書く（ステップ13-2）
+//   number … 小節番号（1 から数えたもの）
+//   x      … 書き始める横の位置（段の五線の左端）
+//   staveY … いちばん上のパートの五線を置く高さ（Stave の y）
+// ----------------------------------------------------------
+function drawMeasureNumber(VF, context, number, x, staveY) {
+  // 五線の一番上の線の高さは、五線を置く高さから少し下（VexFlow の決まり）なので、仮の五線で調べる
+  const lineTop = new VF.Stave(0, staveY, 10).getYForLine(0);
+  context.save();
+  context.setFont("Academico", MEASURE_NUMBER_SIZE, "normal", "italic");
+  context.fillText(String(number), x + MEASURE_NUMBER_SHIFT, lineTop - MEASURE_NUMBER_RAISE);
+  context.restore();
 }
 
 // 1番・2番かっこの見た目の設定（ステップ11-7b）

@@ -7,6 +7,7 @@
   //   ① 紙（A4縦）の幅に合わせて、楽譜を描き直す（選択の青・再生中の緑は付けない）
   //   ② 段の上端・下端を使って、段の途中で切れないようにページに分ける
   //   ③ ページごとに、描いた楽譜の「その範囲だけ」を見せる絵を作る（SVG の viewBox で切り出す）
+  //      （ステップ13-2：段ごとに1枚ずつ切り出して、最後のページ以外は、段をページの下まで均等に広げる）
   //   ④ 印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）
   //   ⑤ 印刷の画面が閉じたら、親に知らせる（onclose）→ 親がこの部品を消す
   //
@@ -34,14 +35,21 @@
   // 紙の設定
   // CSS では 1mm ＝ 96 ÷ 25.4 ピクセル（約 3.78px）
   // ----------------------------------------------------------
+  // （ステップ13-2：参考の楽譜（五線の高さ 7mm・左右の余白 12〜14mm）に合わせて、大きさと余白を決め直した）
   const MM = 96 / 25.4; // 1mm が何ピクセルか
-  const PAGE_MARGIN_MM = 15; // 紙の上・左・右の余白（mm）
-  const PAGE_BOTTOM_MM = 20; // 紙の下の余白（mm）（ページ番号を書く場所を含む）
-  const CONTENT_WIDTH = (210 - PAGE_MARGIN_MM * 2) * MM; // 楽譜を置ける幅（A4 の幅 210mm から左右の余白を引く）
-  const CONTENT_HEIGHT = (297 - PAGE_MARGIN_MM - PAGE_BOTTOM_MM) * MM; // 楽譜を置ける高さ（A4 の高さ 297mm から上下の余白を引く）
-  const SCALE = 0.75; // 楽譜の大きさ（画面の 75%）
+  const PAGE_TOP_MM = 15; // 紙の上の余白（mm）
+  const PAGE_LEFT_MM = 10; // 紙の左の余白（mm）（楽譜の左の余白 10px を足すと、だいたい 12mm）
+  const PAGE_RIGHT_MM = 12; // 紙の右の余白（mm）（楽譜の右の余白 10px を足すと、だいたい 14mm）
+  const PAGE_BOTTOM_MM = 25; // 紙の下の余白（mm）（ページ番号を書く場所を含む）
+  const CONTENT_WIDTH = (210 - PAGE_LEFT_MM - PAGE_RIGHT_MM) * MM; // 楽譜を置ける幅（A4 の幅 210mm から左右の余白を引く）
+  const CONTENT_HEIGHT = (297 - PAGE_TOP_MM - PAGE_BOTTOM_MM) * MM; // 楽譜を置ける高さ（A4 の高さ 297mm から上下の余白を引く）
+  // 楽譜の大きさ：五線の高さ（画面では 40px）が、紙の上で 7mm になるようにする（約 66%）
+  const STAFF_HEIGHT_MM = 7;
+  const SCALE = (STAFF_HEIGHT_MM * MM) / 40;
+  const TITLE_SIZE = 33; // タイトルの文字の大きさ（縮める前。紙の上で、参考と同じ高さ約 5.7mm になる）
 
-  // ページの一覧（それぞれ、そのページに出す SVG の要素）
+  // ページの一覧（ステップ13-2：段ごとに切り出す形にした）
+  //   { slices: そのページに出す段ごとの SVG の要素の配列, stretch: 段をページの下まで広げるか }
   let pages = $state.raw([]);
 
   // ----------------------------------------------------------
@@ -51,7 +59,7 @@
   //   lineBottoms  … 段ごとの下端の高さ
   //   totalHeight  … 楽譜全体の高さ
   //   pageHeight   … 1ページに入る高さ（楽譜の大きさに直したもの）
-  // 戻り値：[{ top, bottom }, ...]（ページごとの、楽譜の中の上端と下端の高さ）
+  // 戻り値：[{ top, bottom, lines }, ...]（ページごとの、楽譜の中の上端と下端の高さと、入る段の番号の配列）（lines はステップ13-2）
   // ・1ページ目はいちばん上（タイトル）から始める
   // ・次の段がページに入りきらなければ、その段から次のページにする（段の途中では切らない）
   // ・1つの段だけでページに入りきらないときは、その段だけでページにする（はみ出した所は切れる）
@@ -64,14 +72,42 @@
     for (let l = 0; l < lineTops.length; l++) {
       // この段の下端までが今のページに入らず、今のページにもう段があるなら、ここで区切る
       if (lineBottoms[l] - pageTop > pageHeight && l > firstLine) {
-        result.push({ top: pageTop, bottom: lineBottoms[l - 1] });
+        result.push({ top: pageTop, bottom: lineBottoms[l - 1], lines: range(firstLine, l - 1) });
         pageTop = lineTops[l];
         firstLine = l;
       }
     }
     // 最後のページは、楽譜の下の端まで
-    result.push({ top: pageTop, bottom: totalHeight });
+    result.push({ top: pageTop, bottom: totalHeight, lines: range(firstLine, lineTops.length - 1) });
     return result;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：range
+  // from から to までの数の配列を作る（例：range(2, 4) → [2, 3, 4]）（ステップ13-2）
+  // ----------------------------------------------------------
+  function range(from, to) {
+    const list = [];
+    for (let n = from; n <= to; n++) list.push(n);
+    return list;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：pageSlices
+  // 1ページ分を、段ごとの「切り出す範囲」に分ける（ステップ13-2）
+  // 段の間のすき間は、あとで CSS で広げるので、ここでは段だけを切り出す
+  //   ・ページの最初の段は、ページの上端から（1ページ目ならタイトル・テンポも入る）
+  //   ・最後のページの最後の段は、楽譜の下の端まで
+  //   page        … splitPages で作った1ページ分 { top, bottom, lines }
+  //   lineTops    … 段ごとの上端の高さ
+  //   lineBottoms … 段ごとの下端の高さ
+  // 戻り値：[{ top, bottom }, ...]（段ごとの、楽譜の中の上端と下端の高さ）
+  // ----------------------------------------------------------
+  function pageSlices(page, lineTops, lineBottoms) {
+    return page.lines.map((l, k) => ({
+      top: k === 0 ? page.top : lineTops[l],
+      bottom: k === page.lines.length - 1 ? page.bottom : lineBottoms[l],
+    }));
   }
 
   // ----------------------------------------------------------
@@ -82,7 +118,8 @@
   //   top    … 見せる範囲の上端
   //   bottom … 見せる範囲の下端
   // viewBox：SVG の中の「どこからどこまで」を見せるかを決める（x y 幅 高さ）
-  // width・height：紙の上での大きさ（ここを 75% にすると、中身も 75% に縮む）
+  // width・height：紙の上での大きさ（ここを SCALE 倍にすると、中身も SCALE 倍に縮む）
+  // （ステップ13-2：1ページ分ではなく、1つの段の分を切り出すのにも使う）
   // ----------------------------------------------------------
   function makePageSvg(svg, width, top, bottom) {
     const copy = svg.cloneNode(true); // 中身ごと写す
@@ -117,13 +154,14 @@
       const VF = (await import("vexflow")).default;
       await document.fonts.ready;
 
-      // ① 紙の幅に合わせて描く（楽譜の大きさのままの幅 ＝ 紙の幅 ÷ 75%）
+      // ① 紙の幅に合わせて描く（楽譜の大きさのままの幅 ＝ 紙の幅 ÷ 縮める割合）
       const width = CONTENT_WIDTH / SCALE;
       const draw = document.createElement("div");
       draw.style.position = "absolute";
       draw.style.left = "-100000px";
       document.body.appendChild(draw);
-      const result = renderScore(VF, draw, printScore, width); // 表示しているパートだけ（ステップ12-6b）
+      // 表示しているパートだけ（ステップ12-6b）。タイトルは大きく、太字にしない（ステップ13-2）
+      const result = renderScore(VF, draw, printScore, width, null, null, [], false, { titleSize: TITLE_SIZE, titleBold: false });
       const svg = draw.querySelector("svg");
       // 幅は renderScore が決めたもの（最低限の幅より狭いときは広がる）を使う
       const svgWidth = Number(svg.getAttribute("width"));
@@ -131,8 +169,12 @@
       // ② ページに分ける（1ページの高さも、楽譜の大きさに直して比べる）
       const ranges = splitPages(result.lineTops, result.lineBottoms, result.totalHeight, CONTENT_HEIGHT / SCALE);
 
-      // ③ ページごとの SVG を作る
-      pages = ranges.map((range) => makePageSvg(svg, svgWidth, range.top, range.bottom));
+      // ③ ページごとに、段ごとの SVG を作る（ステップ13-2）
+      //    最後のページ以外で、段が2つ以上あれば、段をページの下まで均等に広げる
+      pages = ranges.map((page, k) => ({
+        slices: pageSlices(page, result.lineTops, result.lineBottoms).map((slice) => makePageSvg(svg, svgWidth, slice.top, slice.bottom)),
+        stretch: k < ranges.length - 1 && page.lines.length > 1,
+      }));
       draw.remove(); // 描いたもとの楽譜は、もういらない
 
       // ④ 画面にページが入るのを待ってから、印刷の画面を開く
@@ -149,12 +191,17 @@
 
 <!-- 印刷用のページ（画面では見えない場所に置き、印刷のときだけ出す） -->
 <div class="print-root">
-  {#each pages as pageSvg, k}
-    <div class="page">
-      <div class="page-body" use:appendNode={pageSvg}></div>
+  {#each pages as page, k}
+    <div class="page" style:padding={`${PAGE_TOP_MM}mm ${PAGE_RIGHT_MM}mm 0 ${PAGE_LEFT_MM}mm`}>
+      <!-- 段ごとの SVG を縦に並べる。stretch のときは、段の間を均等に広げてページの下までうめる（ステップ13-2） -->
+      <div class="page-body" class:stretch={page.stretch} style:height={`${297 - PAGE_TOP_MM - PAGE_BOTTOM_MM}mm`}>
+        {#each page.slices as slice}
+          <div use:appendNode={slice}></div>
+        {/each}
+      </div>
       <!-- パート名（一部のパートだけを印刷するとき、1ページ目の左上。作曲者と同じ高さ）（ステップ12-6b） -->
       {#if k === 0 && partLabel}
-        <div class="part-label">{partLabel}</div>
+        <div class="part-label" style:top={`calc(${PAGE_TOP_MM}mm + ${56 * SCALE}px)`} style:left={`calc(${PAGE_LEFT_MM}mm + ${10 * SCALE}px)`}>{partLabel}</div>
       {/if}
       <!-- ページ番号（2ページ目から） -->
       {#if k > 0}
@@ -183,7 +230,7 @@
     position: relative; /* ページ番号を、この箱を基準に置く */
     width: 210mm;
     height: 296mm; /* 297mm ちょうどだと、計算の誤差で白いページが増えることがあるので少し小さく */
-    padding: 15mm 15mm 0;
+    /* 余白（padding）は、script の PAGE_TOP_MM などから style で決める（ステップ13-2） */
     box-sizing: border-box;
     overflow: hidden; /* はみ出した所は切る */
     break-after: page; /* このあとでページを変える */
@@ -194,12 +241,20 @@
   .page-body :global(svg) {
     display: block; /* SVG の下にすき間ができないようにする */
   }
+  /* 段を縦に並べる。ふつうは上から詰める（ステップ13-2） */
+  .page-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+  /* 段をページの下まで均等に広げる：最初の段は上、最後の段は下にそろえ、あいだを同じだけあける（ステップ13-2） */
+  .page-body.stretch {
+    justify-content: space-between;
+  }
   /* パート名：楽譜の作曲者（右寄せ）と同じ高さに、左寄せで書く（ステップ12-6b）
-     作曲者の文字の上端は、楽譜の上から約 56px。それを 75% に縮めて約 42px */
+     作曲者の文字の上端は、楽譜の上から約 56px。位置（top・left）は、縮める割合に合わせて style で決める（ステップ13-2） */
   .part-label {
     position: absolute;
-    top: calc(15mm + 42px);
-    left: calc(15mm + 8px); /* 楽譜の左の余白（10px）を 75% にした分 */
     font-family: Academico, serif;
     font-size: 13px; /* 楽譜の作曲者の文字と同じくらいに見える大きさ */
   }
