@@ -63,6 +63,34 @@ const SOUNDFONT_NAMES = { violin: "violin", viola: "viola", cello: "cello" };
 // 鍵盤を押したときの音の強さ（0〜127）
 const KEY_VELOCITY = 90;
 
+// ----------------------------------------------------------
+// 音の種類ごとの音量合わせ（ステップ13-5）
+// 録音のセットによって、録音そのものの大きさが違う。楽器の音B（MusyngKite）は楽器の音A（FluidR3_GM）より小さい
+// 録音を1つずつ取り出して、耳に聞こえる大きさ（LUFS）を測り、楽器の音A に合わせるために足す量（dB）を決めた
+//   測った値（強さ 100 のとき。楽器の音A → 楽器の音B）
+//     バイオリン −21.5 → −30.4、ビオラ −22.4 → −28.9、チェロ −23.3 → −25.5、ピチカート −22.5 → −34.4
+// 楽器の音A は合わせる基準なので、足す量は 0
+// ----------------------------------------------------------
+const KIT_GAIN_DB = {
+  FluidR3_GM: {},
+  MusyngKite: { violin: 8.9, viola: 6.5, cello: 2.2, pizz: 11.9 },
+};
+
+// smplr の Soundfont が、もともと音量にかけている倍率（何も指定しないと 5 倍）
+const SOUNDFONT_EXTRA_GAIN = 5;
+
+// ----------------------------------------------------------
+// 関数：extraGainFor
+// 録音のセットと楽器から、smplr の Soundfont に渡す音量の倍率（extraGain）を決める（ステップ13-5）
+//   kit … 録音のセットの名前（"FluidR3_GM" か "MusyngKite"）
+//   key … 楽器（"violin"・"viola"・"cello"・"pizz"）
+// 戻り値：倍率（dB を倍率に直して、もとの 5 倍にかけたもの）
+// ----------------------------------------------------------
+function extraGainFor(kit, key) {
+  const db = KIT_GAIN_DB[kit]?.[key] ?? 0;
+  return SOUNDFONT_EXTRA_GAIN * Math.pow(10, db / 20);
+}
+
 // 楽器の音で、次の音とつなげない音（ふつうの音・スタッカート）の鳴らし方（ステップ6-3a）
 // 楽器の音は、止めたあと少しずつ小さくなる「余韻」があり、そのままだと次の音まで残ってつながって聞こえる
 // （smplr の余韻は、何も指定しないと 0.3 秒）
@@ -156,6 +184,7 @@ export function loadInstruments(type = "instrument") {
       const options = {
         instrument: name,
         kit: kit, // 録音のセット（"FluidR3_GM" か "MusyngKite"。音の感じが違う）
+        extraGain: extraGainFor(kit, key), // 音の種類ごとの音量合わせ（ステップ13-5）
         // くり返しの情報を読み込む（録音より長い音を、録音の一部をくり返してのばすため）
         // ・録音はどの音も 3.1 秒しかないので、読み込まないと、それより長い音が途中で消える
         loadLoopData: true,
@@ -175,6 +204,7 @@ export function loadInstruments(type = "instrument") {
     const pizzInstrument = Soundfont(ctx, {
       instrument: PIZZ_SOUNDFONT_NAME,
       kit: kit,
+      extraGain: extraGainFor(kit, "pizz"), // 音の種類ごとの音量合わせ（ステップ13-5）
       loadLoopData: false,
     });
     loaded.pizz = pizzInstrument;
@@ -234,7 +264,10 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluc
   const end = pluck ? start + Math.min(duration, PIZZ_SYNTH_DECAY) : start + duration;
 
   // 音の大きさ（強さ 100 のときに 0.15。強さに合わせて大きく・小さくする）
-  const volume = 0.15 * (velocity / 100);
+  // （ステップ13-5：強さの「2乗」に合わせるようにした。楽器の音（smplr）は強さの2乗で大きさを決めるので、
+  //   前の「強さに比例」のままだと、mf・p などで電子音だけ大きく聞こえていたため。
+  //   強さ 100 のときの大きさは、測ると楽器の音A とほぼ同じ（どちらも約 −22 LUFS）なので、0.15 のまま）
+  const volume = 0.15 * Math.pow(velocity / 100, 2);
 
   // 鳴り始めと鳴り終わりを少しずつ変える時間（短い音でも、合わせて長さを超えないようにする）
   const attack = Math.min(0.02, duration / 3);
@@ -302,7 +335,7 @@ export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = f
   const instruments = currentInstruments();
   // 電子音を選んでいるとき・読み込みが終わっていないときは、電子音で鳴らす
   if (!instruments) {
-    playSynth(pitch, duration, null, 100, pizz);
+    playSynth(pitch, duration, null, KEY_VELOCITY, pizz); // 楽器の音と同じ強さで鳴らす（ステップ13-5：前は 100）
     return;
   }
   const ctx = resumeAudio();
