@@ -63,6 +63,8 @@
     canGlissando,
     setTempoChange,
     removeTempoChange,
+    toggleGradual,
+    toggleATempo,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -1239,6 +1241,37 @@
     rangeEnd = end;
   }
 
+  // 「小節」タブの rit.・accel.・a tempo のボタンを青くするための情報（ステップ11-6b）
+  //   { gradual: その小節から始まる rit.・accel.（なければ null）, aTempo: a tempo が付いているか }（何も選んでいなければ null）
+  let currentGradual = $derived(tempoMeasure === null ? null : { gradual: score.measures[tempoMeasure].gradual ?? null, aTempo: !!score.measures[tempoMeasure].aTempo });
+
+  // ----------------------------------------------------------
+  // 関数：handleGradual
+  // 「小節」タブの［rit.］［accel.］が押されたとき（ステップ11-6b）
+  //   type … "rit" か "accel"
+  // 範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける（同じものが始まっている小節なら外す）
+  // ----------------------------------------------------------
+  function handleGradual(type) {
+    if (tempoMeasure === null) return;
+    message = "";
+    const to = range ? range.end.measure : tempoMeasure; // 範囲の終わりの小節
+    const end = rangeEnd;
+    commit(toggleGradual(score, tempoMeasure, to, type));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleATempo
+  // 「小節」タブの［a tempo］が押されたとき：選んでいる小節の頭に付ける・外す（ステップ11-6b）
+  // ----------------------------------------------------------
+  function handleATempo() {
+    if (tempoMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    commit(toggleATempo(score, tempoMeasure));
+    rangeEnd = end;
+  }
+
   // 選んでいるパート・小節の音部記号（「小節」タブのボタンを青くするのに使う。何も選んでいないときは null）
   let currentClef = $derived(selection ? clefAt(score.parts[selection.part], selection.measure) : null);
 
@@ -1699,6 +1732,9 @@
       {currentTempo}
       ontempo={handleTempoChange}
       onremovetempo={handleTempoRemove}
+      {currentGradual}
+      ongradual={handleGradual}
+      onatempo={handleATempo}
       onkey={handleKeySignature}
       {currentClef}
       onclef={handleClef}

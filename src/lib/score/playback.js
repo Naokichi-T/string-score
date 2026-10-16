@@ -240,18 +240,20 @@ function ornamentPieces(event) {
       parts.push({ pitch: event.pitch, length: isLast ? total - k * event.tremoloStep : event.tremoloStep });
     }
   } else if (event.ornament === "trill") {
-    const count = Math.max(1, Math.floor(total / TRILL_STEP)); // かけらの数
+    // 1回分の長さ：32分音符（その所のテンポに合わせて伸び縮みさせる）（ステップ11-6b）
+    const trillStep = TRILL_STEP * (event.tempoFactor ?? 1);
+    const count = Math.max(1, Math.floor(total / trillStep)); // かけらの数
     for (let k = 0; k < count; k++) {
       const isLast = k === count - 1;
       // 最後から数えて偶数番目（最後・最後から3つ目…）が主の音
       const isMain = (count - 1 - k) % 2 === 0;
       // 最後のかけらは、残りの長さを全部鳴らす
-      parts.push({ pitch: isMain ? event.pitch : event.upper, length: isLast ? total - k * TRILL_STEP : TRILL_STEP });
+      parts.push({ pitch: isMain ? event.pitch : event.upper, length: isLast ? total - k * trillStep : trillStep });
     }
   } else {
     const quick = ornamentPitches(event);
-    // 1つ分の長さ：32分音符。入りきらないときは「すばやい音＋最後の主の音」で等分する
-    const step = Math.min(TRILL_STEP, total / (quick.length + 1));
+    // 1つ分の長さ：32分音符（その所のテンポに合わせる）（ステップ11-6b）。入りきらないときは「すばやい音＋最後の主の音」で等分する
+    const step = Math.min(TRILL_STEP * (event.tempoFactor ?? 1), total / (quick.length + 1));
     quick.forEach((pitch) => parts.push({ pitch: pitch, length: step }));
     parts.push({ pitch: event.pitch, length: total - step * quick.length }); // 残りは主の音
   }
@@ -491,39 +493,93 @@ function computeWedges(part) {
   return wedges;
 }
 
+// rit.・accel. で、範囲の終わりまでに何倍の速さにするか（ステップ11-6b）
+const RIT_RATE = 0.7; // rit.：元の 7割の速さまで遅くする
+const ACCEL_RATE = 1.3; // accel.：元の 1.3倍の速さまで速くする
+
+// テンポの倍率を決める細かさ：1小節をこの数に分けて、分けた所ごとに倍率を決める（ステップ11-6b）
+// （rit.・accel. で、小節の中でもなめらかに速さが変わるようにするため）
+const WARP_STEPS = 16;
+
 // ----------------------------------------------------------
 // 関数：makeTempoWarp
 // 途中でテンポが変わる楽譜のために、「ティックの数を伸び縮みさせる」しくみを作る（ステップ11-6a）
 // 再生では、1ティックが何秒かを1小節目のテンポ（score.tempo）で決めたまま変えない。
-// そのかわり、テンポの違う小節では、ティックの数を「1小節目のテンポ ÷ その小節のテンポ」倍にして並べ直す
+// そのかわり、テンポの違う所では、ティックの数を「1小節目のテンポ ÷ その所のテンポ」倍にして並べ直す
 //   例：1小節目 ♩＝120、3小節目から ♩＝60 → 3小節目からは2倍のティックにする（＝半分の速さで鳴る）
+// （ステップ11-6b：rit.・accel.・a tempo も入れた。1小節を WARP_STEPS に分けて、分けた所ごとに速さを決める）
+//   ・rit.・accel. の範囲：範囲の頭の速さから、範囲の終わりで RIT_RATE・ACCEL_RATE 倍まで、だんだん変える
+//   ・範囲のあと：その速さのまま（a tempo かテンポ変更が来るまで）
+//   ・a tempo・テンポ変更：その小節のテンポ（tempoAt と同じもの）に戻る
 //   score        … 楽譜データ
 //   startMeasure … 再生を始める小節（ここを 0 ティックとして数える）
 //   lastMeasure  … 再生する最後の小節
 // 戻り値：{ at, factorAt }
 //   at(tick)             … 伸び縮みさせる前の時刻（ティック）を、伸び縮みさせたあとの時刻にする
-//   factorAt(tick, left) … その時刻の小節の倍率（left が true なら、小節のちょうど頭では前の小節の倍率）
+//   factorAt(tick, left) … その時刻の倍率（left が true なら、区切りのちょうど頭では前の区切りの倍率）
 //                          （フェルマータのように「その音の終わり」で測るものは、left を true にする）
 // ----------------------------------------------------------
 function makeTempoWarp(score, startMeasure, lastMeasure) {
-  // 小節ごとの区切り { from: 伸び縮みさせる前の始まり, warpedFrom: 伸び縮みさせたあとの始まり, factor: 倍率 }
+  // 細かい区切りごとの { from: 伸び縮みさせる前の始まり, warpedFrom: 伸び縮みさせたあとの始まり, factor: 倍率 }
   const segments = [];
-  let tempo = score.tempo; // 今のテンポ（1小節目から順に、テンポ変更をたどる）
-  let raw = 0;
-  let warped = 0;
+  let tempo = score.tempo; // 今のテンポ（テンポ変更をたどる）
+  let rate = 1; // rit.・accel. で変わった速さの割合（1 なら元の速さ）
+  let gradual = null; // 今の rit.・accel. の範囲 { startTick, length, fromRate, toRate, to }（なければ null）
+  let tick = 0; // 曲の頭から何ティック目か（伸び縮みさせる前）
+  let raw = 0; // 再生を始める所から何ティック目か（伸び縮みさせる前）
+  let warped = 0; // 伸び縮みさせたあと
+
   for (let i = 0; i <= lastMeasure; i++) {
-    if (i > 0 && score.measures[i].tempo !== undefined) tempo = score.measures[i].tempo;
-    if (i < startMeasure) continue; // 始める小節より前は、テンポをたどるだけ
-    const factor = score.tempo / tempo;
-    segments.push({ from: raw, warpedFrom: warped, factor: factor });
+    const info = score.measures[i];
     const length = measureTicks(timeAt(score, i));
-    raw = raw + length;
-    warped = warped + length * factor;
+
+    // テンポ変更・a tempo：その小節のテンポ・元の速さに戻る（rit.・accel. の途中でも、そこで終わる）
+    if (i > 0 && info.tempo !== undefined) tempo = info.tempo;
+    if ((i > 0 && info.tempo !== undefined) || info.aTempo) {
+      rate = 1;
+      gradual = null;
+    }
+
+    // rit.・accel. の始まり：終わりの小節を探して、範囲の長さを数える
+    if (info.gradual) {
+      let to = i;
+      while (to < score.measures.length - 1 && !score.measures[to].gradualEnd) to = to + 1;
+      let rangeLength = 0;
+      for (let k = i; k <= to; k++) rangeLength = rangeLength + measureTicks(timeAt(score, k));
+      const toRate = rate * (info.gradual === "rit" ? RIT_RATE : ACCEL_RATE);
+      gradual = { startTick: tick, length: rangeLength, fromRate: rate, toRate: toRate, to: to };
+    }
+
+    // この小節を WARP_STEPS に分けて、分けた所ごとの倍率を決める（始める小節より前は、たどるだけ）
+    if (i >= startMeasure) {
+      const step = length / WARP_STEPS;
+      for (let k = 0; k < WARP_STEPS; k++) {
+        let nowRate = rate;
+        if (gradual) {
+          // 分けた所のまん中が、範囲のどのあたりか（0〜1）で、速さの割合を決める
+          const middle = tick + step * (k + 0.5);
+          const progress = (middle - gradual.startTick) / gradual.length;
+          nowRate = gradual.fromRate + (gradual.toRate - gradual.fromRate) * progress;
+        }
+        const factor = score.tempo / (tempo * nowRate);
+        segments.push({ from: raw, warpedFrom: warped, factor: factor });
+        raw = raw + step;
+        warped = warped + step * factor;
+      }
+    }
+
+    tick = tick + length;
+
+    // rit.・accel. の範囲の終わり：そのあとは、変わった速さのまま
+    if (gradual && gradual.to === i) {
+      rate = gradual.toRate;
+      gradual = null;
+    }
   }
 
   // ----------------------------------------------------------
   // 関数：segmentAt（makeTempoWarp の中だけで使う）
-  // その時刻が入っている小節の区切りを返す（最後の小節より後ろは、最後の小節の区切り）
+  // その時刻が入っている区切りを返す（最後の区切りより後ろは、最後の区切り）
   // ----------------------------------------------------------
   function segmentAt(tick, left) {
     let found = segments[0];
@@ -746,6 +802,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     event.ticks = warp.at(end) - event.startTick;
     event.soundTicks = warp.at(soundEnd) - event.startTick;
     if (event.tremoloStep) event.tremoloStep = event.tremoloStep * warp.factorAt(start); // トレモロの刻む細かさ
+    event.tempoFactor = warp.factorAt(start); // トリルなどの細かさに使う倍率（ステップ11-6b）
     if (event.glissTo) event.glissLastTicks = event.glissLastTicks * warp.factorAt(end, true); // グリッサンドのすべる長さ
   });
   highlights.forEach((h) => {

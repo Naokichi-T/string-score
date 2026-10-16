@@ -25,6 +25,11 @@
   //                  isChange … その小節でテンポが変わっているか（true なら［元に戻す］を押せる）
   //   ontempo      … ［変える］が押されたときに呼ぶ関数（数字の文字と、速度記号の文字を渡す）（ステップ11-6a）
   //   onremovetempo … ［元に戻す］が押されたときに呼ぶ関数（ステップ11-6a）
+  //   currentGradual … 選んでいる小節（範囲なら最初の小節）の rit.・accel.・a tempo（ボタンを青くするのに使う）（ステップ11-6b）
+  //                    { gradual: その小節から始まる "rit" か "accel"（なければ null）, aTempo: a tempo が付いているか }
+  //                    何も選んでいないときは null
+  //   ongradual      … ［rit.］［accel.］が押されたときに呼ぶ関数（"rit" か "accel" を渡す）（ステップ11-6b）
+  //   onatempo       … ［a tempo］が押されたときに呼ぶ関数（ステップ11-6b）
   let {
     canDelete = false,
     onmeasure = () => {},
@@ -37,6 +42,9 @@
     currentTempo = null,
     ontempo = () => {},
     onremovetempo = () => {},
+    currentGradual = null,
+    ongradual = () => {},
+    onatempo = () => {},
   } = $props();
 
   // 速度記号の候補（「楽譜の設定」タブと同じもの）（ステップ11-6a）
@@ -242,6 +250,38 @@
     <button disabled={!currentTempo?.isChange} onclick={() => onremovetempo()} title="選んでいる小節のテンポ変更を消す（前の小節のテンポが続く）"> 元に戻す </button>
   </div>
 
+  <!-- rit.・accel.・a tempo（ステップ11-6b） -->
+  <!-- rit.・accel. は、範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける。ここから始まっている所でもう一度押すと外れる -->
+  <div class="group">
+    <button
+      class="words"
+      class:active={currentGradual?.gradual === "rit"}
+      disabled={!currentGradual}
+      onclick={() => ongradual("rit")}
+      title="リタルダンド（だんだん遅く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん遅くする"
+    >
+      rit.
+    </button>
+    <button
+      class="words"
+      class:active={currentGradual?.gradual === "accel"}
+      disabled={!currentGradual}
+      onclick={() => ongradual("accel")}
+      title="アッチェレランド（だんだん速く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん速くする"
+    >
+      accel.
+    </button>
+    <button
+      class="words"
+      class:active={!!currentGradual?.aTempo}
+      disabled={!currentTempo || currentTempo.measure === 0}
+      onclick={() => onatempo()}
+      title="ア・テンポ（元の速さに戻す）：選んでいる小節の頭から、rit.・accel. の前の速さに戻す"
+    >
+      a tempo
+    </button>
+  </div>
+
   <!-- 音部記号：選んでいるパートだけに効く（何も選んでいないときは押せない） -->
   <div class="group">
     <span class="label">音部記号</span>
@@ -370,5 +410,10 @@
   }
   .tempo-number {
     width: 64px;
+  }
+  /* rit.・accel.・a tempo のボタンは、楽譜と同じく斜めの文字（ステップ11-6b） */
+  button.words {
+    font-style: italic;
+    padding: 0 10px;
   }
 </style>

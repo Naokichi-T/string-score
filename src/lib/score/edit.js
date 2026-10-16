@@ -940,6 +940,86 @@ export function removeTempoChange(score, i) {
   return newScore;
 }
 
+// ----------------------------------------------------------
+// 関数：gradualRanges
+// rit.・accel. の範囲を、小節の情報から探して並べる（ステップ11-6b）
+// 「ここから」（gradual: "rit" / "accel"）と「ここまで」（gradualEnd: true）の組を、前から順に探す
+// （1小節だけの範囲は、同じ小節に両方の印がある）
+//   measures … 楽譜全体の小節の情報（score.measures）
+// 戻り値：[{ from: 始まりの小節, to: 終わりの小節, type: "rit" か "accel" }, ...]
+//         （「ここまで」がない「ここから」・「ここから」がない「ここまで」は入れない）
+// ----------------------------------------------------------
+export function gradualRanges(measures) {
+  const ranges = [];
+  let open = null; // 「ここから」があって、まだ「ここまで」が来ていない範囲
+  measures.forEach((info, i) => {
+    if (info.gradual) open = { from: i, type: info.gradual }; // 新しい「ここから」（前に開いていたものは捨てる）
+    if (info.gradualEnd && open) {
+      ranges.push({ from: open.from, to: i, type: open.type });
+      open = null;
+    }
+  });
+  return ranges;
+}
+
+// ----------------------------------------------------------
+// 関数：setGradualMarks
+// 小節の情報の rit.・accel. の印を、全部消してから、ranges のとおりに付け直す（ステップ11-6b）
+//   measures … 楽譜全体の小節の情報（コピーしたものを渡す。中身を書き換える）
+//   ranges   … [{ from, to, type }, ...]
+// ----------------------------------------------------------
+function setGradualMarks(measures, ranges) {
+  measures.forEach((info) => {
+    delete info.gradual;
+    delete info.gradualEnd;
+  });
+  ranges.forEach((range) => {
+    measures[range.from].gradual = range.type;
+    measures[range.to].gradualEnd = true;
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：toggleGradual
+// from 小節目から to 小節目までに、rit.（だんだん遅く）か accel.（だんだん速く）を付ける（ステップ11-6b）
+// from 小節目でもう同じ種類が始まっていたら、その範囲を外す
+// 付けるときは、範囲に重なっていた rit.・accel. を外す（重ならないようにする）
+//   type … "rit" か "accel"
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleGradual(score, from, to, type) {
+  const newScore = cloneScore(score);
+  const ranges = gradualRanges(newScore.measures);
+  let next;
+  if (newScore.measures[from].gradual === type) {
+    // 同じ種類がここから始まっている：その範囲を外す
+    next = ranges.filter((range) => range.from !== from);
+  } else {
+    // 重なる範囲を外して、新しい範囲を足す
+    next = ranges.filter((range) => range.to < from || range.from > to);
+    next.push({ from: from, to: to, type: type });
+  }
+  setGradualMarks(newScore.measures, next);
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：toggleATempo
+// i 小節目の頭に a tempo（元の速さに戻す）を付ける・外す（ステップ11-6b）
+// 1小節目には付けない（戻す先の速さがないため）
+// 戻り値：新しい楽譜データ（1小節目なら元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleATempo(score, i) {
+  if (i === 0) return score;
+  const newScore = cloneScore(score);
+  if (newScore.measures[i].aTempo) {
+    delete newScore.measures[i].aTempo;
+  } else {
+    newScore.measures[i].aTempo = true;
+  }
+  return newScore;
+}
+
 // ==========================================================
 // ここから下は、小節を足す・消す関数（ステップ5-2）
 // ==========================================================
@@ -1098,6 +1178,9 @@ export function deleteMeasures(score, from, to) {
     delete firstInfo.tempo;
     delete firstInfo.tempoText;
   }
+  // ③-3 片方の端だけ消された rit.・accel. を外す（残っている組だけで、印を付け直す）（ステップ11-6b）
+  setGradualMarks(newScore.measures, gradualRanges(newScore.measures));
+  delete newScore.measures[0].aTempo; // 1小節目に来た a tempo は外す
 
   // ④ 相手がいなくなったスラー・松葉を外す
   newScore.parts.forEach((part) => cleanSpanners(part));

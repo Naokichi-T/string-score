@@ -38,6 +38,9 @@ const TITLE_AREA = 80; // タイトルと作曲者を書く場所の高さ
 const TEMPO_AREA = 28; // テンポ（Allegro ♩ = 120）を書く場所の高さ
 const TEMPO_CHANGE_RAISE = 18; // 途中のテンポ変更の文字の下端を、五線の一番上の線からどれだけ上にするか（ステップ11-6a）
 const TEMPO_CHANGE_GAP = 6; // 音符が五線より上に出ているときの、音符の上端と文字の下端のすき間（ステップ11-6a）
+const TEMPO_MARK_SPACE = 10; // テンポ変更・a tempo・rit. を同じ小節に並べるときの間（ステップ11-6b）
+const GRADUAL_DASH_GAP = 6; // 「rit.」の文字と点線の間（ステップ11-6b）
+const GRADUAL_TEXTS = { rit: "rit.", accel: "accel." }; // rit.・accel. で書く文字（ステップ11-6b）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -245,6 +248,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   // 小節・段をまたいで続くので、段ごとの処理の外に置く
   const trillLines = score.parts.map(() => null);
 
+  // 続いている rit.・accel. の点線（続いていなければ null）{ line: 何段目か, y: 高さ, x: 次に点線を始める横の位置 }（ステップ11-6b）
+  // トリルの波線と同じく、小節・段をまたいで続くので、段ごとの処理の外に置く
+  let gradualLine = null;
+
   // 段ごとの左右の端の位置（段をまたぐスラー・松葉を描くのに使う）
   // lineBounds[l] = { startX: 音符が始まる位置, endX: 段の右端 }
   const lineBounds = [];
@@ -351,11 +358,9 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
-      // 途中のテンポ変更（2小節目から。いちばん上に表示しているパートの上だけ）（ステップ11-6a）
+      // 途中のテンポ変更・a tempo・rit.・accel.（いちばん上に表示しているパートの上だけ）（ステップ11-6a・11-6b）
       // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段・パートと重ならないように間があく）
-      if (!isFirst && score.measures[i].tempo !== undefined) {
-        drawTempoChange(VF, context, staves[0], voices[0].getTickables(), tempoAt(score, i));
-      }
+      gradualLine = drawTempoMarks(context, staves[0], voices[0].getTickables(), score, i, l, gradualLine);
 
       // 拍の線（入のときだけ。下書きでは描かない）（ステップ12-7）
       // 音符の横の位置が決まったあとでないと描けないので、ここで描く（中で、音符の後ろに動かす）
@@ -459,14 +464,28 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 }
 
 // ----------------------------------------------------------
-// 関数：drawTempoChange
-// 途中のテンポ変更を、その小節の頭の上に描く（ステップ11-6a）
-// 五線から少し上（音符が五線より上に出ているときは、その上）に、「Andante ♩ = 60」の形で書く
-//   stave     … いちばん上のパートの、その小節の五線
-//   tickables … その小節の音符（並べ終わったもの。いちばん高い所を調べる）
-//   tempoInfo … { tempo, tempoText }（model.js の tempoAt で調べたもの）
+// 関数：drawTempoMarks
+// 小節の頭の上に、テンポの指示を描く（ステップ11-6a。a tempo・rit.・accel. はステップ11-6b）
+//   ・途中のテンポ変更 … 「Andante ♩ = 60」
+//   ・a tempo          … 「a tempo」
+//   ・rit.・accel.     … 「rit.」のあと、範囲の終わりの小節の終わりまで点線（段をまたぐときは、次の段の頭から続ける）
+// 同じ小節にいくつかあるときは、この順に左から並べる
+// 高さ：五線から少し上（音符が五線より上に出ているときは、その上）。点線は同じ段の中では同じ高さで続ける
+//   stave       … いちばん上のパートの、その小節の五線
+//   tickables   … その小節の音符（並べ終わったもの。いちばん高い所を調べる）
+//   score       … 楽譜データ
+//   i           … 何小節目か
+//   l           … 何段目か
+//   gradualLine … 前の小節から続いている点線（なければ null）
+// 戻り値：次の小節へ続く点線（続かなければ null）
 // ----------------------------------------------------------
-function drawTempoChange(VF, context, stave, tickables, tempoInfo) {
+function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine) {
+  const info = score.measures[i];
+  const hasTempo = i > 0 && info.tempo !== undefined; // 途中のテンポ変更（1小節目は楽譜のいちばん上に描くので除く）
+  const resets = hasTempo || !!info.aTempo; // テンポ変更・a tempo のあとは、rit.・accel. の点線を続けない
+  if (resets) gradualLine = null;
+  if (!hasTempo && !info.aTempo && !info.gradual && !gradualLine) return null; // この小節には何もない
+
   // 文字の下端の高さ：五線の一番上の線より TEMPO_CHANGE_RAISE だけ上
   // 音符（符尾・加線も入る）がそれより上に出ているときは、音符の上端よりさらに上
   let y = stave.getYForLine(0) - TEMPO_CHANGE_RAISE;
@@ -474,8 +493,62 @@ function drawTempoChange(VF, context, stave, tickables, tempoInfo) {
     const box = tickable.getBoundingBox();
     if (box) y = Math.min(y, box.getY() - TEMPO_CHANGE_GAP);
   });
-  // 横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
-  drawTempo(context, tempoInfo, stave.getNoteStartX() - 4, y);
+  // 同じ段で続いている点線は、始まりと同じ高さのまま続ける
+  if (gradualLine && gradualLine.line === l && !info.gradual) y = gradualLine.y;
+
+  // 書き始める横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
+  let x = stave.getNoteStartX() - 4;
+
+  // ① 途中のテンポ変更
+  if (hasTempo) x = drawTempo(context, tempoAt(score, i), x, y) + TEMPO_MARK_SPACE;
+
+  // ② a tempo
+  if (info.aTempo) x = drawTempoWords(context, "a tempo", x, y) + TEMPO_MARK_SPACE;
+
+  // ③ rit.・accel. の始まり：文字を書いて、そのすぐ右から点線を始める
+  let dashFrom;
+  if (info.gradual) {
+    dashFrom = drawTempoWords(context, GRADUAL_TEXTS[info.gradual] ?? info.gradual, x, y) + GRADUAL_DASH_GAP;
+  } else if (gradualLine) {
+    // 前の小節から続いている：同じ段なら前の続きから、新しい段なら段の頭から
+    dashFrom = gradualLine.line === l ? gradualLine.x : x;
+  } else {
+    return null; // rit.・accel. の途中ではない
+  }
+
+  // ④ 点線を、この小節の終わりまで引く（範囲の終わりの小節では、小節線の少し手前まで）
+  const measureEnd = stave.getX() + stave.getWidth();
+  const dashTo = info.gradualEnd ? measureEnd - 8 : measureEnd;
+  if (dashTo > dashFrom) {
+    context.save();
+    context.setLineWidth(1);
+    context.setLineDash([4, 4]);
+    context.beginPath();
+    context.moveTo(dashFrom, y - 4); // 文字のまん中あたりの高さ
+    context.lineTo(dashTo, y - 4);
+    context.stroke();
+    context.restore();
+  }
+
+  // 範囲の終わりなら点線はここまで。そうでなければ、次の小節へ続ける
+  if (info.gradualEnd) return null;
+  return { line: l, y: y, x: measureEnd };
+}
+
+// ----------------------------------------------------------
+// 関数：drawTempoWords
+// a tempo・rit.・accel. の文字を、斜めの字で書く（ステップ11-6b）
+//   x … 書き始める横の位置
+//   y … 文字の下端（ベースライン）の位置
+// 戻り値：書き終わった右端の横の位置
+// ----------------------------------------------------------
+function drawTempoWords(context, text, x, y) {
+  context.save();
+  context.setFont("Academico", 15, "normal", "italic");
+  context.fillText(text, x, y);
+  const width = context.measureText(text).width;
+  context.restore();
+  return x + width;
 }
 
 // ----------------------------------------------------------
@@ -484,6 +557,7 @@ function drawTempoChange(VF, context, stave, tickables, tempoInfo) {
 //   score … tempo と tempoText が入っているもの（楽譜データ、または tempoAt で調べたもの）（ステップ11-6a）
 //   x … 書き始める横の位置
 //   y … 文字の下端（ベースライン）の位置
+// 戻り値：書き終わった右端の横の位置（ステップ11-6b。同じ小節に a tempo などを並べるのに使う）
 // ----------------------------------------------------------
 function drawTempo(context, score, x, y) {
   context.save();
@@ -503,6 +577,8 @@ function drawTempo(context, score, x, y) {
   // 「= 120」
   context.setFont("Academico", 15);
   context.fillText(`= ${score.tempo}`, x, y);
+  x = x + context.measureText(`= ${score.tempo}`).width;
 
   context.restore();
+  return x;
 }
