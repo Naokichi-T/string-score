@@ -68,6 +68,7 @@
     setBarline,
     toggleRepeatStart,
     toggleRepeatEnd,
+    toggleEnding,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -1289,6 +1290,7 @@
           barline: score.measures[barlineEndMeasure].barline ?? null,
           repeatEnd: !!score.measures[barlineEndMeasure].repeatEnd,
           repeatStart: !!score.measures[barlineStartMeasure].repeatStart,
+          ending: score.measures[barlineStartMeasure].ending ?? null, // 範囲の最初の小節から始まるかっこの番号（ステップ11-7b）
         },
   );
 
@@ -1319,6 +1321,19 @@
     } else {
       commit(toggleRepeatEnd(score, barlineEndMeasure));
     }
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleEnding
+  // 「小節線」タブの［1番］［2番］が押されたとき：範囲にかかる小節に、かっこを付ける・外す（ステップ11-7b）
+  //   number … 1 か 2
+  // ----------------------------------------------------------
+  function handleEnding(number) {
+    if (barlineEndMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    commit(toggleEnding(score, barlineStartMeasure, barlineEndMeasure, number));
     rangeEnd = end;
   }
 
@@ -1788,6 +1803,7 @@
       {currentBarline}
       onbarline={handleBarline}
       onrepeatmark={handleRepeatMark}
+      onending={handleEnding}
       onkey={handleKeySignature}
       {currentClef}
       onclef={handleClef}

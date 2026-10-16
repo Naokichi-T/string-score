@@ -499,6 +499,12 @@ function computeWedges(part) {
 //   例：1 2 ‖: 3 4 :‖ 5 → [0, 1, 2, 3, 2, 3, 4]（小節の番号は 0 から）
 //   ・:‖ に来て、まだくり返していなければ、戻る（2回目はそのまま次へ進む）
 //   ・戻る先：前にある ‖:（その前に別の :‖ があれば、その :‖ のすぐあと。どちらもなければ曲の頭）
+// （ステップ11-7b：1番・2番かっこ）
+//   ・今が何回目か（pass）を数える。:‖ で戻ると 2回目になる
+//   ・その回と番号の違うかっこは、かっこの終わりの小節まで飛ばす
+//     例：‖: 1 2 [1. 3 :‖] [2. 4] 5 → 1 2 3 1 2 4 5
+//   ・2番かっこを弾き終わったら、1回目に戻す（その先に別のくり返しがあってもよいように）
+//   ・‖: に、戻ってきたのではなく前から進んできたときも、1回目に戻す
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（そこから順番を作る。前の ‖: へ戻ることもある）
 //   endMeasure   … 何小節目まで鳴らすか（区間リピートのとき）。指定したときは、くり返しはたどらず、まっすぐ並べる
@@ -514,10 +520,26 @@ export function playOrder(score, startMeasure, endMeasure = null) {
 
   const measures = score.measures;
   const repeated = new Set(); // もうくり返した :‖ の小節（2回目は戻らない）
+  let pass = 1; // 今が何回目か（1番・2番かっこで使う）（ステップ11-7b）
+  let jumpedTo = null; // :‖ で戻った先の小節（そこの ‖: では、回数を1に戻さない）
   let i = startMeasure;
   while (i < measures.length) {
+    const info = measures[i];
+
+    // 前から進んできて ‖: に来た：新しいくり返しなので、1回目にする（ステップ11-7b）
+    if (info.repeatStart && i !== jumpedTo) pass = 1;
+    jumpedTo = null;
+
+    // その回と番号の違うかっこ：かっこの終わりの小節まで飛ばす（ステップ11-7b）
+    if (info.ending && info.ending !== pass) {
+      let end = i;
+      while (end < measures.length - 1 && !measures[end].endingEnd) end = end + 1;
+      i = end + 1;
+      continue;
+    }
+
     order.push(i);
-    if (measures[i].repeatEnd && !repeated.has(i)) {
+    if (info.repeatEnd && !repeated.has(i)) {
       repeated.add(i);
       // 戻る先を探す：前へさかのぼって ‖: を探す（別の :‖ に当たったら、そのすぐあと）
       let target = 0;
@@ -531,9 +553,14 @@ export function playOrder(score, startMeasure, endMeasure = null) {
           break;
         }
       }
+      pass = pass + 1; // 次は2回目（ステップ11-7b）
+      jumpedTo = target;
       i = target;
       continue;
     }
+
+    // 2番かっこ（1番より後ろの番号のかっこ）を弾き終わったら、1回目に戻す（ステップ11-7b）
+    if (info.endingEnd && info.endingEnd >= 2) pass = 1;
     i = i + 1;
   }
   return order;

@@ -4,6 +4,7 @@
   // 「小節線」タブの中身（ステップ11-7a）
   //   ・小節の終わりの線：ふつう・複縦線・終止線
   //   ・くり返し：くり返しの始まり（‖:）・くり返しの終わり（:‖）
+  //   ・1番・2番かっこ（ステップ11-7b）
   // 今付いているもののボタンは青くなる。くり返しのボタンは、もう一度押すと外れる
   // ==========================================================
 
@@ -13,7 +14,9 @@
   //                 終わりの線・:‖ は「範囲の最後の小節（音1つならその小節）」、‖: は「範囲の最初の小節」のもの
   //   onbarline   … 終わりの線のボタンが押されたときに呼ぶ関数（null・"double"・"final" を渡す）
   //   onrepeatmark … くり返しのボタンが押されたときに呼ぶ関数（"start" か "end" を渡す）
-  let { current = null, onbarline = () => {}, onrepeatmark = () => {} } = $props();
+  //   （ステップ11-7b）current には ending（範囲の最初の小節から始まるかっこの番号。なければ null）も入る
+  //   onending    … 1番・2番かっこのボタンが押されたときに呼ぶ関数（1 か 2 を渡す）（ステップ11-7b）
+  let { current = null, onbarline = () => {}, onrepeatmark = () => {}, onending = () => {} } = $props();
 
   // 何も選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!current);
@@ -94,6 +97,29 @@
       <span class="text">終わり</span>
     </button>
   </div>
+
+  <!-- 1番・2番かっこ（範囲を選んでいるときは、範囲にかかる小節に付ける。ここから始まっている所でもう一度押すと外れる）（ステップ11-7b） -->
+  <div class="group">
+    <span class="label">かっこ</span>
+    {#each [1, 2] as number (number)}
+      <button
+        class:active={current?.ending === number}
+        {disabled}
+        onclick={() => onending(number)}
+        title={`${number}番かっこ：選んでいる小節に付ける（範囲を選んでいるときは、範囲にかかる小節）。くり返しの${number}回目だけ弾く`}
+      >
+        <svg width="22" height="28" viewBox="0 0 22 28">
+          <rect x="2" y="4" width="18" height="1.5" fill="currentColor" />
+          <rect x="2" y="4" width="1.5" height="12" fill="currentColor" />
+          {#if number === 1}
+            <rect x="18.5" y="4" width="1.5" height="12" fill="currentColor" />
+          {/if}
+          <text x="6" y="17" class="ending-number">{number}.</text>
+        </svg>
+        <span class="text">{number}番</span>
+      </button>
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -134,6 +160,12 @@
   button:disabled {
     opacity: 0.35; /* 押せないものはうすく */
     cursor: not-allowed;
+  }
+  /* かっこのボタンの中の「1.」「2.」（ステップ11-7b） */
+  .ending-number {
+    font-size: 10px;
+    font-weight: bold;
+    fill: currentColor;
   }
   /* 中の SVG と文字では、マウスの操作を受け取らず、下のボタンに通す */
   button svg,

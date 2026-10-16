@@ -94,7 +94,9 @@
   //   currentBarline … 選んでいる所の小節線（何も選んでいないときは null。「小節線」タブで使う）（ステップ11-7a）
   //   onbarline    … 終わりの線のボタンが押されたときに呼ぶ関数（「小節線」タブで使う）（ステップ11-7a）
   //   onrepeatmark … くり返しのボタンが押されたときに呼ぶ関数（"start" か "end" を渡す。「小節線」タブで使う）（ステップ11-7a）
+  //   onending     … 1番・2番かっこのボタンが押されたときに呼ぶ関数（1 か 2 を渡す。「小節線」タブで使う）（ステップ11-7b）
   let {
+    onending = () => {},
     currentBarline = null,
     onbarline = () => {},
     onrepeatmark = () => {},
@@ -350,7 +352,7 @@
         {onatempo}
       />
     {:else if activeTab === "barline"}
-      <BarlineTools current={currentBarline} {onbarline} {onrepeatmark} />
+      <BarlineTools current={currentBarline} {onbarline} {onrepeatmark} {onending} />
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} {hiddenParts} {ontoggleview} {beatLines} {ontogglebeats} />
     {:else if activeTab === "playback"}

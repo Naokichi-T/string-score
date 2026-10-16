@@ -256,6 +256,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   // トリルの波線と同じく、小節・段をまたいで続くので、段ごとの処理の外に置く
   let gradualLine = null;
 
+  // 前の小節から続いている1番・2番かっこの番号（続いていなければ null）（ステップ11-7b）
+  // 小節・段をまたいで続くので、段ごとの処理の外に置く
+  let endingOpen = null;
+
   // 段ごとの左右の端の位置（段をまたぐスラー・松葉を描くのに使う）
   // lineBounds[l] = { startX: 音符が始まる位置, endX: 段の右端 }
   const lineBounds = [];
@@ -267,6 +271,14 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 
     // この段の最初の小節の五線（括弧とパート名を描くのに使う）
     let lineStartStaves = [];
+
+    // この段の1番・2番かっこの部分（小節ごと）。段の小節を全部並べ終わってから、まとめて描く（ステップ11-7b）
+    // （かっこの横線の高さを、かっこの中のいちばん高い音符に合わせるため）
+    const lineEndings = [];
+
+    // この段の、テンポの指示を描く小節の一覧（かっこを描いてから描くので、ためておく）（ステップ11-7b）
+    // （かっこの小節では、テンポの指示をかっこより上に書くため、かっこの高さが決まってから描く）
+    const tempoQueue = [];
 
     line.measures.forEach((i, m) => {
       const state = states[i];
@@ -379,7 +391,9 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 
       // 途中のテンポ変更・a tempo・rit.・accel.（いちばん上に表示しているパートの上だけ）（ステップ11-6a・11-6b）
       // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段・パートと重ならないように間があく）
-      gradualLine = drawTempoMarks(context, staves[0], voices[0].getTickables(), score, i, l, gradualLine);
+      // 1番・2番かっことテンポの指示は、この段の小節を全部並べ終わってから描くので、ここではためておく（ステップ11-7b）
+      endingOpen = collectEndingPart(lineEndings, staves[0], voices[0].getTickables(), score, i, isLineStart, endingOpen);
+      tempoQueue.push({ stave: staves[0], tickables: voices[0].getTickables(), i: i });
 
       // 拍の線（入のときだけ。下書きでは描かない）（ステップ12-7）
       // 音符の横の位置が決まったあとでないと描けないので、ここで描く（中で、音符の後ろに動かす）
@@ -434,6 +448,13 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
     // この段の左右の端の位置を覚えておく（x はこの段の右端まで進んでいる）
     lineBounds.push({ startX: lineStartStaves[0].getNoteStartX(), endX: x });
 
+    // この段の1番・2番かっこを描いてから、テンポの指示を描く（ステップ11-7b）
+    // （かっこの小節では、テンポの指示をかっこの横線より上に書く）
+    const endingYs = drawEndings(context, lineEndings);
+    tempoQueue.forEach((item) => {
+      gradualLine = drawTempoMarks(context, item.stave, item.tickables, score, item.i, l, gradualLine, endingYs.get(item.i) ?? null);
+    });
+
     // --- この段の左端の線・括弧・パート名を描く（下書きでは描かない） ---
     if (!isDraft) {
       const lineTopStave = lineStartStaves[0];
@@ -486,6 +507,115 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   return allNotes;
 }
 
+// 1番・2番かっこの見た目の設定（ステップ11-7b）
+const ENDING_RAISE = 12; // かっこの横線を、五線の一番上の線からどれだけ上にするか
+const ENDING_GAP = 8; // 音符が五線より上に出ているときの、音符の上端とかっこの横線のすき間
+const ENDING_HOOK = 12; // かっこの両はしの、下に折れる線の長さ
+const ENDING_TEXT_SPACE = 8; // かっこの小節で、テンポの指示の文字の下端を、かっこの横線からどれだけ上にするか
+
+// ----------------------------------------------------------
+// 関数：collectEndingPart
+// 1番・2番かっこの、この小節の部分を調べて、段の一覧（lineEndings）に入れる（ステップ11-7b）
+// （描くのは、段の小節を全部並べ終わってから drawEndings で行う）
+//   lineEndings … この段のかっこの部分の一覧（ここに足す）
+//                 { x1, x2: 横線の左右のはし, top: 音符のいちばん上, start: 始まりの小節か, end: 終わりの小節か, number: 何番か }
+//   stave       … いちばん上のパートの、その小節の五線
+//   tickables   … その小節の音符（並べ終わったもの）
+//   score       … 楽譜データ
+//   i           … 何小節目か
+//   isLineStart … 段の最初の小節か（段の頭では、音部記号・調号のあとから描く）
+//   endingOpen  … 前の小節から続いているかっこの番号（なければ null）
+// 戻り値：次の小節へ続くかっこの番号（続かなければ null）
+// ----------------------------------------------------------
+function collectEndingPart(lineEndings, stave, tickables, score, i, isLineStart, endingOpen) {
+  const info = score.measures[i];
+  const number = info.ending ?? endingOpen;
+  if (!number) return null; // かっこの中ではない
+
+  // 音符のいちばん上（符尾・加線も入る）
+  let top = stave.getYForLine(0);
+  tickables.forEach((tickable) => {
+    const box = tickable.getBoundingBox();
+    if (box) top = Math.min(top, box.getY());
+  });
+
+  // 横線の左右のはし（始まり・終わりの小節では、小節線から少し離す。途中の小節は、となりとつなげる）
+  const left = isLineStart ? stave.getNoteStartX() - 6 : stave.getX();
+  const right = stave.getX() + stave.getWidth();
+  lineEndings.push({
+    x1: info.ending && !isLineStart ? left + 2 : left,
+    x2: info.endingEnd ? right - 3 : right,
+    top: top,
+    start: !!info.ending,
+    end: !!info.endingEnd,
+    number: number,
+    staffTop: stave.getYForLine(0),
+    measure: i,
+  });
+
+  // かっこの終わりなら、ここまで。そうでなければ、次の小節へ続ける
+  return info.endingEnd ? null : number;
+}
+
+// ----------------------------------------------------------
+// 関数：drawEndings
+// 1つの段の1番・2番かっこを描く（ステップ11-7b）
+//   ┌1.───────┐  ← 1番かっこ：右の端も下に折る（閉じた形）
+//   ┌2.────────  ← 2番かっこ：右の端は開いたまま
+// 横線の高さは、そのかっこ（この段の中の部分）のいちばん高い音符より上にそろえる
+//   lineEndings … collectEndingPart で集めた、この段のかっこの部分の一覧
+// 戻り値：小節の番号 → その小節のかっこの横線の高さ（Map。テンポの指示を、かっこより上に書くのに使う）
+// ----------------------------------------------------------
+function drawEndings(context, lineEndings) {
+  const endingYs = new Map();
+  // 1つのかっこごとにまとめる（始まりの小節で、新しいまとまりにする）
+  const groups = [];
+  lineEndings.forEach((part) => {
+    const lastGroup = groups[groups.length - 1];
+    const lastPart = lastGroup ? lastGroup[lastGroup.length - 1] : null;
+    if (!lastGroup || part.start || lastPart.end) {
+      groups.push([part]);
+    } else {
+      lastGroup.push(part);
+    }
+  });
+
+  groups.forEach((group) => {
+    // 横線の高さ：五線の一番上の線より ENDING_RAISE だけ上（音符が上に出ているときは、その上）
+    let y = group[0].staffTop - ENDING_RAISE;
+    group.forEach((part) => {
+      y = Math.min(y, part.top - ENDING_GAP);
+    });
+    const first = group[0];
+    const last = group[group.length - 1];
+    group.forEach((part) => endingYs.set(part.measure, y));
+
+    context.save();
+    context.setLineWidth(1);
+    context.beginPath();
+    context.moveTo(first.x1, y);
+    context.lineTo(last.x2, y);
+    // 始まり：左のはしを下に折る
+    if (first.start) {
+      context.moveTo(first.x1, y);
+      context.lineTo(first.x1, y + ENDING_HOOK);
+    }
+    // 1番かっこの終わり：右のはしも下に折る（2番かっこは開いたまま）
+    if (last.end && last.number === 1) {
+      context.moveTo(last.x2, y);
+      context.lineTo(last.x2, y + ENDING_HOOK);
+    }
+    context.stroke();
+    // 始まり：「1.」「2.」の文字（横線のすぐ下）
+    if (first.start) {
+      context.setFont("Academico", 13, "bold");
+      context.fillText(`${first.number}.`, first.x1 + 4, y + 12);
+    }
+    context.restore();
+  });
+  return endingYs;
+}
+
 // ----------------------------------------------------------
 // 関数：drawTempoMarks
 // 小節の頭の上に、テンポの指示を描く（ステップ11-6a。a tempo・rit.・accel. はステップ11-6b）
@@ -500,9 +630,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 //   i           … 何小節目か
 //   l           … 何段目か
 //   gradualLine … 前の小節から続いている点線（なければ null）
+//   endingY     … この小節が1番・2番かっこの中なら、かっこの横線の高さ（中でなければ null）（ステップ11-7b）
 // 戻り値：次の小節へ続く点線（続かなければ null）
 // ----------------------------------------------------------
-function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine) {
+function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, endingY = null) {
   const info = score.measures[i];
   const hasTempo = i > 0 && info.tempo !== undefined; // 途中のテンポ変更（1小節目は楽譜のいちばん上に描くので除く）
   const resets = hasTempo || !!info.aTempo; // テンポ変更・a tempo のあとは、rit.・accel. の点線を続けない
@@ -518,6 +649,8 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine) {
   });
   // 同じ段で続いている点線は、始まりと同じ高さのまま続ける
   if (gradualLine && gradualLine.line === l && !info.gradual) y = gradualLine.y;
+  // 1番・2番かっこの小節では、かっこの横線より上に書く（ステップ11-7b）
+  if (endingY !== null) y = Math.min(y, endingY - ENDING_TEXT_SPACE);
 
   // 書き始める横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
   let x = stave.getNoteStartX() - 4;

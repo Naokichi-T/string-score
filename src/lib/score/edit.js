@@ -1075,6 +1075,67 @@ export function toggleRepeatEnd(score, i) {
   return newScore;
 }
 
+// ----------------------------------------------------------
+// 関数：endingRanges
+// 1番・2番かっこの範囲を、小節の情報から探して並べる（ステップ11-7b）
+// 「ここから」（ending: 番号）と「ここまで」（endingEnd: 番号）の組を、前から順に探す（gradualRanges と同じ考え方）
+//   measures … 楽譜全体の小節の情報（score.measures）
+// 戻り値：[{ from: 始まりの小節, to: 終わりの小節, number: 1 か 2 }, ...]
+// ----------------------------------------------------------
+export function endingRanges(measures) {
+  const ranges = [];
+  let open = null; // 「ここから」があって、まだ「ここまで」が来ていないかっこ
+  measures.forEach((info, i) => {
+    if (info.ending) open = { from: i, number: info.ending };
+    if (info.endingEnd && open) {
+      ranges.push({ from: open.from, to: i, number: open.number });
+      open = null;
+    }
+  });
+  return ranges;
+}
+
+// ----------------------------------------------------------
+// 関数：setEndingMarks
+// 小節の情報の1番・2番かっこの印を、全部消してから、ranges のとおりに付け直す（ステップ11-7b）
+//   measures … 楽譜全体の小節の情報（コピーしたものを渡す。中身を書き換える）
+//   ranges   … [{ from, to, number }, ...]
+// ----------------------------------------------------------
+function setEndingMarks(measures, ranges) {
+  measures.forEach((info) => {
+    delete info.ending;
+    delete info.endingEnd;
+  });
+  ranges.forEach((range) => {
+    measures[range.from].ending = range.number;
+    measures[range.to].endingEnd = range.number;
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：toggleEnding
+// from 小節目から to 小節目までに、1番かっこか2番かっこを付ける（ステップ11-7b）
+// from 小節目でもう同じ番号のかっこが始まっていたら、そのかっこを外す
+// 付けるときは、範囲に重なっていたかっこを外す（重ならないようにする）
+//   number … 1 か 2
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleEnding(score, from, to, number) {
+  const newScore = cloneScore(score);
+  const ranges = endingRanges(newScore.measures);
+  let next;
+  if (newScore.measures[from].ending === number) {
+    // 同じ番号がここから始まっている：そのかっこを外す
+    next = ranges.filter((range) => range.from !== from);
+  } else {
+    // 重なるかっこを外して、新しいかっこを足す
+    next = ranges.filter((range) => range.to < from || range.from > to);
+    next.push({ from: from, to: to, number: number });
+  }
+  setEndingMarks(newScore.measures, next);
+  return newScore;
+}
+
 // ==========================================================
 // ここから下は、小節を足す・消す関数（ステップ5-2）
 // ==========================================================
@@ -1235,6 +1296,8 @@ export function deleteMeasures(score, from, to) {
   }
   // ③-3 片方の端だけ消された rit.・accel. を外す（残っている組だけで、印を付け直す）（ステップ11-6b）
   setGradualMarks(newScore.measures, gradualRanges(newScore.measures));
+  // 1番・2番かっこも同じように片付ける（ステップ11-7b）
+  setEndingMarks(newScore.measures, endingRanges(newScore.measures));
   delete newScore.measures[0].aTempo; // 1小節目に来た a tempo は外す
 
   // ④ 相手がいなくなったスラー・松葉を外す

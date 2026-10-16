@@ -725,6 +725,17 @@ function readBarlines(measureElements, score) {
       const direction = repeat ? repeat.getAttribute("direction") : null;
       const style = childText(barline, "bar-style");
 
+      // 1番・2番かっこ（ステップ11-7b）：number の最初の数字を使う（"1, 2" のような書き方もあるため）。1・2 だけ読む
+      const ending = childElement(barline, "ending");
+      if (ending) {
+        const number = parseInt(ending.getAttribute("number") ?? "", 10);
+        const type = ending.getAttribute("type");
+        if (number === 1 || number === 2) {
+          if (type === "start") info.ending = number;
+          if (type === "stop" || type === "discontinue") info.endingEnd = number;
+        }
+      }
+
       if (location === "left") {
         if (direction === "forward") info.repeatStart = true;
         return;
@@ -744,6 +755,21 @@ function readBarlines(measureElements, score) {
       if (style === "light-light" && !nextKeyChanges) info.barline = "double";
     });
   });
+
+  // 組になっていない1番・2番かっこの印を外す（「ここから」だけ・「ここまで」だけが残らないように）（ステップ11-7b）
+  let open = null; // 「ここから」があって、まだ「ここまで」が来ていない小節の情報
+  score.measures.forEach((info) => {
+    if (info.ending) {
+      if (open) delete open.ending; // 前の「ここから」に「ここまで」がなかった
+      open = info;
+    }
+    if (info.endingEnd) {
+      if (open && open.ending === info.endingEnd)
+        open = null; // 正しい組になった
+      else delete info.endingEnd; // 「ここから」がない（番号が違う）「ここまで」は外す
+    }
+  });
+  if (open) delete open.ending; // 最後まで「ここまで」が来なかった
 }
 
 // ----------------------------------------------------------

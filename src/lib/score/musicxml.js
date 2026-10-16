@@ -502,27 +502,44 @@ function directionsAfterXml(note) {
 // （五線譜の表示（render.js）と同じ決め方）
 // ----------------------------------------------------------
 function barlineXml(isLast, nextKeyChanges, measureInfo = {}) {
-  // くり返しの終わり（:‖）：細い線＋太い線と、「戻る」の印（ステップ11-7a）
-  if (measureInfo.repeatEnd) {
-    return [`      <barline location="right">`, "        <bar-style>light-heavy</bar-style>", `        <repeat direction="backward"/>`, "      </barline>"];
-  }
   let style = null;
+  // くり返しの終わり（:‖）は細い線＋太い線（ステップ11-7a）
   // 自分で決めた線（ステップ11-7a）：複縦線は light-light、終止線は light-heavy
-  if (measureInfo.barline === "double") style = "light-light";
+  if (measureInfo.repeatEnd) style = "light-heavy";
+  else if (measureInfo.barline === "double") style = "light-light";
   else if (measureInfo.barline === "final") style = "light-heavy";
   else if (isLast) style = "light-heavy";
   else if (nextKeyChanges) style = "light-light";
-  if (!style) return [];
-  return [`      <barline location="right">`, `        <bar-style>${style}</bar-style>`, "      </barline>"];
+
+  // 中身（MusicXML の決まりで、線の形 → かっこ → くり返し の順に書く）
+  const inner = [];
+  if (style) inner.push(`        <bar-style>${style}</bar-style>`);
+  // 1番・2番かっこの終わり（ステップ11-7b）：1番は閉じる（stop）、2番は開いたまま（discontinue）
+  if (measureInfo.endingEnd) {
+    const type = measureInfo.endingEnd === 1 ? "stop" : "discontinue";
+    inner.push(`        <ending number="${measureInfo.endingEnd}" type="${type}"/>`);
+  }
+  // くり返しの終わりの「戻る」の印（ステップ11-7a）
+  if (measureInfo.repeatEnd) inner.push(`        <repeat direction="backward"/>`);
+
+  if (inner.length === 0) return [];
+  return [`      <barline location="right">`, ...inner, "      </barline>"];
 }
 
 // ----------------------------------------------------------
-// 関数：repeatStartXml
-// くり返しの始まり（‖:）の <barline location="left"> を作る（小節の頭に書く）（ステップ11-7a）
-//   heavy-light … 太い線＋細い線、repeat forward … 「ここから」の印
+// 関数：leftBarlineXml
+// 小節の頭の <barline location="left"> を作る（くり返しの始まり・1番2番かっこの始まり）（ステップ11-7a・11-7b）
+//   くり返しの始まり（‖:）… heavy-light（太い線＋細い線）と repeat forward（「ここから」の印）
+//   かっこの始まり        … <ending number="1" type="start">1.</ending>
+// 何もなければ空の配列
 // ----------------------------------------------------------
-function repeatStartXml() {
-  return [`      <barline location="left">`, "        <bar-style>heavy-light</bar-style>", `        <repeat direction="forward"/>`, "      </barline>"];
+function leftBarlineXml(measureInfo) {
+  const inner = [];
+  if (measureInfo.repeatStart) inner.push("        <bar-style>heavy-light</bar-style>");
+  if (measureInfo.ending) inner.push(`        <ending number="${measureInfo.ending}" type="start">${measureInfo.ending}.</ending>`);
+  if (measureInfo.repeatStart) inner.push(`        <repeat direction="forward"/>`);
+  if (inner.length === 0) return [];
+  return [`      <barline location="left">`, ...inner, "      </barline>"];
 }
 
 // ----------------------------------------------------------
@@ -574,7 +591,8 @@ function partXml(score, p, divisions) {
     const isFirst = i === 0;
     lines.push(`    <measure number="${i + 1}">`);
     // くり返しの始まり（‖:）は、小節のいちばん頭に書く（ステップ11-7a）
-    if (score.measures[i].repeatStart) lines.push(...repeatStartXml());
+    // （ステップ11-7b：1番・2番かっこの始まりも、同じ所に書く）
+    lines.push(...leftBarlineXml(score.measures[i]));
 
     // 小節の頭の情報（1小節目はいつも書く。途中は、前の小節と違うときだけ書く）
     // （ステップ8-1b：データに書いてあっても、前と同じなら書かない。小節の削除などで同じ拍子が残ることがあるため）
