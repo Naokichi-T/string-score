@@ -64,7 +64,7 @@
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
-  import { playPitch, loadInstruments, isLoaded, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
+  import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
@@ -181,12 +181,128 @@
   // ----------------------------------------------------------
   // 関数：replayIfPlaying
   // 再生中なら、今鳴っている小節の頭から、新しい設定で鳴らし直す（ステップ12-4a：handleMixer から分けた）
+  // （ステップ12-5b：区間リピートが入っていれば、範囲の終わりまで鳴らしたあと、範囲の頭からくり返しを続ける）
   // ----------------------------------------------------------
   function replayIfPlaying() {
     if (!playing) return;
-    const measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
+    let measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
+    // くり返す範囲（切なら null）。くり返し中なら今の範囲のまま、そうでなければ選んでいる所から決める
+    const repeat = repeatOn ? (repeatRange ?? getRepeatRange()) : null;
+    // 今の小節が範囲の外なら、範囲の頭から
+    if (repeat && (measure < repeat.start || measure > repeat.end)) measure = repeat.start;
     handleStop();
-    playFrom(measure, false); // 鳴らし直しでは、カウントインは入れない（ステップ12-4b）
+    playFrom(measure, false, repeat); // 鳴らし直しでは、カウントインは入れない（ステップ12-4b）
+  }
+
+  // 区間リピートが入っているか（ステップ12-5b）。ページを開き直したら切に戻る（保存しない）
+  let repeatOn = $state(false);
+
+  // 再生中にくり返している範囲 { start, end }（小節の番号。くり返していないときは null）（ステップ12-5b）
+  let repeatRange = $state(null);
+
+  // くり返しの予約のしかた（くり返していないときは null）（ステップ12-5b）
+  //   firstTicks  … 最初の回（カウントインを含む）の長さ（ティック）
+  //   period      … 2回目からの1回分の長さ（ティック）
+  //   result      … 2回目からの1回分の buildEvents の結果（予約・緑の表示・小節の時刻に使う）
+  //   clicks      … 2回目からの1回分のクリック（メトロノームが切なら空）
+  //   tickSeconds … 1ティックが何秒か
+  //   next        … 次に予約する回（0 なら2回目）
+  let repeatPlan = null;
+
+  // 次の回を予約するためのタイマー（ステップ12-5b）
+  let repeatTimer = null;
+
+  // 次の回を、始まる何秒前に予約するか（ステップ12-5b）
+  const REPEAT_LEAD = 1.0;
+
+  // ----------------------------------------------------------
+  // 関数：getRepeatRange
+  // 今選んでいる所から、くり返す範囲を決める（ステップ12-5b）
+  //   範囲を選んでいる → 範囲にかかる小節まるごと
+  //   音を1つ選んでいる → その小節1つ
+  //   何も選んでいない → 曲の最初から最後まで
+  // 戻り値：{ start, end }（小節の番号。0 から数える）
+  // ----------------------------------------------------------
+  function getRepeatRange() {
+    if (range) return { start: range.start.measure, end: range.end.measure };
+    if (selection) return { start: selection.measure, end: selection.measure };
+    return { start: 0, end: score.measures.length - 1 };
+  }
+
+  // 「再生」タブに出す、くり返す範囲の文字（例："3〜5小節目"）（ステップ12-5b）
+  // 再生中はくり返している範囲、止まっているときは今選んでいる所から決めた範囲
+  let repeatText = $derived.by(() => {
+    const r = repeatRange ?? getRepeatRange();
+    return r.start === r.end ? `${r.start + 1}小節目` : `${r.start + 1}〜${r.end + 1}小節目`;
+  });
+
+  // ----------------------------------------------------------
+  // 関数：handleRepeat
+  // 「再生」タブの［区間リピート］が押されたとき（ステップ12-5b）
+  // 入・切を変え、再生中なら今の小節から鳴らし直す（入れたときは、選んでいる所からくり返す）
+  // ----------------------------------------------------------
+  function handleRepeat() {
+    repeatOn = !repeatOn;
+    replayIfPlaying();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：startRepeat
+  // 区間リピートの2回目からの予約を始める（ステップ12-5b）
+  //   repeat      … くり返す範囲 { start, end }
+  //   firstTicks  … 最初の回（カウントインを含む）の長さ（ティック）
+  //   tickSeconds … 1ティックが何秒か
+  // ----------------------------------------------------------
+  function startRepeat(repeat, firstTicks, tickSeconds) {
+    // 2回目からは、いつも範囲の頭から終わりまで（カウントインなし）
+    const result = buildEvents(score, repeat.start, mixer, repeat.end);
+    repeatRange = repeat;
+    repeatPlan = {
+      firstTicks: firstTicks,
+      period: result.totalTicks,
+      result: result,
+      clicks: metronome.on ? result.clicks : [],
+      tickSeconds: tickSeconds,
+      next: 0,
+    };
+    scheduleNextRepeat();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：scheduleNextRepeat
+  // 次の回が始まる REPEAT_LEAD 秒前になったら、その回を予約する（ステップ12-5b）
+  // 予約したら、さらに次の回のために自分をもう一度呼ぶ（止めるまで続く）
+  // ----------------------------------------------------------
+  function scheduleNextRepeat() {
+    const plan = repeatPlan;
+    if (!plan) return;
+    const offset = plan.firstTicks + plan.next * plan.period; // この回が、再生を始めてから何ティック目に始まるか
+    const wait = offset * plan.tickSeconds - REPEAT_LEAD - (getPlaybackTime() ?? 0); // 予約するまで待つ秒数
+    repeatTimer = setTimeout(
+      () => {
+        if (repeatPlan !== plan) return; // 止めた・鳴らし直したあとなら何もしない
+        scheduleMore(plan.result.events, plan.clicks, offset, plan.tickSeconds, metronome.volume);
+        plan.next = plan.next + 1;
+        scheduleNextRepeat();
+      },
+      Math.max(0, wait) * 1000,
+    );
+  }
+
+  // ----------------------------------------------------------
+  // 関数：playbackPosition
+  // 再生を始めてからのティックを、「今の回の中の位置」に直す（ステップ12-5b）
+  //   tick … 再生を始めてから何ティックたったか
+  // 戻り値：{ tick: 回の中の位置, highlights: その回の緑の一覧, measureStarts: その回の小節の始まり }
+  //   ・最初の回（区間リピートでないときは全部）：そのまま
+  //   ・2回目から：最初の回の長さを引いて、1回分の長さで割った余り
+  // ----------------------------------------------------------
+  function playbackPosition(tick) {
+    if (!repeatPlan || tick < repeatPlan.firstTicks) {
+      return { tick: tick, highlights: highlights, measureStarts: playMeasureStarts };
+    }
+    const inner = (tick - repeatPlan.firstTicks) % repeatPlan.period; // % は割った余り
+    return { tick: inner, highlights: repeatPlan.result.highlights, measureStarts: repeatPlan.result.measureStarts };
   }
 
   // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
@@ -221,8 +337,9 @@
     if (time === null) return; // 再生していなければ終わり
 
     // 秒をティックに直して、その時間に鳴っている音符を探す
-    const tick = time / highlightTickSeconds;
-    const now = highlights.filter((h) => h.startTick <= tick && tick < h.endTick);
+    // （ステップ12-5b：区間リピートの2回目からは、今の回の中の位置で探す）
+    const position = playbackPosition(time / highlightTickSeconds);
+    const now = position.highlights.filter((h) => h.startTick <= position.tick && position.tick < h.endTick);
 
     // 前と同じなら描き直さない（描き直しは時間がかかるので）
     const key = now.map((h) => `${h.part}-${h.measure}-${h.note}`).join(",");
@@ -1054,6 +1171,13 @@
   //   ・「再生」タブの設定（ミュート・ソロ・音量）に合わせて鳴らす（ステップ12-3b）
   // ----------------------------------------------------------
   function handlePlay() {
+    // 区間リピートが入っていれば、くり返す範囲を決めて、その頭から（ステップ12-5b）
+    if (repeatOn) {
+      const repeat = getRepeatRange();
+      playFrom(repeat.start, true, repeat);
+      return;
+    }
+
     // 始める小節（範囲を選んでいるときは、範囲の最初の小節）
     let startMeasure = 0;
     if (range) {
@@ -1069,14 +1193,16 @@
   // 決めた小節の頭から再生する（ステップ12-3b：handlePlay から分けた）
   //   startMeasure … 何小節目から鳴らすか（0 から数える）
   //   allowCountIn … カウントインを入れてよいか（鳴らし直しのときは false）（ステップ12-4b）
+  //   repeat       … 区間リピートの範囲 { start, end }（くり返さないときは null）（ステップ12-5b）
+  //                  くり返すときは、範囲の終わりまで鳴らしたあと、範囲の頭からくり返す
   // 再生のボタンと、再生中に音量を変えたときの鳴らし直しで使う
   // ----------------------------------------------------------
-  function playFrom(startMeasure, allowCountIn = true) {
+  function playFrom(startMeasure, allowCountIn = true, repeat = null) {
     if (!canPlay) return;
     message = "";
 
-    // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す）
-    let result = buildEvents(score, startMeasure, mixer);
+    // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す。くり返すときは範囲の終わりまで）
+    let result = buildEvents(score, startMeasure, mixer, repeat ? repeat.end : null);
     // カウントインが入っていれば、前に1小節ぶん足す（ステップ12-4b）
     let countInClicks = [];
     if (allowCountIn && metronome.countIn) {
@@ -1098,7 +1224,8 @@
       playing = false;
       clearHighlight();
     };
-    const started = playEvents(result.events, result.totalTicks, tickSeconds, onend, clicks, metronome.volume);
+    // くり返すときは、最後まで行っても終わらせない（onend の代わりに null を渡す）（ステップ12-5b）
+    const started = playEvents(result.events, result.totalTicks, tickSeconds, repeat ? null : onend, clicks, metronome.volume);
     playing = started;
 
     // 鳴っている音符を緑にし始める
@@ -1108,6 +1235,8 @@
       lastHighlightKey = "";
       cancelAnimationFrame(highlightFrame);
       highlightFrame = requestAnimationFrame(updateHighlight);
+      // くり返すときは、2回目からの予約を始める（ステップ12-5b）
+      if (repeat) startRepeat(repeat, result.totalTicks, tickSeconds);
     }
   }
 
@@ -1120,6 +1249,11 @@
     stopPlayback();
     playing = false;
     clearHighlight(); // 緑を消す
+    // 区間リピートの予約もやめる（ステップ12-5b）
+    clearTimeout(repeatTimer);
+    repeatTimer = null;
+    repeatPlan = null;
+    repeatRange = null;
   }
 
   // ----------------------------------------------------------
@@ -1130,11 +1264,12 @@
   // ----------------------------------------------------------
   function currentMeasure() {
     const time = getPlaybackTime(); // 再生を始めてから何秒たったか（始めてすぐはマイナス）
-    const tick = Math.max(0, time ?? 0) / highlightTickSeconds; // 秒をティックに直す
+    // 秒をティックに直し、今の回の中の位置にする（ステップ12-5b：区間リピートの2回目から）
+    const position = playbackPosition(Math.max(0, time ?? 0) / highlightTickSeconds);
     // 始まりの時刻が今より前の小節のうち、一番うしろのもの
-    let measure = playMeasureStarts[0].measure;
-    playMeasureStarts.forEach((m) => {
-      if (m.startTick <= tick) measure = m.measure;
+    let measure = position.measureStarts[0].measure;
+    position.measureStarts.forEach((m) => {
+      if (m.startTick <= position.tick) measure = m.measure;
     });
     return measure;
   }
@@ -1421,6 +1556,9 @@
       onmixer={handleMixer}
       {metronome}
       onmetronome={handleMetronome}
+      {repeatOn}
+      {repeatText}
+      onrepeat={handleRepeat}
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}

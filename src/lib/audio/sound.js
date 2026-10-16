@@ -316,6 +316,7 @@ export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = f
 //   totalTicks … 最後までの長さ（ティック）
 //   tickSeconds … 1ティックが何秒か
 //   onend      … 最後まで鳴り終わったときに呼ぶ関数
+//                （ステップ12-5b：null を渡すと、最後まで行っても終わらせない。区間リピートで、続きを scheduleMore で足すため）
 //   clicks     … メトロノームのクリックの一覧 [{ startTick, strong }, ...]（鳴らさないときは空の配列）（ステップ12-4a）
 //   clickVolume … クリックの音量（0〜100）（ステップ12-4a）
 // 楽器の音を選んでいて、読み込みが終わっていないときは、何もせずに false を返す
@@ -333,6 +334,54 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}, cl
   // 予約が間に合うように、ほんの少し（0.1秒）あとから始める
   const startTime = ctx.currentTime + 0.1;
   playStartTime = startTime; // 緑にする音符を決めるために覚えておく
+
+  // 音とクリックを予約する（ステップ12-5b：scheduleEvents に分けた）
+  scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume);
+
+  // 最後まで行ったら知らせる（音の余韻のぶん、0.3秒だけ待つ）
+  // onend が null のとき（区間リピート）は、終わらせない（止めるのは stopPlayback）（ステップ12-5b）
+  if (onend) {
+    const totalSeconds = 0.1 + totalTicks * tickSeconds + 0.3;
+    endTimer = setTimeout(() => {
+      endTimer = null;
+      stopFunctions = [];
+      playStartTime = null;
+      onend();
+    }, totalSeconds * 1000);
+  }
+
+  return true;
+}
+
+// ----------------------------------------------------------
+// 関数：scheduleMore
+// 再生中に、続きの音とクリックを足して予約する（ステップ12-5b）
+// 区間リピートで、2回目・3回目…を、前の回のすぐあとに予約するのに使う
+//   events      … 鳴らす音の一覧（時刻は、その回の頭を 0 にしたもの）
+//   clicks      … クリックの一覧（同じく、その回の頭を 0 にしたもの）
+//   offsetTicks … その回が、再生を始めてから何ティック目に始まるか
+//   tickSeconds … 1ティックが何秒か
+//   clickVolume … クリックの音量（0〜100）
+// 再生していないときは何もしない
+// ----------------------------------------------------------
+export function scheduleMore(events, clicks, offsetTicks, tickSeconds, clickVolume) {
+  if (playStartTime === null) return;
+  scheduleEvents(events, clicks, playStartTime + offsetTicks * tickSeconds, tickSeconds, clickVolume);
+}
+
+// ----------------------------------------------------------
+// 関数：scheduleEvents
+// 音とクリックを、決めた時刻を頭にして予約する（ステップ12-5b：playEvents から分けた）
+//   events      … 鳴らす音の一覧
+//   clicks      … クリックの一覧
+//   startTime   … 頭の時刻（AudioContext の時計で）。音の startTick は、ここから数える
+//   tickSeconds … 1ティックが何秒か
+//   clickVolume … クリックの音量（0〜100）
+// 止めるための関数は stopFunctions に入れる（stopPlayback でまとめて止める）
+// ----------------------------------------------------------
+function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
+  // 今選んでいる楽器の音（電子音のときは null）
+  const instruments = currentInstruments();
 
   events.forEach((event) => {
     const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
@@ -375,17 +424,6 @@ export function playEvents(events, totalTicks, tickSeconds, onend = () => {}, cl
     const time = startTime + click.startTick * tickSeconds;
     stopFunctions.push(playClick(time, click.strong, clickVolume));
   });
-
-  // 最後まで行ったら知らせる（音の余韻のぶん、0.3秒だけ待つ）
-  const totalSeconds = 0.1 + totalTicks * tickSeconds + 0.3;
-  endTimer = setTimeout(() => {
-    endTimer = null;
-    stopFunctions = [];
-    playStartTime = null;
-    onend();
-  }, totalSeconds * 1000);
-
-  return true;
 }
 
 // ----------------------------------------------------------
