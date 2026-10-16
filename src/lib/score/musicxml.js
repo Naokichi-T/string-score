@@ -4,6 +4,7 @@
 // （ステップ8-1：書き出しの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
 // （ステップ8-1b：コモンタイム（C）・カットタイム（¢）の拍子記号）
 // （ステップ8-2：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
+// （ステップ14-3：重音。1つ目の音の <note> のあとに、<chord/> を付けた <note> を低い順に並べる）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -30,7 +31,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -368,11 +369,17 @@ function tempoXml(score) {
 //   tupletMark … 連符の中の音なら { actual, normal, start, stop, bracket }、そうでなければ null（ステップ10-5）
 //                start … 連符の最初の音か　stop … 連符の最後の音か　bracket … 括弧を付けるか
 //   measureRest … 小節まるごとの休符か（true なら <rest measure="yes"/> にして、形 <type> は書かない）（ステップ13-3）
+//   chordMember … 重音の2つ目からの音か（true なら <chord/> の印を書く。「前の音と同時に鳴る」という意味）（ステップ14-3）
+// 重音のときは、高さ1つ分ずつの「書き出し用の音」を作って、この関数を高さの数だけ呼ぶ（partXml を参照）
+//   書き出し用の音の pitch はその高さ、tie は「その高さが次の音へタイでつながるか」
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false) {
+function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false, chordMember = false) {
   const lines = [];
   lines.push("      <note>");
+
+  // 重音の2つ目からの音：高さの前に <chord/> を書く決まり（ステップ14-3）
+  if (chordMember) lines.push("        <chord/>");
 
   // 高さ（休符なら <rest/>。小節まるごとの休符なら <rest measure="yes"/>（ステップ13-3））
   if (measureRest) {
@@ -679,6 +686,46 @@ function sameTimeSignature(a, b) {
 }
 
 // ----------------------------------------------------------
+// 関数：chordParts
+// 音符を、高さ1つ分ずつの「書き出し用の音」に分ける（ステップ14-3）
+// 重音でなければ1つだけ。重音なら低い順に、高さの数だけ作る
+//   note      … 音符のデータ（重音なら chord が付いている）
+//   tiedFrom  … 前の音（タイでこの音につながってきているときだけ。つながっていなければ null）
+//   nextNote  … 次の音（小節をまたいでもよい。なければ null）
+// 戻り値：[{ note: 書き出し用の音, tieStop: 前からタイでつながってきた高さか }, ...]
+// 決まり
+//   ・1つ目（いちばん低い音）は、記号も全部付けたまま（記号は1つ目の <note> にだけ書く）
+//   ・2つ目からは、高さ・長さ・連符の印だけ（記号を2回書かないため）
+//   ・タイの「ここから」は、次の音に同じ高さがある高さだけ。「ここまで」は、前の音に同じ高さがある高さだけ
+//   ・指番号：指番号の数と高さの数が同じなら、付けた順に下の高さから1つずつ。ちがうときは、全部を1つ目に
+// ----------------------------------------------------------
+function chordParts(note, tiedFrom, nextNote) {
+  const pitches = notePitches(note);
+  const nextPitches = nextNote && !nextNote.rest ? notePitches(nextNote) : [];
+  const fromPitches = tiedFrom ? notePitches(tiedFrom) : [];
+  const fingerings = note.fingerings ?? [];
+  const splitFingers = pitches.length > 1 && fingerings.length === pitches.length; // 指番号を1つずつ分けるか
+
+  return pitches.map((pitch, h) => {
+    const tieStart = !!note.tie && nextPitches.some((other) => samePitch(other, pitch));
+    const tieStop = fromPitches.some((other) => samePitch(other, pitch));
+    let piece;
+    if (h === 0) {
+      // 1つ目：記号も全部付けたまま。高さとタイだけ、この高さのものにする
+      piece = { ...note, pitch: pitch, tie: tieStart };
+      delete piece.chord;
+      if (splitFingers) piece.fingerings = [fingerings[0]];
+    } else {
+      // 2つ目から：高さ・長さ・連符の印だけ
+      piece = { pitch: pitch, duration: note.duration, dots: note.dots ?? 0, tie: tieStart };
+      if (note.tuplet) piece.tuplet = note.tuplet;
+      if (splitFingers) piece.fingerings = [fingerings[h]];
+    }
+    return { note: piece, tieStop: tieStop };
+  });
+}
+
+// ----------------------------------------------------------
 // 関数：partXml
 // 1つのパートの <part> を作る
 //   score … 楽譜データ
@@ -709,6 +756,7 @@ function partXml(score, p, divisions) {
     }
   });
   const lastIndex = part.measures.length - 1;
+  let noteIndex = -1; // パート全体で、今書いている音の番号（partNotes の中の番号）（ステップ14-3）
 
   // 1つ前の小節の拍子・調・音部記号（変わったかどうかを比べるため）（ステップ8-1b）
   let prevTime = null;
@@ -743,7 +791,7 @@ function partXml(score, p, divisions) {
     if (p === 0) lines.push(...jumpStartXml(score, i));
 
     // 臨時記号を、五線譜の表示と同じ決め方で決める
-    // （ステップ14-1：重音のため、高さごとの配列が返ってくる。重音の書き出しは 14-3 で入れるので、今はいちばん低い音の分だけ使う）
+    // （ステップ14-1：重音のため、高さごとの配列が返ってくる。ステップ14-3：高さごとに書く）
     const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedInNote);
 
     // この小節の連符（ステップ10-5）
@@ -751,8 +799,9 @@ function partXml(score, p, divisions) {
 
     // 音符・休符
     let prevTie = tiedIn; // 1つ前の音が、この音にタイでつながっているか
+    let prevTiedNote = tiedInNote; // 1つ前の音（タイでこの音につながっているときだけ。高さごとのタイの「ここまで」に使う）（ステップ14-3）
     measure.notes.forEach((note, k) => {
-      const tieStop = prevTie && !note.rest;
+      noteIndex = noteIndex + 1; // パート全体での、この音の番号（次の音を探すのに使う）（ステップ14-3）
 
       // 連符の情報（連符でなければ null）（ステップ10-5）
       // 括弧は、4分音符以上の連符か、休符が入っている連符に付ける（連桁で全部つながらないとき。画面の表示と同じ）
@@ -772,16 +821,27 @@ function partXml(score, p, divisions) {
       lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
       // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
-      // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
-      if (!note.rest && note.grace) lines.push(...graceXml(note, keyAt(score, i)));
-      // 小節まるごとの休符なら、その印も渡す（ステップ13-3）
-      lines.push(...noteXml(xmlNote, accidentals[k][0] ?? null, tieStop, divisions, tupletMark, isMeasureRest(measure.notes)));
+      // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）（重音には前打音を付けない決まり（ステップ14-1））
+      if (!note.rest && note.grace && !note.chord) lines.push(...graceXml(note, keyAt(score, i)));
+
+      if (note.rest) {
+        // 休符：今までどおり（小節まるごとの休符なら、その印も渡す（ステップ13-3））
+        lines.push(...noteXml(xmlNote, null, false, divisions, tupletMark, isMeasureRest(measure.notes)));
+      } else {
+        // 音符：高さごとに <note> を書く（重音でなければ1つだけ）（ステップ14-3）
+        const nextNote = partNotes[noteIndex + 1] ?? null;
+        chordParts(xmlNote, prevTie ? prevTiedNote : null, nextNote).forEach((piece, h) => {
+          // 2つ目からの音は <chord/> を付け、連符の始まり・終わりの印は書かない（1つ目に書く）
+          const mark = tupletMark && h > 0 ? { ...tupletMark, start: false, stop: false } : tupletMark;
+          lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0));
+        });
+      }
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
+      prevTiedNote = prevTie ? note : null;
     });
     tiedIn = prevTie; // 次の小節へ引き継ぐ
-    const lastNote = measure.notes[measure.notes.length - 1];
-    tiedInNote = prevTie ? lastNote : null; // 次の小節の臨時記号のために引き継ぐ（ステップ14-1）
+    tiedInNote = prevTiedNote; // 次の小節の臨時記号・タイのために引き継ぐ（ステップ14-1）
 
     // rit.・accel. の範囲の終わりの小節なら、最後の音のあとに点線の終わりを書く（一番上のパートだけ）（ステップ11-6c）
     if (p === 0 && score.measures[i].gradualEnd) lines.push(...gradualEndXml());

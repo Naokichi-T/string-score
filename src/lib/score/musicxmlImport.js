@@ -4,6 +4,7 @@
 // （ステップ8-3：読み込みの基本（タイトル・作曲者・テンポ・パート・拍子・調・音部記号・音符・休符・付点・タイ））
 // （ステップ8-4a：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 // （ステップ8-4b：重音・2つ目の声部・装飾音・アウフタクト）
+// （ステップ14-3：重音を読むようにした。<chord/> の付いた音を、1つ前の音に重ねる）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -23,7 +24,8 @@
 //
 // 【このアプリで扱えないもの】（ステップ8-4b）
 //   読めない長さの音（32分音符・読めない連符など）がある小節 … 小節ごと休符にする
-//   重音 … 一番上の音だけ残す（ほかの音に付いていた記号は、残した音にまとめる）
+//   重音 … 4音までは重音として読む（5音以上なら上の4音を残す）（ステップ14-3。前は一番上の音だけ残していた）
+//          ほかの音に付いていた記号は、重音全体の記号にまとめる
 //   2つ目の声部・装飾音 … 使わない
 //   アウフタクト（1小節目が拍子より短い）… 1小節目の前を休符で埋める
 //   どれも、最後にまとめて知らせる
@@ -37,7 +39,22 @@
 // ==========================================================
 
 import { unzipSync } from "fflate";
-import { INSTRUMENTS, measureTicks, restsForSpan, renameParts, TICKS_PER_16TH, DURATION_ORDER, durationToTicks, tupletGroups, createPartId, tempoAt } from "./model.js";
+import {
+  INSTRUMENTS,
+  measureTicks,
+  restsForSpan,
+  renameParts,
+  TICKS_PER_16TH,
+  DURATION_ORDER,
+  durationToTicks,
+  tupletGroups,
+  createPartId,
+  tempoAt,
+  setNotePitches,
+  samePitch,
+  pitchNumber,
+  MAX_CHORD_NOTES,
+} from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
 
@@ -55,9 +72,6 @@ const TICKS_TO_DURATION = {
   2: { duration: "eighth", dots: 0 }, // 8分音符
   1: { duration: "16th", dots: 0 }, // 16分音符
 };
-
-// ドレミファソラシの、ドからの半音の数（重音でどの音が一番上かを比べるのに使う）（ステップ8-4b）
-const STEP_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 // ----------------------------------------------------------
 // パート名から楽器を決めるための言葉（小文字で比べる）
@@ -423,15 +437,6 @@ function readNote(noteElement, divisions) {
   const note = { pitch: { step: step, alter: alter, octave: octave }, duration: shape.duration, dots: shape.dots, tie: tie };
   if (tuplet) note.tuplet = tuplet; // 連符の印（ステップ10-6）
   return { note: note, ticks: ticks };
-}
-
-// ----------------------------------------------------------
-// 関数：pitchNumber
-// 音の高さを、比べられる1つの数にする（半音1つで 1 ちがう）（ステップ8-4b）
-// 例：ド4 → 48、ド♯4 → 49、レ4 → 50
-// ----------------------------------------------------------
-function pitchNumber(pitch) {
-  return pitch.octave * 12 + STEP_SEMITONES[pitch.step] + (pitch.alter ?? 0);
 }
 
 // ----------------------------------------------------------
@@ -997,7 +1002,9 @@ function readPart(partElement, counter, skipped) {
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
   let mainVoice = null; // このパートで使う声部（最初の音の声部）
-  let countedChord = null; // 重音として数えた最後の音（同じ重音を2回数えないため）（ステップ8-4b）
+  // 重音にした音の一覧（小節を読み終わってから、高さを並べ直すため）（ステップ14-3）
+  //   { note: 重音の音符のデータ, groups: [{ pitch: 高さ, fingers: その高さの <note> に付いていた指番号 }, ...] }
+  const chords = [];
   const measures = [];
   const problems = [];
 
@@ -1092,24 +1099,37 @@ function readPart(partElement, counter, skipped) {
           continue;
         }
 
-        // 重音の2つ目以降：一番上の音だけ残す（ステップ8-4b）
+        // 重音の2つ目以降：1つ前の音に重ねる（ステップ14-3。前は一番上の音だけ残していた）
+        //   ・高さは、あとで（小節を読み終わってから）低い順に並べ直す。それまでは groups にためておく
+        //   ・指番号は、高さごとに分けて覚えておく（低い音の順に並べ直すため）
+        //   ・タイは、どれか1つの音に「ここから」があれば付ける（つながるのは同じ高さの音どうしだけ）
+        //   ・ほかの記号（スラーなど）は、重音全体の記号にまとめる
         if (childElement(element, "chord")) {
           const base = measure.notes[measure.notes.length - 1]; // 重音の1つ目の音（もう読んである）
           if (!base || base.rest || !measure.readable) continue;
           const member = readNote(element, divisions).note;
           if (!member || member.rest) continue;
-          if (pitchNumber(member.pitch) > pitchNumber(base.pitch)) {
-            // こちらのほうが高い：高さとタイを入れ替える
-            base.pitch = member.pitch;
-            base.tie = member.tie;
+
+          // この重音のためた情報（はじめて重ねるときは、1つ目の音の分から作る）
+          let chord = chords.find((c) => c.note === base);
+          if (!chord) {
+            chord = { note: base, groups: [{ pitch: base.pitch, fingers: [...(base.fingerings ?? [])] }] };
+            chords.push(chord);
           }
-          // この音に付いていた記号（スラーなど）は、残した音にまとめる
+
+          // 記号を読む（指番号は、読む前と後をくらべて、この音の分だけを取り出す）
+          const before = [...(base.fingerings ?? [])];
           readNotations(element, base, state, counter);
-          // 重音1つにつき1回だけ数える（3つ以上の音の重音でも1回）
-          if (countedChord !== base) {
-            report(skipped, "重音（一番上の音だけ残した）");
-            countedChord = base;
+          const added = (base.fingerings ?? []).filter((finger) => !before.includes(finger));
+
+          // 同じ高さ（鍵盤で同じ所）がもうあれば、まとめる（指番号だけ足す）
+          const same = chord.groups.find((group) => samePitch(group.pitch, member.pitch));
+          if (same) {
+            same.fingers.push(...added);
+          } else {
+            chord.groups.push({ pitch: member.pitch, fingers: added });
           }
+          if (member.tie) base.tie = true;
           continue;
         }
 
@@ -1157,7 +1177,65 @@ function readPart(partElement, counter, skipped) {
   // 最後まで主音が来なかった前打音は使わない（ステップ11-8b）
   if (state.pendingGrace) report(skipped, "装飾音");
 
+  // 重音を、決まりどおりの形にする（ステップ14-3）
+  chords.forEach((chord) => finishChord(chord, skipped, counter));
+
   return { measures: measures, firstClef: firstClef, problems: problems };
+}
+
+// ----------------------------------------------------------
+// 関数：finishChord
+// 読み込んだ重音を、このアプリの重音の決まりどおりの形にする（ステップ14-3）
+//   chord   … { note: 重音の音符のデータ, groups: [{ pitch, fingers }, ...] }（readPart でためたもの）
+//   skipped … 使わなかった音を数える表
+//   counter … 使えなかった記号を数える表
+// ・高さを低い順に並べて、pitch（いちばん低い音）と chord（その上の音）に入れる
+// ・5音以上なら、上の MAX_CHORD_NOTES 音を残す（減らしたことを数える）
+// ・指番号を、低い音の順に並べ直す（書き出しのときと同じ順になる）
+// ・重音に付けられない記号（前打音・装飾・グリッサンド）は外して数える
+// ----------------------------------------------------------
+function finishChord(chord, skipped, counter) {
+  const note = chord.note;
+  // 低い順に並べる
+  let groups = [...chord.groups].sort((a, b) => pitchNumber(a.pitch) - pitchNumber(b.pitch));
+  if (groups.length > MAX_CHORD_NOTES) {
+    groups = groups.slice(groups.length - MAX_CHORD_NOTES); // 上の4音
+    report(skipped, `5音以上の重音（上の${MAX_CHORD_NOTES}音を残した）`);
+  }
+  setNotePitches(
+    note,
+    groups.map((group) => group.pitch),
+  ); // pitch（いちばん低い音）と chord（その上の音）に入れる
+
+  // 指番号：低い音の順に並べ直す（同じ数字は1つだけ）
+  const fingers = [];
+  groups.forEach((group) => {
+    group.fingers.forEach((finger) => {
+      if (!fingers.includes(finger)) fingers.push(finger);
+    });
+  });
+  if (fingers.length > 0) {
+    note.fingerings = fingers;
+  } else {
+    delete note.fingerings;
+  }
+
+  // 1音だけになったとき（同じ高さどうしだった）は、ふつうの音符なので、ここまで
+  if (!note.chord) return;
+
+  // 重音に付けられない記号を外す
+  if (note.grace) {
+    delete note.grace;
+    report(skipped, "装飾音");
+  }
+  if (note.ornament) {
+    delete note.ornament;
+    report(counter, "重音に付いたトリルなどの装飾");
+  }
+  if (note.glissando) {
+    delete note.glissando;
+    report(counter, "重音のグリッサンド");
+  }
 }
 
 // ----------------------------------------------------------
@@ -1326,13 +1404,16 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   });
 
   // タイの相手が休符・違う高さになっている所は外す（つながる先がない）
+  // （ステップ14-3：重音なら、同じ高さの音が1つでもあれば残す。重音へのグリッサンドも外す（重音にはすべらせない決まり））
   parts.forEach((part) => {
     const flat = part.measures.flatMap((m) => m.notes);
     flat.forEach((note, k) => {
-      if (!note.tie) return;
       const next = flat[k + 1];
-      const samePitch = next && !next.rest && next.pitch.step === note.pitch.step && next.pitch.alter === note.pitch.alter && next.pitch.octave === note.pitch.octave;
-      if (!samePitch) note.tie = false;
+      if (note.glissando && next && next.chord) delete note.glissando;
+      if (!note.tie) return;
+      const nextPitches = next && !next.rest ? [next.pitch, ...(next.chord ?? [])] : [];
+      const hasSame = [note.pitch, ...(note.chord ?? [])].some((pitch) => nextPitches.some((other) => samePitch(other, pitch)));
+      if (!hasSame) note.tie = false;
     });
   });
 
