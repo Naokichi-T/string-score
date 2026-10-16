@@ -1141,6 +1141,7 @@ export function toggleEnding(score, from, to, number) {
 // i 小節目に、D.C.・D.S. で使う印を付ける・外す（ステップ11-7c）
 //   kind … "segno"（𝄋：小節の頭）・"coda"（𝄌：コーダの始まり。小節の頭）
 //           "toCoda"（To Coda：小節の終わり）・"fine"（Fine：小節の終わり）
+//           "rehearsal"（練習番号：小節の頭。文字は model.js の rehearsalLabel で数えて決める）（ステップ11-7d）
 // もう付いていたら外す
 // 𝄋 と 𝄌 は楽譜に1つだけ：ほかの小節に付いていたら、そこからは外す（＝押した小節へ移る）
 // 戻り値：新しい楽譜データ

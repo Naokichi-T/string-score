@@ -247,6 +247,26 @@ export function tempoAt(score, i) {
   return { tempo: score.tempo, tempoText: score.tempoText ?? "" };
 }
 
+// ----------------------------------------------------------
+// 関数：rehearsalLabel
+// i 小節目の練習番号の文字を返す（ステップ11-7d）
+// 練習番号（measures[i].rehearsal）の付いた小節を前から数えて、A, B, C… … Z, AA, BB… と付ける
+// （文字はデータに持たず、そのつど数えるので、途中に足したり消したりすると後ろが付け直される）
+//   例：3小節目と9小節目に付いていたら、3小節目は "A"、9小節目は "B"
+// 戻り値：文字（その小節に練習番号がなければ null）
+// ----------------------------------------------------------
+export function rehearsalLabel(measures, i) {
+  if (!measures[i].rehearsal) return null;
+  // この小節までに、練習番号がいくつあるか（この小節も入れる）
+  let count = 0;
+  for (let k = 0; k <= i; k++) {
+    if (measures[k].rehearsal) count = count + 1;
+  }
+  const n = count - 1; // 0 から数えた番号
+  const letter = String.fromCharCode(65 + (n % 26)); // 65 は "A"
+  return letter.repeat(Math.floor(n / 26) + 1); // 27個目からは AA, BB…
+}
+
 // D.C.・D.S. の種類と、楽譜に書く文字（ステップ11-7c）
 // 小節の情報の jump に、この左側の名前（"dc" など）を入れる
 export const JUMP_TEXTS = {

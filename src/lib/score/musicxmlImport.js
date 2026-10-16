@@ -660,7 +660,7 @@ function jumpWordKind(text) {
 
 // ----------------------------------------------------------
 // 関数：readJumpMarks
-// D.C.・D.S.・Fine・To Coda・𝄋（Segno）・𝄌（Coda）を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-7c）
+// D.C.・D.S.・Fine・To Coda・𝄋（Segno）・𝄌（Coda）・練習番号を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-7c）
 // 一番上のパートの小節だけを見る（全パート共通の印なので）
 //   ・文字（<words>）："Fine" → fine、"To Coda" → toCoda、"D.C. al Fine" など → jump
 //   ・文字がなくても、<sound> の印でも読む：fine="yes" → fine、tocoda → toCoda、dacapo="yes" → D.C.、dalsegno → D.S.
@@ -668,6 +668,7 @@ function jumpWordKind(text) {
 //       ただし同じ <direction> に「To Coda」か tocoda があれば、𝄌 の記号は To Coda の印として使われているので To Coda にする
 //       D.C.・D.S. と同じ <direction> にある記号は、その文字の飾りなので 𝄋・𝄌 にはしない
 //   ・𝄋・𝄌 は楽譜に1つだけ：2つ目からは使わずに数える
+//   ・<rehearsal> → 練習番号（ステップ11-7d。文字は読まず、このアプリの決め方 A, B, C… で付け直す）
 //   measureElements … 一番上のパートの <measure> の並び
 //   score           … 作った楽譜データ（measures に書き足す）
 // 戻り値：使わなかった 𝄋・𝄌 の数
@@ -701,6 +702,9 @@ function readJumpMarks(measureElements, score) {
       const attr = (name) => (sound ? sound.getAttribute(name) : null);
       const segnoGlyph = types.some((type) => childElements(type, "segno").length > 0) || !!attr("segno");
       const codaGlyph = types.some((type) => childElements(type, "coda").length > 0) || !!attr("coda");
+
+      // ⓪ 練習番号（どこに付いているかだけを読む）（ステップ11-7d）
+      if (types.some((type) => childElements(type, "rehearsal").length > 0)) info.rehearsal = true;
 
       // ① Fine・To Coda
       if (kinds.includes("fine") || attr("fine") === "yes") info.fine = true;

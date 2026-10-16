@@ -30,7 +30,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -264,11 +264,21 @@ function gradualEndXml() {
 // 関数：jumpStartXml
 // 小節の頭の 𝄋（Segno）・𝄌（Coda）の <direction> を作る（いちばん上のパートの、小節の頭に書く）（ステップ11-7c）
 //   見た目の印（<segno/>・<coda/>）と、ほかのアプリが再生に使う印（<sound segno>・<sound coda>）を両方書く
-//   info … 小節の情報（score.measures[i]）
+// （ステップ11-7d：練習番号 <rehearsal> も、いちばん先に書く。四角で囲む形 enclosure="square"）
+//   score … 楽譜データ（練習番号の文字を数えるのに使う）
+//   i     … 何小節目か
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // ----------------------------------------------------------
-function jumpStartXml(info) {
+function jumpStartXml(score, i) {
+  const info = score.measures[i];
   const lines = [];
+  if (info.rehearsal) {
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <rehearsal enclosure="square">${rehearsalLabel(score.measures, i)}</rehearsal>`);
+    lines.push("        </direction-type>");
+    lines.push("      </direction>");
+  }
   if (info.segno) {
     lines.push(`      <direction placement="above">`);
     lines.push("        <direction-type>");
@@ -672,8 +682,8 @@ function partXml(score, p, divisions) {
     if (isFirst && p === 0) lines.push(...tempoXml(score));
     // 2小節目からのテンポの指示（途中のテンポ変更・a tempo・rit.・accel.）も、一番上のパートにだけ書く（ステップ11-6c）
     if (p === 0) lines.push(...tempoMarksXml(score, i));
-    // 𝄋・𝄌 も、一番上のパートの小節の頭にだけ書く（ステップ11-7c）
-    if (p === 0) lines.push(...jumpStartXml(score.measures[i]));
+    // 𝄋・𝄌・練習番号も、一番上のパートの小節の頭にだけ書く（ステップ11-7c・11-7d）
+    if (p === 0) lines.push(...jumpStartXml(score, i));
 
     // 臨時記号を、五線譜の表示と同じ決め方で決める
     const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedIn);

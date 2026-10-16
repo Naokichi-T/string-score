@@ -6,6 +6,7 @@
   //   ・くり返し：くり返しの始まり（‖:）・くり返しの終わり（:‖）
   //   ・1番・2番かっこ（ステップ11-7b）
   //   ・𝄋・𝄌・To Coda・Fine、D.C.・D.S.（ステップ11-7c）
+  //   ・練習番号（ステップ11-7d）
   // 今付いているもののボタンは青くなる。くり返しのボタンは、もう一度押すと外れる
   // ==========================================================
 
@@ -23,7 +24,9 @@
   //     segno・coda   … 範囲の最初の小節（音1つならその小節）の頭に 𝄋・𝄌 があるか
   //     toCoda・fine  … 範囲の最後の小節（音1つならその小節）の終わりに To Coda・Fine があるか
   //     jump          … 範囲の最後の小節の終わりの D.C.・D.S. の種類（なければ null）
+  //     rehearsal     … 範囲の最初の小節の頭に練習番号があるか（ステップ11-7d）
   //   onjumpmark  … 𝄋・𝄌・To Coda・Fine のボタンが押されたときに呼ぶ関数（"segno"・"coda"・"toCoda"・"fine" を渡す）（ステップ11-7c）
+  //                 （ステップ11-7d：［練習番号］のときは "rehearsal" を渡す）
   //   onjump      … D.C.・D.S. のプルダウンで選んだときに呼ぶ関数（null か "dc" などを渡す）（ステップ11-7c）
   let { current = null, onbarline = () => {}, onrepeatmark = () => {}, onending = () => {}, onjumpmark = () => {}, onjump = () => {} } = $props();
 
@@ -180,6 +183,19 @@
       {/each}
     </select>
   </div>
+
+  <!-- 練習番号（選んでいる小節の頭に付ける。文字は A, B, C… と自動で決まる）（ステップ11-7d） -->
+  <div class="group">
+    <button
+      class:active={!!current?.rehearsal}
+      {disabled}
+      onclick={() => onjumpmark("rehearsal")}
+      title="練習番号：選んでいる小節の頭に付ける（範囲を選んでいるときは、範囲の最初の小節）。文字は前から A, B, C… と自動で決まる。もう一度押すと外れる"
+    >
+      <span class="rehearsal-icon">A</span>
+      <span class="text">練習番号</span>
+    </button>
+  </div>
 </div>
 
 <style>
@@ -235,6 +251,17 @@
     position: relative;
     top: 9px; /* Bravura の記号は文字の基準線より上に寄っているので、まん中に見えるよう下げる */
   }
+  /* 練習番号のボタンの、四角で囲んだ「A」（ステップ11-7d） */
+  .rehearsal-icon {
+    display: inline-block;
+    min-width: 14px;
+    padding: 0 3px;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 18px;
+    text-align: center;
+    border: 1.5px solid currentColor;
+  }
   /* D.C.・D.S. のプルダウン（ほかのボタンと同じ高さ）（ステップ11-7c） */
   select {
     height: 40px;
@@ -251,6 +278,7 @@
   /* 中の SVG と文字では、マウスの操作を受け取らず、下のボタンに通す */
   button svg,
   button .glyph,
+  button .rehearsal-icon,
   button .text {
     pointer-events: none;
   }

@@ -1302,6 +1302,7 @@
           toCoda: !!score.measures[barlineEndMeasure].toCoda,
           fine: !!score.measures[barlineEndMeasure].fine,
           jump: score.measures[barlineEndMeasure].jump ?? null,
+          rehearsal: !!score.measures[barlineStartMeasure].rehearsal, // 練習番号は範囲の最初の小節の頭（ステップ11-7d）
         },
   );
 
@@ -1351,13 +1352,15 @@
   // ----------------------------------------------------------
   // 関数：handleJumpMark
   // 「小節線」タブの［Segno］［Coda］［To Coda］［Fine］が押されたとき：付ける・外す（ステップ11-7c）
-  //   kind … "segno"・"coda"（範囲の最初の小節の頭に）か "toCoda"・"fine"（範囲の最後の小節の終わりに）
+  // （ステップ11-7d：［練習番号］も、ここで付ける・外す）
+  //   kind … "segno"・"coda"・"rehearsal"（範囲の最初の小節の頭に）か "toCoda"・"fine"（範囲の最後の小節の終わりに）
   // ----------------------------------------------------------
   function handleJumpMark(kind) {
     if (barlineEndMeasure === null) return;
     message = "";
     const end = rangeEnd;
-    const measure = kind === "segno" || kind === "coda" ? barlineStartMeasure : barlineEndMeasure;
+    const atStart = kind === "segno" || kind === "coda" || kind === "rehearsal"; // 小節の頭に付けるものか
+    const measure = atStart ? barlineStartMeasure : barlineEndMeasure;
     commit(toggleJumpMark(score, measure, kind));
     rangeEnd = end;
   }

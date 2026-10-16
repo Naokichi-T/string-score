@@ -14,7 +14,7 @@
 //   render/beatLines.js … 拍の線を描く（ステップ12-7）
 // ==========================================================
 
-import { tempoAt, JUMP_TEXTS } from "./model.js";
+import { tempoAt, JUMP_TEXTS, rehearsalLabel } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -46,7 +46,8 @@ const SEGNO_GLYPH = "\uE047"; // 𝄋（Segno）の楽譜用フォントの文�
 const CODA_GLYPH = "\uE048"; // 𝄌（Coda）の楽譜用フォントの文字（ステップ11-7c）
 const JUMP_GLYPH_SIZE = 24; // 𝄋・𝄌 の大きさ（ステップ11-7c）
 // 𝄋・𝄌・To Coda・Fine・D.C.・D.S. のある小節で、記号が小節からはみ出さないように確保する幅のめやす（ステップ11-7c）
-const JUMP_MARK_WIDTHS = { segno: 26, coda: 26, toCoda: 90, fine: 45, jump: 105 };
+const JUMP_MARK_WIDTHS = { segno: 26, coda: 26, toCoda: 90, fine: 45, jump: 105, rehearsal: 30 };
+const REHEARSAL_PADDING = 4; // 練習番号の文字と、まわりの四角のすき間（ステップ11-7d）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -633,6 +634,7 @@ function drawEndings(context, lineEndings) {
 // 同じ小節にいくつかあるときは、この順に左から並べる
 // （ステップ11-7c：D.C.・D.S. で使う印も、同じ高さに描く）
 //   ・𝄋・𝄌（小節の頭）           … テンポの指示より左（小節のいちばん左）
+// （ステップ11-7d：練習番号（四角で囲んだ A・B…）は、𝄋・𝄌 よりさらに左に描く）
 //   ・To Coda・Fine・D.C.・D.S.（小節の終わり） … 小節の右端に寄せる。rit.・accel. の点線は、その手前で止める
 // 高さ：五線から少し上（音符が五線より上に出ているときは、その上）。点線は同じ段の中では同じ高さで続ける
 //   stave       … いちばん上のパートの、その小節の五線
@@ -649,7 +651,7 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   const hasTempo = i > 0 && info.tempo !== undefined; // 途中のテンポ変更（1小節目は楽譜のいちばん上に描くので除く）
   const resets = hasTempo || !!info.aTempo; // テンポ変更・a tempo のあとは、rit.・accel. の点線を続けない
   if (resets) gradualLine = null;
-  const hasJumpMarks = jumpMarksWidth(info) > 0; // 𝄋・𝄌・To Coda・Fine・D.C.・D.S. があるか（ステップ11-7c）
+  const hasJumpMarks = jumpMarksWidth(info) > 0; // 𝄋・𝄌・To Coda・Fine・D.C.・D.S.・練習番号があるか（ステップ11-7c・11-7d）
   if (!hasTempo && !info.aTempo && !info.gradual && !gradualLine && !hasJumpMarks) return null; // この小節には何もない
 
   // 文字の下端の高さ：五線の一番上の線より TEMPO_CHANGE_RAISE だけ上
@@ -667,7 +669,10 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   // 書き始める横の位置：小節の音符が始まる所（段の頭なら、音部記号・調号のあと）
   let x = stave.getNoteStartX() - 4;
 
-  // ⓪ 𝄋・𝄌（小節の頭）（ステップ11-7c）
+  // ⓪ 練習番号（小節のいちばん左）（ステップ11-7d）
+  if (info.rehearsal) x = drawRehearsal(context, rehearsalLabel(score.measures, i), x, y) + TEMPO_MARK_SPACE;
+
+  // ⓪-2 𝄋・𝄌（小節の頭）（ステップ11-7c）
   if (info.segno) x = drawJumpGlyph(context, SEGNO_GLYPH, x, y) + TEMPO_MARK_SPACE;
   if (info.coda) x = drawJumpGlyph(context, CODA_GLYPH, x, y) + TEMPO_MARK_SPACE;
 
@@ -715,7 +720,7 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
 
 // ----------------------------------------------------------
 // 関数：jumpMarksWidth
-// その小節の 𝄋・𝄌・To Coda・Fine・D.C.・D.S. を書くのに要る幅のめやすを返す（ステップ11-7c）
+// その小節の 𝄋・𝄌・To Coda・Fine・D.C.・D.S.・練習番号を書くのに要る幅のめやすを返す（ステップ11-7c・11-7d）
 // （小節の幅を決めるときと、印があるかを調べるときに使う）
 //   info … 小節の情報（score.measures[i]）
 // 戻り値：幅（ピクセル）。印が1つもなければ 0
@@ -727,7 +732,39 @@ function jumpMarksWidth(info) {
   if (info.toCoda) width = width + JUMP_MARK_WIDTHS.toCoda;
   if (info.fine) width = width + JUMP_MARK_WIDTHS.fine;
   if (info.jump) width = width + JUMP_MARK_WIDTHS.jump;
+  if (info.rehearsal) width = width + JUMP_MARK_WIDTHS.rehearsal; // ステップ11-7d
   return width;
+}
+
+// ----------------------------------------------------------
+// 関数：drawRehearsal
+// 練習番号（A・B…）を、四角で囲んで太字で描く（ステップ11-7d）
+//   label … 書く文字（rehearsalLabel で決めたもの）
+//   x     … 書き始める横の位置（四角の左端）
+//   y     … 文字の下端（ベースライン）の位置
+// 戻り値：書き終わった右端の横の位置（四角の右端）
+// ----------------------------------------------------------
+function drawRehearsal(context, label, x, y) {
+  context.save();
+  context.setFont("Academico", 16, "bold");
+  const width = context.measureText(label).width;
+  // 文字（四角の内側に、すき間をあけて書く）
+  context.fillText(label, x + REHEARSAL_PADDING, y);
+  // まわりの四角（文字の高さはおよそ 12px なので、ベースラインから 12px 上までを囲む）
+  const left = x;
+  const right = x + width + REHEARSAL_PADDING * 2;
+  const top = y - 12 - REHEARSAL_PADDING;
+  const bottom = y + REHEARSAL_PADDING;
+  context.setLineWidth(1.5);
+  context.beginPath();
+  context.moveTo(left, top);
+  context.lineTo(right, top);
+  context.lineTo(right, bottom);
+  context.lineTo(left, bottom);
+  context.lineTo(left, top);
+  context.stroke();
+  context.restore();
+  return right;
 }
 
 // ----------------------------------------------------------
