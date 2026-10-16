@@ -10,6 +10,7 @@
 //       （createdAt・updatedAt は日時を数字にしたもの。Date.now() の値）
 //   "string-score:score:（id）"   … 楽譜データそのもの（1曲に1つ）
 //   "string-score:mixer:（id）"   … 楽譜ごとの、パートの音量の設定（ステップ12-3。くわしくは mixer.js）
+//   "string-score:view:（id）"    … 楽譜ごとの、隠すパートの名札（id）の配列（ステップ12-6a）
 //   "string-score:settings"      … アプリ全体の設定（楽譜とは別）（ステップ7-4）
 //       { soundType: "instrument" }（音の種類。"instrument"：楽器の音、"synth"：電子音）
 //
@@ -154,6 +155,7 @@ export function deleteScore(id) {
   try {
     localStorage.removeItem(scoreKey(id));
     localStorage.removeItem(mixerKey(id)); // 音量の設定もいっしょに消す（ステップ12-3）
+    localStorage.removeItem(viewKey(id)); // 隠すパートの設定もいっしょに消す（ステップ12-6a）
     const list = readList().filter((item) => item.id !== id);
     writeList(list);
     return true;
@@ -207,6 +209,53 @@ export function saveMixer(id, mixer) {
   } catch (error) {
     // 保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
     console.error("音量の設定を保存できませんでした", error);
+  }
+}
+
+// ==========================================================
+// ここから下は、楽譜ごとの「隠すパート」の設定（ステップ12-6a）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：viewKey
+// 隠すパートの設定を入れる場所の名前を作る
+// 例："abc123" → "string-score:view:abc123"
+// ----------------------------------------------------------
+function viewKey(id) {
+  return "string-score:view:" + id;
+}
+
+// ----------------------------------------------------------
+// 関数：loadHiddenParts
+// 楽譜の、隠すパートの名札（id）の配列を読み込む
+//   id … 楽譜の id
+// 戻り値：隠すパートの名札の配列（まだ保存していない・読めないときは空の []）
+// ----------------------------------------------------------
+export function loadHiddenParts(id) {
+  try {
+    const text = localStorage.getItem(viewKey(id));
+    if (!text) return [];
+    const hidden = JSON.parse(text);
+    // 配列でなければ（壊れていたら）空にする
+    return Array.isArray(hidden) ? hidden : [];
+  } catch (error) {
+    console.error("隠すパートの設定を読み込めませんでした", error);
+    return [];
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：saveHiddenParts
+// 楽譜の、隠すパートの名札（id）の配列を保存する（楽譜の更新日時は変えない）
+//   id     … 楽譜の id
+//   hidden … 隠すパートの名札の配列
+// ----------------------------------------------------------
+export function saveHiddenParts(id, hidden) {
+  try {
+    localStorage.setItem(viewKey(id), JSON.stringify(hidden));
+  } catch (error) {
+    // 保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
+    console.error("隠すパートの設定を保存できませんでした", error);
   }
 }
 

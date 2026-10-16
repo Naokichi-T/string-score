@@ -12,7 +12,12 @@
   //   onaddpart    … 追加のボタンが押されたときに呼ぶ関数（楽器の名前 "violin" などを渡す）
   //   onmovepart   … ↑ ↓ が押されたときに呼ぶ関数（パートの番号と、-1（上）か 1（下）を渡す）
   //   ondeletepart … 削除が押されたときに呼ぶ関数（パートの番号を渡す）
-  let { parts = [], selectedPart = null, onaddpart = () => {}, onmovepart = () => {}, ondeletepart = () => {} } = $props();
+  //   hiddenParts  … 隠すパートの名札（id）の配列（ステップ12-6a）
+  //   ontoggleview … 表示のチェックが押されたときに呼ぶ関数（パートの名札を渡す）（ステップ12-6a）
+  let { parts = [], selectedPart = null, onaddpart = () => {}, onmovepart = () => {}, ondeletepart = () => {}, hiddenParts = [], ontoggleview = () => {} } = $props();
+
+  // 表示しているパートの数（最後の1つはチェックを外せないようにするため）（ステップ12-6a）
+  let visibleCount = $derived(parts.filter((part) => !hiddenParts.includes(part.id)).length);
 
   // 追加のボタンに並べる楽器（INSTRUMENTS に書いてある順番）
   const INSTRUMENT_IDS = Object.keys(INSTRUMENTS);
@@ -30,7 +35,17 @@
   <!-- パートの一覧（上から楽譜と同じ順番） -->
   <div class="part-list">
     {#each parts as part, index}
-      <div class="part-row" class:selected={index === selectedPart}>
+      {@const shown = !hiddenParts.includes(part.id)}
+      <div class="part-row" class:selected={index === selectedPart} class:hidden-part={!shown}>
+        <!-- 表示する・しないのチェック（表示しているのが1つだけなら、それは外せない）（ステップ12-6a） -->
+        <input
+          type="checkbox"
+          class="view-check"
+          checked={shown}
+          disabled={shown && visibleCount <= 1}
+          onchange={() => ontoggleview(part.id)}
+          title="楽譜に表示する（外すと隠れる。音は「再生」タブの設定どおりに鳴る）"
+        />
         <span class="part-name">{part.name}</span>
         <button class="small" disabled={index === 0} onclick={() => onmovepart(index, -1)} title="1つ上に動かす"> ↑ </button>
         <button class="small" disabled={index === parts.length - 1} onclick={() => onmovepart(index, 1)} title="1つ下に動かす"> ↓ </button>
@@ -93,6 +108,17 @@
     font-size: 14px;
     min-width: 72px;
     margin-right: 4px;
+  }
+  /* 隠しているパートの行は、名前をうすくする（ステップ12-6a） */
+  .part-row.hidden-part .part-name {
+    color: #aaa;
+  }
+  /* 表示のチェック（指でも押しやすい大きさ）（ステップ12-6a） */
+  .view-check {
+    width: 18px;
+    height: 18px;
+    margin: 0 6px 0 0;
+    cursor: pointer;
   }
   /* 行の中のボタンは小さめ */
   button.small {

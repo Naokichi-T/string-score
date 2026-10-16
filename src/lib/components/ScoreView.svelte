@@ -6,6 +6,10 @@
   // ・楽譜データや選択中の場所が変わったら描き直す
   // ・音符がクリックされたら、親に知らせる（onselect）
   // （ステップ6-2：再生中に鳴っている音符を緑にする。その段が画面の外なら、見えるところまでスクロールする）
+  // （ステップ12-6a：表示するパートだけを描けるようにした。visibleParts で選ぶ）
+  //   ・表示するパートだけの「見せる用の楽譜」を作って描く（楽譜データそのものは変えない）
+  //   ・この部品の外とやりとりするパートの番号は、いつも本当の番号（全パートの中での番号）
+  //   ・中で描くときだけ、見せる用の番号（表示するパートの中での番号）に直す
   // ==========================================================
   import { onMount } from "svelte";
   import { renderScore } from "#lib/score/render.js";
@@ -18,7 +22,24 @@
   //   playing      … 再生中か（止めたら、自動スクロールの「前の段」を忘れるのに使う）
   //   onselect     … 音符がクリックされたときに呼ぶ関数
   //                  （選ばれた場所か null と、Shift キーを押していたか true / false を渡す）
-  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {} } = $props();
+  //   visibleParts … 表示するパートの本当の番号の配列（例：[0, 2]。null なら全部表示）（ステップ12-6a）
+  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {}, visibleParts = null } = $props();
+
+  // 表示するパートの本当の番号の配列（null のときは全部）（ステップ12-6a）
+  let shownParts = $derived(visibleParts ?? score.parts.map((_, p) => p));
+
+  // 表示するパートだけの、見せる用の楽譜データ（ステップ12-6a）
+  // （$derived なので、score か表示するパートが変わったときだけ作り直す。
+  //   毎回作ると、render.js の「前回と同じ楽譜なら測り直さない」しくみが効かなくなるため）
+  let viewScore = $derived(shownParts.length === score.parts.length ? score : { ...score, parts: shownParts.map((p) => score.parts[p]) });
+
+  // ----------------------------------------------------------
+  // 関数：toViewPart
+  // 本当のパートの番号を、見せる用の番号に直す（隠しているパートなら -1）（ステップ12-6a）
+  // ----------------------------------------------------------
+  function toViewPart(part) {
+    return shownParts.indexOf(part);
+  }
 
   // 外側の枠の div（幅を測るのに使う）
   let wrapper;
@@ -54,8 +75,14 @@
     if (!VF) return;
     // 枠の内側の幅（左右の padding 8px ずつを引く）
     const width = wrapper.clientWidth - 16;
+    // 選択中・範囲・鳴っている音符を、見せる用のパートの番号に直す（隠しているパートのものは外す）（ステップ12-6a）
+    const viewSelection = selection && toViewPart(selection.part) >= 0 ? { ...selection, part: toViewPart(selection.part) } : null;
+    const viewRange = range && toViewPart(range.part) >= 0 ? { ...range, part: toViewPart(range.part) } : null;
+    const viewPlaying = playingNotes.filter((n) => toViewPart(n.part) >= 0).map((n) => ({ ...n, part: toViewPart(n.part) }));
     // renderScore は段の位置なども返すが、ここで使うのは当たり判定の四角だけ（ステップ9）
-    hitBoxes = renderScore(VF, container, score, width, selection, range, playingNotes).hitBoxes;
+    const boxes = renderScore(VF, container, viewScore, width, viewSelection, viewRange, viewPlaying).hitBoxes;
+    // 当たり判定のパートの番号は、本当の番号に戻しておく（クリック・自動スクロールで使うため）（ステップ12-6a）
+    hitBoxes = boxes.map((box) => ({ ...box, part: shownParts[box.part] }));
     followPlaying();
   }
 
@@ -143,7 +170,7 @@
   // （ここで読んだ値が変わると、この中身がもう一度実行される）
   // ----------------------------------------------------------
   $effect(() => {
-    score;
+    viewScore; // 楽譜データ・表示するパート（ステップ12-6a：score から変えた）
     selection;
     range;
     playingNotes;

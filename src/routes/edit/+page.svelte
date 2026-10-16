@@ -66,7 +66,7 @@
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn } from "#lib/score/playback.js";
-  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer } from "#lib/score/library.js";
+  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
@@ -159,6 +159,40 @@
     mixer = { ...mixer, [partId]: { ...mixerOf(mixer, partId), ...changes } };
     saveMixer(scoreId, mixer);
     if (final) replayIfPlaying();
+  }
+
+  // 隠すパートの名札（id）の配列（ステップ12-6a）
+  // 楽譜を開いたときに、その楽譜の設定を読み込む（楽譜ごとに覚える）
+  let hiddenParts = $state([]);
+
+  // 表示するパートの本当の番号の配列（例：[0, 2]）（ステップ12-6a）
+  // 全部隠れてしまうとき（消したパートの名札が残っているなど）は、全部表示にする
+  let visibleParts = $derived.by(() => {
+    const shown = score.parts.map((part, p) => (hiddenParts.includes(part.id) ? -1 : p)).filter((p) => p >= 0);
+    return shown.length > 0 ? shown : score.parts.map((_, p) => p);
+  });
+
+  // ----------------------------------------------------------
+  // 関数：handleToggleView
+  // 「パート」タブの表示のチェックが押されたとき（ステップ12-6a）
+  //   partId … パートの名札（id）
+  // 表示する・隠すを切り替えて保存する（表示しているのが1つだけなら、それは隠さない）
+  // 選んでいた音や範囲のパートを隠したときは、選択を外す
+  // ----------------------------------------------------------
+  function handleToggleView(partId) {
+    if (hiddenParts.includes(partId)) {
+      hiddenParts = hiddenParts.filter((id) => id !== partId); // 表示に戻す
+    } else {
+      if (visibleParts.length <= 1) return; // 最後の1つは隠さない
+      hiddenParts = [...hiddenParts, partId];
+    }
+    saveHiddenParts(scoreId, hiddenParts);
+
+    // 選んでいるパートが隠れたら、選択を外す
+    if (selection && hiddenParts.includes(score.parts[selection.part].id)) {
+      selection = null;
+      rangeEnd = null;
+    }
   }
 
   // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
@@ -460,6 +494,7 @@
     }
     scoreId = id;
     mixer = loadMixer(id); // この楽譜の音量の設定（ステップ12-3）
+    hiddenParts = loadHiddenParts(id); // この楽譜の、隠すパートの設定（ステップ12-6a）
     // パートに id（名札）がなければ付ける（ステップ12-3 より前に作った楽譜）（ステップ12-3）
     const withIds = ensurePartIds(loaded);
     score = withIds;
@@ -1559,6 +1594,8 @@
       {repeatOn}
       {repeatText}
       onrepeat={handleRepeat}
+      {hiddenParts}
+      ontoggleview={handleToggleView}
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}
@@ -1569,7 +1606,8 @@
 
     <!-- 五線譜の部分だけスクロールする -->
     <main class="score-area">
-      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} />
+      <!-- visibleParts：表示するパートだけを描く（ステップ12-6a） -->
+      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} />
     </main>
 
     <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
