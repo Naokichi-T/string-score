@@ -30,7 +30,7 @@ import {
   MAX_CHORD_NOTES,
 } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
-import { positionsInRange } from "./selection.js";
+import { positionsInRange, selectedHead } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
 
 // ----------------------------------------------------------
@@ -987,11 +987,12 @@ export function pitchForLetter(score, selection, step) {
 //   ・足したり外したりしたら、低い順に並べ直す（いちばん低い音が pitch、残りが chord）
 //   ・重音になったら、重音には付けられない記号（装飾・前打音・グリッサンド）を外す
 // 選んでいるのが休符のときは、ここでは何もしない（休符に音を入れるのは、編集ページで行う）
-// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字）, head: このあと選ぶ玉の番号 }（ステップ14-2：head を足した）
+//   head … 足したときは足した玉、外したときはそのすぐ下の玉（いちばん下を外したら、新しいいちばん下）
 // ----------------------------------------------------------
 export function toggleChordPitch(score, selection, pitch) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
-  if (!note || note.rest) return { score: score, error: "" };
+  if (!note || note.rest) return { score: score, error: "", head: 0 };
 
   const pitches = notePitches(note);
   const index = pitches.findIndex((other) => samePitch(other, pitch));
@@ -999,7 +1000,7 @@ export function toggleChordPitch(score, selection, pitch) {
   // もうある高さ：外す
   if (index >= 0) {
     if (pitches.length === 1) {
-      return { score: score, error: "最後の1音は外せません（休符にするときは［削除］）" };
+      return { score: score, error: "最後の1音は外せません（休符にするときは［削除］）", head: 0 };
     }
     const newScore = updateNote(score, selection, (n) => {
       setNotePitches(
@@ -1007,12 +1008,12 @@ export function toggleChordPitch(score, selection, pitch) {
         pitches.filter((_, k) => k !== index),
       ); // その音を除いて入れ直す
     });
-    return { score: newScore, error: "" };
+    return { score: newScore, error: "", head: Math.max(0, index - 1) };
   }
 
   // ない高さ：足す
   if (pitches.length >= MAX_CHORD_NOTES) {
-    return { score: score, error: `重音は${MAX_CHORD_NOTES}音までです` };
+    return { score: score, error: `重音は${MAX_CHORD_NOTES}音までです`, head: selectedHead(score, selection) };
   }
   const newScore = updateNote(score, selection, (n) => {
     setNotePitches(n, [...pitches, pitch]);
@@ -1028,7 +1029,90 @@ export function toggleChordPitch(score, selection, pitch) {
     const prevNote = newScore.parts[prev.part].measures[prev.measure].notes[prev.note];
     if (prevNote.glissando) delete prevNote.glissando; // newScore はコピーなので、直接書き換えてよい
   }
-  return { score: newScore, error: "" };
+  // 足した玉が、低い順で何番目になったか
+  const added = notePitches(newScore.parts[selection.part].measures[selection.measure].notes[selection.note]).findIndex((other) => samePitch(other, pitch));
+  return { score: newScore, error: "", head: added };
+}
+
+// ==========================================================
+// ここから下は、重音の中の1つの玉を直す関数（ステップ14-2）
+// どれも、選んでいる玉（selection.head。selection.js の selectedHead で決める）だけを変える
+// 戻り値はどれも { score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字）, head: このあと選ぶ玉の番号 }
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：replaceChordHead
+// 選んでいる玉の高さを入れ替えて、低い順に並べ直す（transposeChordHead・setChordHeadAccidental で使う）
+//   newPitch … 新しい高さ
+// ほかの玉と同じ高さになるときは、変えずに知らせる
+// 並べ直したあとも、変えた玉を選んだままにする（head は並べ直したあとの番号）
+// ----------------------------------------------------------
+function replaceChordHead(score, selection, newPitch) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const pitches = notePitches(note);
+  const head = selectedHead(score, selection);
+  // ほかの玉と同じ高さにならないか
+  const others = pitches.filter((_, k) => k !== head);
+  if (others.some((other) => samePitch(other, newPitch))) {
+    return { score: score, error: "同じ高さの音があります", head: head };
+  }
+  const newScore = updateNote(score, selection, (n) => {
+    setNotePitches(n, [...others, newPitch]);
+  });
+  const newHead = notePitches(newScore.parts[selection.part].measures[selection.measure].notes[selection.note]).findIndex((other) => samePitch(other, newPitch));
+  return { score: newScore, error: "", head: newHead };
+}
+
+// ----------------------------------------------------------
+// 関数：transposeChordHead
+// 重音の中の、選んでいる玉だけの高さを変える（▲ ▼）
+//   semitones … 変える半音の数（transposeNote と同じ。±12 なら音名を変えずにオクターブだけ）
+// 範囲の外に出るときは変えない。ほかの玉と同じ高さになるときも変えない
+// ----------------------------------------------------------
+export function transposeChordHead(score, selection, semitones) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const head = selectedHead(score, selection);
+  const pitch = notePitches(note)[head];
+  const midi = pitchToMidi(pitch) + semitones;
+  if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) {
+    return { score: score, error: "これ以上は高さを変えられません", head: head };
+  }
+  const newPitch = Math.abs(semitones) === 12 ? { ...pitch, octave: pitch.octave + semitones / 12 } : midiToPitch(midi, keyAt(score, selection.measure));
+  return replaceChordHead(score, selection, newPitch);
+}
+
+// ----------------------------------------------------------
+// 関数：setChordHeadAccidental
+// 重音の中の、選んでいる玉だけを、その音名の♯・♭・♮にする
+//   alter … 1 なら♯、-1 なら♭、0 なら♮
+// ほかの玉と同じ高さになるときは変えない（例：ミとファの重音で、ミを♯にする）
+// ----------------------------------------------------------
+export function setChordHeadAccidental(score, selection, alter) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const head = selectedHead(score, selection);
+  const pitch = notePitches(note)[head];
+  if ((pitch.alter ?? 0) === alter) return { score: score, error: "", head: head }; // 変わらない
+  return replaceChordHead(score, selection, { ...pitch, alter: alter });
+}
+
+// ----------------------------------------------------------
+// 関数：removeChordHead
+// 重音の中の、選んでいる玉を外す（削除）
+// 残りが1つになったら、ふつうの音符に戻る（記号・タイなどはそのまま）
+// 外したあとは、そのすぐ下の玉を選ぶ（いちばん下を外したら、新しいいちばん下）
+// ----------------------------------------------------------
+export function removeChordHead(score, selection) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const pitches = notePitches(note);
+  const head = selectedHead(score, selection);
+  if (pitches.length <= 1) return { score: score, error: "", head: 0 };
+  const newScore = updateNote(score, selection, (n) => {
+    setNotePitches(
+      n,
+      pitches.filter((_, k) => k !== head),
+    );
+  });
+  return { score: newScore, error: "", head: Math.max(0, head - 1) };
 }
 
 // ----------------------------------------------------------

@@ -17,6 +17,7 @@
   // （ステップ8-4c：MusicXML を読み込んだときに、知らせることを黄色い枠で出す）
   // （ステップ8-1：MusicXML の書き出し）
   // （ステップ14-1：［重音］が入のとき、鍵盤・音名キーで選んでいる音に音を足す）
+  // （ステップ14-2：重音の中の1つの玉を選んで、▲▼・♯♭♮・削除をその玉だけに効かせる）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -29,7 +30,7 @@
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
   import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches } from "#lib/score/model.js";
-  import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
+  import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
   import {
     canFit,
     replaceAt,
@@ -76,6 +77,9 @@
     toggleMeasureRest,
     toggleChordPitch,
     chordPitchForLetter,
+    transposeChordHead,
+    setChordHeadAccidental,
+    removeChordHead,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -579,7 +583,8 @@
     return !!note && !note.rest;
   });
 
-  // 選んでいる音符が重音か（重音のときは ♯♭♮ を押せない）（ステップ14-1）
+  // 選んでいる音符が重音か（ステップ14-1）
+  // （ステップ14-2：重音でも、選んでいる玉の ♯♭♮ を変えられるようになった）
   let chordSelected = $derived(!!getSelectedNote(score, selection)?.chord);
 
   // ［重音］が入っているか（ステップ14-1）
@@ -982,12 +987,42 @@
       return;
     }
 
-    // 音符：足す・外す
+    // 音符：足す・外す（足した玉を選ぶ。外したときは、そのすぐ下の玉）（ステップ14-2）
     const result = toggleChordPitch(score, selection, pitch);
     message = result.error;
     if (result.error) return;
-    commit(result.score);
+    commit(result.score, withHead(result.score, selection, result.head));
     playSelected();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：withHead
+  // 選択中の場所に、重音の中の玉の番号（head）を付けたものを返す（ステップ14-2）
+  // 重音でなくなったときは、head を付けない
+  //   newScore … 変えたあとの楽譜データ
+  //   place    … 選択中の場所
+  //   head     … 玉の番号（低い順。0 から）
+  // ----------------------------------------------------------
+  function withHead(newScore, place, head) {
+    const { head: _old, ...rest } = place; // 前の head を取りのぞいた形
+    const note = getSelectedNote(newScore, rest);
+    if (!note || note.rest || !note.chord) return rest;
+    return { ...rest, head: head };
+  }
+
+  // ----------------------------------------------------------
+  // 関数：moveHead
+  // 重音の中で、上か下の玉へ選択を移す（⌥（Alt）＋↑↓）（ステップ14-2）
+  //   direction … 1 なら上の玉へ、-1 なら下の玉へ（端まで来ていたら動かない）
+  // ----------------------------------------------------------
+  function moveHead(direction) {
+    if (!chordSelected) return;
+    const count = 1 + getSelectedNote(score, selection).chord.length;
+    const head = Math.min(count - 1, Math.max(0, selectedHead(score, selection) + direction));
+    selection = { ...selection, head: head };
+    rangeEnd = null;
+    message = "";
+    playSelected(true); // 選んだ玉の音を鳴らす
   }
 
   // ----------------------------------------------------------
@@ -1054,13 +1089,16 @@
   // 関数：playSelected
   // 選んでいる音を鳴らす（高さを変えたあとなどに、耳で確かめるため）
   // 重音なら、全部の音をいっしょに鳴らす（ステップ14-1）
+  //   onlyHead … true なら、重音の中で選んでいる玉の音だけを鳴らす（1つの玉を変えたとき）（ステップ14-2）
   // ----------------------------------------------------------
-  function playSelected() {
+  function playSelected(onlyHead = false) {
     const note = getSelectedNote(score, selection);
     if (!note || note.rest) return;
     // ピチカートの範囲なら、ピチカートで鳴らす
     const pizz = isPizzAt(score, selection);
-    notePitches(note).forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
+    const pitches = notePitches(note);
+    const targets = onlyHead ? [pitches[selectedHead(score, selection)]] : pitches;
+    targets.forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
   }
 
   // ----------------------------------------------------------
@@ -1087,6 +1125,19 @@
 
     if (!noteSelected) return;
     message = "";
+
+    // 重音：選んでいる玉だけを動かす（ほかの玉と同じ高さになるときは動かさない）（ステップ14-2）
+    if (chordSelected) {
+      const result = transposeChordHead(score, selection, semitones);
+      if (result.error) {
+        message = result.error;
+        return;
+      }
+      commit(result.score, withHead(result.score, selection, result.head));
+      playSelected(true);
+      return;
+    }
+
     const newScore = transposeNote(score, selection, semitones);
     if (newScore === score) {
       message = "これ以上は高さを変えられません";
@@ -1102,8 +1153,21 @@
   //   alter … 1：♯、-1：♭、0：♮
   // ----------------------------------------------------------
   function handleAccidental(alter) {
-    if (!noteSelected || chordSelected) return; // 重音のときは使えない（ステップ14-1）
+    if (!noteSelected) return;
     message = "";
+
+    // 重音：選んでいる玉だけを変える（ほかの玉と同じ高さになるときは変えない）（ステップ14-2）
+    if (chordSelected) {
+      const result = setChordHeadAccidental(score, selection, alter);
+      if (result.error) {
+        message = result.error;
+        return;
+      }
+      commit(result.score, withHead(result.score, selection, result.head));
+      playSelected(true);
+      return;
+    }
+
     commit(setAccidental(score, selection, alter));
     playSelected();
   }
@@ -1136,6 +1200,14 @@
 
     if (!noteSelected) return;
     message = "";
+
+    // 重音：選んでいる玉だけを外す（残りが1つなら、ふつうの音符に戻る）（ステップ14-2）
+    if (chordSelected) {
+      const result = removeChordHead(score, selection);
+      commit(result.score, withHead(result.score, selection, result.head));
+      return;
+    }
+
     commit(deleteNote(score, selection));
   }
 
@@ -1812,6 +1884,10 @@
     } else if (command && (event.key === "y" || event.key === "Y")) {
       // Ctrl＋Y：やり直し（Windows でよく使われる）
       handleRedo();
+      event.preventDefault();
+    } else if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      // ⌥（Alt）＋↑↓：重音の中で、上・下の玉へ選択を移す（ステップ14-2）
+      moveHead(event.key === "ArrowUp" ? 1 : -1);
       event.preventDefault();
     } else if (event.key === "ArrowUp") {
       // ↑：半音上げる（Ctrl / ⌘ と一緒なら1オクターブ上げる）

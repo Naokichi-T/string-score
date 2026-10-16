@@ -90,6 +90,7 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
 //                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
 //                 lineTop・lineBottom … その音符がある段の上端と下端（再生中の自動スクロールに使う）
+//                 headYs … 玉ごとの高さ（低い順）（重音で、クリックした玉を決めるのに使う）（ステップ14-2）
 //   lineTops    … 段ごとの上端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
 //   lineBottoms … 段ごとの下端の高さの配列（PDF 出力のページ分けに使う）（ステップ9）
 //   totalHeight … 楽譜全体の高さ（ステップ9）
@@ -229,6 +230,7 @@ export function renderScore(VF, container, score, width, selection = null, range
         // この音符がある段の上端と下端（はみ出した中身も含める。spacing.js で決めたもの）
         lineTop: positions.lineTops[entry.line],
         lineBottom: positions.lineBottoms[entry.line],
+        headYs: entry.staveNote.getYs(), // 玉ごとの高さ（ステップ14-2）
       });
     });
   });
@@ -369,7 +371,16 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
           if (playingKeys.has(`${p}-${i}-${j}`)) {
             staveNote.setStyle({ fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR });
           } else if (selection && selection.part === p && selection.measure === i && selection.note === j) {
-            staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+            const headCount = note.rest ? 1 : 1 + (note.chord?.length ?? 0);
+            if (headCount > 1) {
+              // 重音：全体を明るい青にして、選んでいる玉だけ濃い青にする（ステップ14-2）
+              // （選んでいる玉の番号は selection.js の selectedHead と同じ決め方。合わない番号ならいちばん上）
+              const head = Number.isInteger(selection.head) && selection.head >= 0 && selection.head < headCount ? selection.head : headCount - 1;
+              staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
+              staveNote.setKeyStyle(head, { fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+            } else {
+              staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+            }
           } else if (isInRange(range, p, i, j)) {
             staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
           }

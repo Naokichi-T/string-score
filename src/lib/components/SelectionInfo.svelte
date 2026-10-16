@@ -31,7 +31,7 @@
     {:else if text}
       選択中：{text}
     {:else}
-      <span class="hint">音符をクリックすると選べます（← → キーで前後の音へ、Shift＋クリックか Shift＋← → で範囲を選ぶ、Esc で選択を外す）</span>
+      <span class="hint">音符をクリックすると選べます（← → キーで前後の音へ、Shift＋クリックか Shift＋← → で範囲を選ぶ、⌥（Alt）＋↑↓ で重音の中の音を選ぶ、Esc で選択を外す）</span>
     {/if}
     <!-- 知らせたいことがあれば、右側に赤い文字で出す -->
     {#if message}

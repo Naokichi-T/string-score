@@ -7,6 +7,7 @@
   // ・音符がクリックされたら、親に知らせる（onselect）
   // （ステップ6-2：再生中に鳴っている音符を緑にする。その段が画面の外なら、見えるところまでスクロールする）
   // （ステップ12-6a：表示するパートだけを描けるようにした。visibleParts で選ぶ）
+  // （ステップ14-2：重音の玉をクリックしたら、その玉（クリックした高さにいちばん近い玉）を選ぶ）
   //   ・表示するパートだけの「見せる用の楽譜」を作って描く（楽譜データそのものは変えない）
   //   ・この部品の外とやりとりするパートの番号は、いつも本当の番号（全パートの中での番号）
   //   ・中で描くときだけ、見せる用の番号（表示するパートの中での番号）に直す
@@ -228,8 +229,17 @@
     });
 
     if (hit) {
+      const place = { part: hit.part, measure: hit.measure, note: hit.note };
+      // 重音なら、クリックした高さにいちばん近い玉を選ぶ（head は低い順の番号）（ステップ14-2）
+      if (hit.headYs && hit.headYs.length > 1) {
+        let head = 0;
+        hit.headYs.forEach((headY, k) => {
+          if (Math.abs(headY - y) < Math.abs(hit.headYs[head] - y)) head = k;
+        });
+        place.head = head;
+      }
       // Shift キーを押しながらのクリックかどうかも一緒に知らせる（範囲選択に使う）
-      onselect({ part: hit.part, measure: hit.measure, note: hit.note }, event.shiftKey);
+      onselect(place, event.shiftKey);
     } else {
       onselect(null, false); // 何もない所をクリックしたら選択を外す
     }

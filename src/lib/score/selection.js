@@ -1,7 +1,9 @@
 // ==========================================================
 // selection.js
 // 「選択中の場所」を扱う関数
-//   選択中の場所 = { part: パート番号, measure: 小節番号, note: 小節の中の音の番号 }
+//   選択中の場所 = { part: パート番号, measure: 小節番号, note: 小節の中の音の番号, head: 重音の中の玉の番号 }
+//   head … 重音のときだけ使う。低い順に 0, 1, 2…（ステップ14-2）
+//           書いていない・合わない番号のときは、いちばん上の玉を選んでいることにする（selectedHead で決める）
 //   何も選んでいないときは null
 //   番号はどれも 0 から数える（1小節目は measure: 0）
 // ==========================================================
@@ -30,6 +32,7 @@ const DURATION_NAMES = {
 //   selection … 今の選択中の場所
 //   direction … 1 なら次の音へ、-1 なら前の音へ
 // 戻り値：動かしたあとの選択中の場所（端まで来ていたら動かさずにそのまま返す）
+// （ステップ14-2：移った先が重音なら、いちばん上の玉を選ぶ）
 // ----------------------------------------------------------
 export function moveSelection(score, selection, direction) {
   if (!selection) return selection;
@@ -50,7 +53,30 @@ export function moveSelection(score, selection, direction) {
     note = measures[measure].notes.length - 1;
   }
 
-  return { part: selection.part, measure: measure, note: note };
+  return withTopHead(score, { part: selection.part, measure: measure, note: note });
+}
+
+// ----------------------------------------------------------
+// 関数：withTopHead
+// 選択中の場所が重音なら、いちばん上の玉を選んだ形にして返す（重音でなければ head を付けない）（ステップ14-2）
+// ----------------------------------------------------------
+export function withTopHead(score, selection) {
+  const count = notePitches(getSelectedNote(score, selection)).length;
+  if (count <= 1) return selection;
+  return { ...selection, head: count - 1 };
+}
+
+// ----------------------------------------------------------
+// 関数：selectedHead
+// 選んでいる音符の、何番目の玉（低い順。0 から）を選んでいるかを返す（ステップ14-2）
+//   ・重音でなければ 0
+//   ・head が書いていない・玉の数より大きいときは、いちばん上の玉
+// ----------------------------------------------------------
+export function selectedHead(score, selection) {
+  const count = notePitches(getSelectedNote(score, selection)).length;
+  if (count <= 1) return 0;
+  const head = selection.head;
+  return Number.isInteger(head) && head >= 0 && head < count ? head : count - 1;
 }
 
 // ----------------------------------------------------------
@@ -99,6 +125,8 @@ export function durationToJapanese(duration, dots, isRest) {
 // 例：'Viola　3小節目　2つ目　ラ3（A3）・4分音符'
 // 重音なら、低い順に「＋」でつなぐ（ステップ14-1）
 // 例：'Violin I　1小節目　1つ目　ラ4＋ミ5（A4＋E5）・4分音符'
+// 重音の中で選んでいる音は［ ］で囲む（ステップ14-2）
+// 例：'Violin I　1小節目　1つ目　ラ4＋［ミ5］（A4＋E5）・4分音符'
 // ----------------------------------------------------------
 export function describeSelection(score, selection) {
   const note = getSelectedNote(score, selection);
@@ -115,7 +143,9 @@ export function describeSelection(score, selection) {
   }
   // 日本語の音名のうしろに、英語の音名をかっこで付ける（ステップ12-1）
   const pitches = notePitches(note);
-  const japanese = pitches.map((pitch) => pitchToJapanese(pitch)).join("＋");
+  const head = selectedHead(score, selection);
+  // 重音のときは、選んでいる音を［ ］で囲む（ステップ14-2）
+  const japanese = pitches.map((pitch, k) => (pitches.length > 1 && k === head ? `［${pitchToJapanese(pitch)}］` : pitchToJapanese(pitch))).join("＋");
   const english = pitches.map((pitch) => pitchToEnglish(pitch)).join("＋");
   return `${where}　${japanese}（${english}）・${length}`;
 }
