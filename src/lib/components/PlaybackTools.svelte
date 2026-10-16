@@ -13,7 +13,7 @@
   //             例：onmixer("pk2qyyj3f", { volume: 80 }, false)、onmixer("pk2qyyj3f", { mute: true })
   //             変え終わったか：つまみを動かしている途中は false、離したときは true（省略したら true）（ステップ12-3b）
   //             （再生中に変え終わったら、親が今の小節から鳴らし直す）
-  //   metronome   … メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100 }（ステップ12-4a）
+  //   metronome   … メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
   //   onmetronome … メトロノームの設定が変わったときに呼ぶ関数（変えた項目と、変え終わったかを渡す）（ステップ12-4a）
   //                 例：onmetronome({ on: true })、onmetronome({ volume: 50 }, false)
   let { parts = [], mixer = {}, onmixer = () => {}, metronome = { on: false, volume: 70 }, onmetronome = () => {} } = $props();
@@ -70,6 +70,16 @@
   <div class="part-row metronome">
     <!-- 入・切（押すたびに切り替わる） -->
     <button class="switch" class:on={metronome.on} onclick={() => onmetronome({ on: !metronome.on })} title="再生といっしょにメトロノームを鳴らす（1拍目は高い音）"> メトロノーム </button>
+
+    <!-- カウントイン（押すたびに入・切。メトロノームが切でも使える）（ステップ12-4b） -->
+    <button
+      class="switch"
+      class:on={metronome.countIn}
+      onclick={() => onmetronome({ countIn: !metronome.countIn })}
+      title="再生の前に、1小節ぶんクリックだけを鳴らす（再生中に設定を変えて鳴らし直すときは入れない）"
+    >
+      カウントイン
+    </button>
 
     <!-- クリックの音量（パートのつまみと同じしくみ） -->
     <input

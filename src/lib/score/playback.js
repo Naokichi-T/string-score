@@ -658,6 +658,40 @@ function beatTicks(time) {
 }
 
 // ----------------------------------------------------------
+// 関数：addCountIn
+// buildEvents の結果の前に、カウントイン（1小節ぶんのクリックだけの前打ち）を足す（ステップ12-4b）
+//   result       … buildEvents の結果
+//   score        … 楽譜データ
+//   startMeasure … 再生を始める小節（この小節の拍子で1小節ぶん数える）
+// 戻り値：result と同じ形で、次のように変えたもの
+//   ・楽器の音・緑の音符・小節の始まり・メトロノームのクリックの時刻を、1小節ぶん後ろにずらす
+//   ・最後までの長さ（totalTicks）も、1小節ぶん長くする
+//   ・countInClicks（カウントインのクリックの一覧）を足す
+//     （メトロノームが切でもカウントインは鳴らすので、clicks とは分けておく）
+// ----------------------------------------------------------
+export function addCountIn(result, score, startMeasure) {
+  const time = timeAt(score, startMeasure);
+  const length = measureTicks(time); // カウントインの長さ（1小節ぶん）
+  const beat = beatTicks(time); // 1拍の長さ
+
+  // カウントインのクリック（1拍目は strong）
+  const countInClicks = [];
+  for (let b = 0; b < length; b = b + beat) {
+    countInClicks.push({ startTick: b, strong: b === 0 });
+  }
+
+  // 時刻を1小節ぶん後ろにずらした、新しいものを作る（もとの result は変えない）
+  return {
+    events: result.events.map((event) => ({ ...event, startTick: event.startTick + length })),
+    totalTicks: result.totalTicks + length,
+    highlights: result.highlights.map((h) => ({ ...h, startTick: h.startTick + length, endTick: h.endTick + length })),
+    measureStarts: result.measureStarts.map((m) => ({ ...m, startTick: m.startTick + length })),
+    clicks: result.clicks.map((click) => ({ ...click, startTick: click.startTick + length })),
+    countInClicks: countInClicks,
+  };
+}
+
+// ----------------------------------------------------------
 // 関数：mergeFermatas
 // フェルマータで止まる所の一覧を、時刻の順に並べて、同じ時刻のものを1つにまとめる（ステップ6-3b）
 // 同じ時刻に複数のパートでフェルマータがあるときは、のばす量の一番大きいものにする

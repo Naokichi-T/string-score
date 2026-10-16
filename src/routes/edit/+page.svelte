@@ -65,7 +65,7 @@
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, isLoaded, playEvents, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
-  import { buildEvents, secondsPerTick, isPizzAt } from "#lib/score/playback.js";
+  import { buildEvents, secondsPerTick, isPizzAt, addCountIn } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
@@ -161,9 +161,9 @@
     if (final) replayIfPlaying();
   }
 
-  // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100 }（ステップ12-4a）
+  // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
   // アプリ全体で1つ（音の種類と同じく、設定として保存する）。ページを開いたときに読み込む
-  let metronome = $state({ on: false, volume: 70 });
+  let metronome = $state({ on: false, volume: 70, countIn: false });
 
   // ----------------------------------------------------------
   // 関数：handleMetronome
@@ -186,7 +186,7 @@
     if (!playing) return;
     const measure = currentMeasure(); // 止める前に、今何小節目かを調べておく
     handleStop();
-    playFrom(measure);
+    playFrom(measure, false); // 鳴らし直しでは、カウントインは入れない（ステップ12-4b）
   }
 
   // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
@@ -1068,16 +1068,23 @@
   // 関数：playFrom
   // 決めた小節の頭から再生する（ステップ12-3b：handlePlay から分けた）
   //   startMeasure … 何小節目から鳴らすか（0 から数える）
+  //   allowCountIn … カウントインを入れてよいか（鳴らし直しのときは false）（ステップ12-4b）
   // 再生のボタンと、再生中に音量を変えたときの鳴らし直しで使う
   // ----------------------------------------------------------
-  function playFrom(startMeasure) {
+  function playFrom(startMeasure, allowCountIn = true) {
     if (!canPlay) return;
     message = "";
 
     // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す）
-    const result = buildEvents(score, startMeasure, mixer);
-    // メトロノームのクリック（切のときは鳴らさない）（ステップ12-4a）
-    const clicks = metronome.on ? result.clicks : [];
+    let result = buildEvents(score, startMeasure, mixer);
+    // カウントインが入っていれば、前に1小節ぶん足す（ステップ12-4b）
+    let countInClicks = [];
+    if (allowCountIn && metronome.countIn) {
+      result = addCountIn(result, score, startMeasure);
+      countInClicks = result.countInClicks;
+    }
+    // 鳴らすクリック：カウントイン＋メトロノーム（切のときは鳴らさない）（ステップ12-4a・12-4b）
+    const clicks = [...countInClicks, ...(metronome.on ? result.clicks : [])];
     // 楽器の音もクリックもないときだけ、鳴らさない（クリックだけでも鳴らす）
     if (result.events.length === 0 && clicks.length === 0) {
       message = "鳴らす音がありません（休符だけか、全部のパートが鳴らない設定です）";
