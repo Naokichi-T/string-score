@@ -10,7 +10,25 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, tempoAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId, isMeasureRest, DURATION_ORDER } from "./model.js";
+import {
+  durationToTicks,
+  noteTicks,
+  timeAt,
+  keyAt,
+  tempoAt,
+  measureTicks,
+  restsForSpan,
+  INSTRUMENTS,
+  renameParts,
+  tupletGroups,
+  createPartId,
+  isMeasureRest,
+  DURATION_ORDER,
+  notePitches,
+  setNotePitches,
+  samePitch,
+  MAX_CHORD_NOTES,
+} from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -259,23 +277,32 @@ function updateNote(score, selection, change) {
 // 選んでいる音の高さを変える
 //   semitones … 変える半音の数（1 なら半音上、-1 なら半音下、12 なら1オクターブ上）
 // 1オクターブ（±12）のときは、音名を変えずにオクターブだけ変える
+// 重音なら、全部の音を同じだけ動かす（ステップ14-1）
 // 戻り値：新しい楽譜データ（休符や、範囲の外に出るときは元の楽譜データのまま）
 // ----------------------------------------------------------
 export function transposeNote(score, selection, semitones) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest) return score;
 
-  const midi = pitchToMidi(note.pitch) + semitones;
-  if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) return score; // 範囲の外には出さない
+  // 全部の音が範囲の中に収まるか（1つでも外に出るなら動かさない）
+  const pitches = notePitches(note);
+  const inside = pitches.every((pitch) => {
+    const midi = pitchToMidi(pitch) + semitones;
+    return midi >= LOWEST_MIDI && midi <= HIGHEST_MIDI;
+  });
+  if (!inside) return score;
 
   return updateNote(score, selection, (n) => {
-    if (Math.abs(semitones) === 12) {
-      // オクターブだけ変える（音名と♯♭はそのまま）
-      n.pitch.octave = n.pitch.octave + semitones / 12;
-    } else {
+    const key = keyAt(score, selection.measure);
+    const moved = notePitches(n).map((pitch) => {
+      if (Math.abs(semitones) === 12) {
+        // オクターブだけ変える（音名と♯♭はそのまま）
+        return { ...pitch, octave: pitch.octave + semitones / 12 };
+      }
       // 半音ずつ：調に合わせて♯か♭で呼び直す
-      n.pitch = midiToPitch(midi, keyAt(score, selection.measure));
-    }
+      return midiToPitch(pitchToMidi(pitch) + semitones, key);
+    });
+    setNotePitches(n, moved); // 低い順に入れ直す（全部同じだけ動かすので、並びは変わらない）
   });
 }
 
@@ -283,11 +310,12 @@ export function transposeNote(score, selection, semitones) {
 // 関数：setAccidental
 // 選んでいる音を、その音名の♯・♭・♮にする（例：ミ → ミ♭）
 //   alter … 1 なら♯、-1 なら♭、0 なら♮
-// 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
+// 戻り値：新しい楽譜データ（休符・重音なら元の楽譜データのまま）
+// （重音の中の1つの音の ♯♭♮ は、ステップ14-2 で重音の中の音を選べるようにしてから入れる）
 // ----------------------------------------------------------
 export function setAccidental(score, selection, alter) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
-  if (!note || note.rest) return score;
+  if (!note || note.rest || note.chord) return score;
   return updateNote(score, selection, (n) => {
     n.pitch.alter = alter;
   });
@@ -332,6 +360,9 @@ function findNext(score, selection) {
 //   ・次が同じ高さの音 → タイを付ける・外す
 //   ・次が休符 → その休符を同じ高さの音に変えて、タイでつなぐ
 //   ・次が違う高さの音 → つなげない
+// （ステップ14-1：重音のとき）
+//   ・次の音に、同じ高さの音が1つでもあればつなぐ（つながるのは、同じ高さの音どうしだけ）
+//   ・次が休符なら、重音のまま同じ高さにする
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
 // ----------------------------------------------------------
 export function toggleTie(score, selection) {
@@ -362,6 +393,8 @@ export function toggleTie(score, selection) {
     const nextNotes = newScore.parts[next.part].measures[next.measure].notes;
     nextNotes[next.note] = {
       pitch: { ...note.pitch },
+      // 重音なら、重ねる音も同じにする（ステップ14-1）
+      ...(note.chord ? { chord: note.chord.map((pitch) => ({ ...pitch })) } : {}),
       duration: nextNote.duration,
       dots: nextNote.dots ?? 0,
       tie: false,
@@ -371,8 +404,11 @@ export function toggleTie(score, selection) {
     return { score: newScore, error: "" };
   }
 
-  if (pitchToMidi(nextNote.pitch) !== pitchToMidi(note.pitch)) {
-    return { score: score, error: "次の音が違う高さなので、タイを付けられません" };
+  // 同じ高さの音が1つもなければつなげない（重音なら、どれか1つでも同じならよい）（ステップ14-1）
+  const nextPitches = notePitches(nextNote);
+  const hasSame = notePitches(note).some((pitch) => nextPitches.some((other) => samePitch(other, pitch)));
+  if (!hasSame) {
+    return { score: score, error: "次の音に同じ高さの音がないので、タイを付けられません" };
   }
 
   return {
@@ -542,16 +578,17 @@ function toggleInList(list, value) {
 //   ・タイが付いていない（タイは同じ高さどうしをつなぐので、いっしょには使わない）
 //   ・次の音がある（小節をまたいでもよい）
 //   ・次の音が休符ではない
+//   ・この音も次の音も、重音ではない（ステップ14-1）
 // 戻り値：true / false
 // ----------------------------------------------------------
 export function canGlissando(score, selection) {
   if (!selection) return false;
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
-  if (!note || note.rest || note.tie) return false;
+  if (!note || note.rest || note.tie || note.chord) return false;
   const next = findNext(score, selection);
   if (!next) return false; // 最後の音
   const nextNote = score.parts[next.part].measures[next.measure].notes[next.note];
-  return !nextNote.rest;
+  return !nextNote.rest && !nextNote.chord;
 }
 
 // ----------------------------------------------------------
@@ -568,11 +605,16 @@ export function canGlissando(score, selection) {
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
+// 重音には、装飾・前打音を付けられない（外すことはできる）（ステップ14-1）
 // 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
 // ----------------------------------------------------------
 export function toggleNoteSymbol(score, selection, kind, value) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest) return score;
+
+  // 重音：装飾・前打音は、付いていなければ付けない（ステップ14-1）
+  if (note.chord && kind === "ornament" && !note.ornament) return score;
+  if (note.chord && kind === "grace" && !note.grace) return score;
 
   // グリッサンド（kind が 'glissando'）：付いていれば外す、なければ付ける（ステップ11-5a）
   // 付けるのは、canGlissando で付けられるときだけ（外すのはいつでもできる）
@@ -849,10 +891,13 @@ export function transposeRange(score, range, semitones) {
   if (positions.length === 0) return score;
 
   // 先に、ぜんぶの音が範囲の中に収まるかを調べる
+  // （ステップ14-1：重音なら、重ねた音も全部調べる）
   const allInside = positions.every((pos) => {
     const note = score.parts[pos.part].measures[pos.measure].notes[pos.note];
-    const midi = pitchToMidi(note.pitch) + semitones;
-    return midi >= LOWEST_MIDI && midi <= HIGHEST_MIDI;
+    return notePitches(note).every((pitch) => {
+      const midi = pitchToMidi(pitch) + semitones;
+      return midi >= LOWEST_MIDI && midi <= HIGHEST_MIDI;
+    });
   });
   if (!allInside) return score;
 
@@ -925,6 +970,108 @@ export function pitchForLetter(score, selection, step) {
     }
   }
   return best.pitch;
+}
+
+// ==========================================================
+// ここから下は、重音の関数（ステップ14-1）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：toggleChordPitch
+// 選んでいる音符に、高さを1つ足す（同じ高さがもうあれば、その音を外す）
+// ［重音］が入のときに、鍵盤・音名キーで呼ぶ
+//   pitch … 足す（外す）高さ { step, alter, octave }
+// 決まり
+//   ・同じ高さ（鍵盤で同じ所）の音がもうある → その音を外す（ただし最後の1音は外さない）
+//   ・ない → 足す（MAX_CHORD_NOTES 音より多くはしない）
+//   ・足したり外したりしたら、低い順に並べ直す（いちばん低い音が pitch、残りが chord）
+//   ・重音になったら、重音には付けられない記号（装飾・前打音・グリッサンド）を外す
+// 選んでいるのが休符のときは、ここでは何もしない（休符に音を入れるのは、編集ページで行う）
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+// ----------------------------------------------------------
+export function toggleChordPitch(score, selection, pitch) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest) return { score: score, error: "" };
+
+  const pitches = notePitches(note);
+  const index = pitches.findIndex((other) => samePitch(other, pitch));
+
+  // もうある高さ：外す
+  if (index >= 0) {
+    if (pitches.length === 1) {
+      return { score: score, error: "最後の1音は外せません（休符にするときは［削除］）" };
+    }
+    const newScore = updateNote(score, selection, (n) => {
+      setNotePitches(
+        n,
+        pitches.filter((_, k) => k !== index),
+      ); // その音を除いて入れ直す
+    });
+    return { score: newScore, error: "" };
+  }
+
+  // ない高さ：足す
+  if (pitches.length >= MAX_CHORD_NOTES) {
+    return { score: score, error: `重音は${MAX_CHORD_NOTES}音までです` };
+  }
+  const newScore = updateNote(score, selection, (n) => {
+    setNotePitches(n, [...pitches, pitch]);
+    // 重音には付けられない記号を外す
+    delete n.ornament;
+    delete n.grace;
+    delete n.glissando;
+  });
+
+  // 前の音からこの音へのグリッサンドも外す（重音へはすべらせない）
+  const prev = findPrevious(newScore, selection);
+  if (prev) {
+    const prevNote = newScore.parts[prev.part].measures[prev.measure].notes[prev.note];
+    if (prevNote.glissando) delete prevNote.glissando; // newScore はコピーなので、直接書き換えてよい
+  }
+  return { score: newScore, error: "" };
+}
+
+// ----------------------------------------------------------
+// 関数：findPrevious
+// 選んでいる音の「前の音」の場所を返す（小節をまたいでもよい）（ステップ14-1）
+// 最初の小節の最初の音なら null
+// ----------------------------------------------------------
+function findPrevious(score, selection) {
+  if (selection.note > 0) return { ...selection, note: selection.note - 1 };
+  if (selection.measure > 0) {
+    const notes = score.parts[selection.part].measures[selection.measure - 1].notes;
+    return { ...selection, measure: selection.measure - 1, note: notes.length - 1 };
+  }
+  return null;
+}
+
+// ----------------------------------------------------------
+// 関数：chordPitchForLetter
+// ［重音］が入のときに、音名キー（C D E F G A B）で足す音の高さを決める（ステップ14-1）
+//   step … 音名（"C"〜"B"）
+// 決め方：
+//   ① ♯♭は調号どおりにする（pitchForLetter と同じ）
+//   ② 選んでいる音符のいちばん高い音より上で、いちばん近い高さにする
+//      （重音は下から積み上げて入れることが多いため。上に入らないときは、いちばん高い音に近い高さ）
+//   選んでいるのが休符なら、pitchForLetter と同じ決め方にする
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+export function chordPitchForLetter(score, selection, step) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest) return pitchForLetter(score, selection, step);
+
+  const alter = keyAlters(keyAt(score, selection.measure))[step];
+  const pitches = notePitches(note);
+  const top = pitchToMidi(pitches[pitches.length - 1]); // いちばん高い音
+
+  // いちばん高い音より上で、いちばん近いもの（低いオクターブから順に調べる）
+  for (let octave = 0; octave <= 8; octave++) {
+    const pitch = { step: step, alter: alter, octave: octave };
+    const midi = pitchToMidi(pitch);
+    if (midi > top && midi <= HIGHEST_MIDI) return pitch;
+  }
+  // 上に入らないとき：いちばん高い音と同じオクターブ
+  return { step: step, alter: alter, octave: pitches[pitches.length - 1].octave };
 }
 
 // ==========================================================

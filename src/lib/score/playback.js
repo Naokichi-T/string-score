@@ -23,7 +23,7 @@
 // }
 // ==========================================================
 
-import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH } from "./model.js";
+import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches } from "./model.js";
 import { keyAlters } from "./accidentals.js";
 import { mixerOf, isAudible } from "./mixer.js";
 
@@ -763,6 +763,7 @@ function makeTempoWarp(score, startMeasure, order) {
 // ・休符は一覧に入れない（時間だけ進める）
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
+// ・重音は、高さごとに鳴らす音を作って、同時に鳴らす（タイも高さごとにつなぐ）（ステップ14-1）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) {
   // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときは範囲をまっすぐ）
@@ -799,7 +800,9 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
 
     let dynamic = DEFAULT_DYNAMIC; // 今の強弱
     let tick = 0; // 再生を始めた所から何ティック目か（始める小節より前は数えない）
-    let tiedEvent = null; // 前の音からタイでつながっているときの、その音（まとめる先）
+    // 前の音からタイでつながっているときの、その音（まとめる先）
+    // （ステップ14-1：重音のため、1つの音から「高さの番号（MIDI）→ 鳴らす音」の表にした。つながっていなければ空の表）
+    let tiedEvents = new Map();
     let inSlur = false; // 今スラーの中か（スラーの始まりの音から、終わりの音の1つ前まで true）
     let pizz = false; // 今ピチカートか（pizz. の付いた音から、arco の付いた音の1つ前まで true）
     let muted = false; // 今弱音器を付けているか（con sord. の付いた音から、senza sord. の付いた音の1つ前まで true）（ステップ11-2）
@@ -811,7 +814,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
 
       // 鳴らし始める小節の頭と、くり返しで戻った所（前の小節のすぐ次ではない所）では、タイを切る（頭の音を鳴らし直す）
       const jumped = s > 0 && i !== sequence[s - 1].i + 1;
-      if (playing && (s === startMeasure || jumped)) tiedEvent = null;
+      if (playing && (s === startMeasure || jumped)) tiedEvents = new Map();
 
       // くり返しで戻ったときは、強弱・スラー・pizz.・弱音器を、1回目にこの小節に来たときの状態に戻す（ステップ11-7a）
       if (jumped && firstVisit.has(i)) {
@@ -829,7 +832,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         // 休符：時間だけ進める。タイのつながりも切る
         if (note.rest) {
           if (playing) tick = tick + length;
-          tiedEvent = null;
+          tiedEvents = new Map();
           return;
         }
 
@@ -871,7 +874,8 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         if (note.breath && !plucked) gate = Math.min(gate, GATE_BREATH);
         // グリッサンドの付いた音：次の音の高さへすべらせて、切れ目なしでつなげる（ステップ11-5b）
         // （ピチカートの音・トリルやトレモロも付いている音は、すべらせない）
-        const glissTo = note.glissando && !note.tie && !plucked && !note.ornament && !note.tremolo ? glissandoTarget(part, i, j) : null;
+        // （重音の音も、すべらせない）（ステップ14-1）
+        const glissTo = note.glissando && !note.tie && !plucked && !note.ornament && !note.tremolo && !note.chord ? glissandoTarget(part, i, j) : null;
         if (glissTo) gate = 1;
         const soundLength = length * gate;
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
@@ -890,64 +894,72 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         // 「再生」タブの音量をかける（ステップ12-3b）
         velocity = Math.round(velocity * volumeRate);
 
-        if (tiedEvent && pitchToMidi(tiedEvent.pitch) === pitchToMidi(note.pitch)) {
-          // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
-          // 音を出す長さは「前の音の楽譜の長さいっぱい ＋ この音の音を出す長さ」
-          tiedEvent.soundTicks = tiedEvent.ticks + soundLength;
-          tiedEvent.ticks = tiedEvent.ticks + length;
-          tiedEvent.connected = connected; // つなげるかどうかは、タイの最後の音で決める
-          tiedEvent.fermataEnd = !!note.fermata; // 最後の音にフェルマータがあるか
-          tiedEvent.glissTo = glissTo; // タイの最後の音にグリッサンドがあれば、その音の後半ですべる（ステップ11-5b）
-          tiedEvent.glissLastTicks = length;
-        } else {
-          // 新しく鳴らす音
-          const event = {
-            part: p,
-            measure: i,
-            note: j,
-            instrument: part.instrument,
-            pitch: note.pitch,
-            startTick: tick,
-            ticks: length,
-            soundTicks: soundLength,
-            connected: connected,
-            pizz: plucked, // ピチカートで鳴らすか（ステップ6-3c。左手・バルトーク・ピチカートはステップ11-1b）
-            velocity: velocity,
-            fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
-            ornament: note.ornament ?? null, // 装飾（トリルなど）の名前（ステップ11-3a）
-            upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
-            lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
-            tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
-            glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
-            glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
-          };
-          // 前打音：主音の頭の一部を借りて、先に前打音を鳴らす（ステップ11-8a）
-          //   短前打音 … 32分音符の長さ（主音が短いときは、主音の半分まで）
-          //   長前打音 … 主音の半分（付点の音符なら3分の2）
-          if (note.grace) {
-            const graceTicks = graceLength(note, length);
-            events.push({
-              ...event,
-              pitch: note.grace.pitch,
-              ticks: graceTicks,
-              soundTicks: graceTicks,
-              connected: true, // 主音とつなげて鳴らす
-              fermataEnd: false,
-              ornament: null, // 装飾・トレモロ・グリッサンドは主音のほうだけ
-              upper: null,
-              lower: null,
-              tremoloStep: null,
-              glissTo: null,
-            });
-            // 主音は、借りたぶんだけ遅く始めて、短くする
-            event.startTick = event.startTick + graceTicks;
-            event.ticks = event.ticks - graceTicks;
-            event.soundTicks = Math.max(event.soundTicks - graceTicks, 1);
-            event.glissLastTicks = event.glissLastTicks - graceTicks;
+        // 高さごとに、鳴らす音を作る（重音でなければ1つだけ）（ステップ14-1）
+        // nowEvents … この音符の高さごとの鳴らす音（次の音がタイでつながってきたときに、まとめる先になる）
+        const nowEvents = new Map();
+        notePitches(note).forEach((pitch, k) => {
+          const midi = pitchToMidi(pitch);
+          const tiedEvent = tiedEvents.get(midi); // 前の音から、同じ高さでタイがつながっているか
+          if (tiedEvent) {
+            // 前の音とタイでつながっている：前の音を長くするだけ（鳴らし直さない）
+            // 音を出す長さは「前の音の楽譜の長さいっぱい ＋ この音の音を出す長さ」
+            tiedEvent.soundTicks = tiedEvent.ticks + soundLength;
+            tiedEvent.ticks = tiedEvent.ticks + length;
+            tiedEvent.connected = connected; // つなげるかどうかは、タイの最後の音で決める
+            tiedEvent.fermataEnd = !!note.fermata; // 最後の音にフェルマータがあるか
+            tiedEvent.glissTo = glissTo; // タイの最後の音にグリッサンドがあれば、その音の後半ですべる（ステップ11-5b）
+            tiedEvent.glissLastTicks = length;
+            nowEvents.set(midi, tiedEvent);
+          } else {
+            // 新しく鳴らす音
+            const event = {
+              part: p,
+              measure: i,
+              note: j,
+              instrument: part.instrument,
+              pitch: pitch, // この高さ（重音なら、高さごとに1つずつ作る）（ステップ14-1）
+              startTick: tick,
+              ticks: length,
+              soundTicks: soundLength,
+              connected: connected,
+              pizz: plucked, // ピチカートで鳴らすか（ステップ6-3c。左手・バルトーク・ピチカートはステップ11-1b）
+              velocity: velocity,
+              fermataEnd: !!note.fermata, // この音の終わりにフェルマータがあるか（ステップ6-3b）
+              ornament: note.ornament ?? null, // 装飾（トリルなど）の名前（ステップ11-3a）
+              upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
+              lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
+              tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
+              glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
+              glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
+            };
+            // 前打音：主音の頭の一部を借りて、先に前打音を鳴らす（ステップ11-8a）
+            //   短前打音 … 32分音符の長さ（主音が短いときは、主音の半分まで）
+            //   長前打音 … 主音の半分（付点の音符なら3分の2）
+            if (note.grace && k === 0) {
+              const graceTicks = graceLength(note, length);
+              events.push({
+                ...event,
+                pitch: note.grace.pitch,
+                ticks: graceTicks,
+                soundTicks: graceTicks,
+                connected: true, // 主音とつなげて鳴らす
+                fermataEnd: false,
+                ornament: null, // 装飾・トレモロ・グリッサンドは主音のほうだけ
+                upper: null,
+                lower: null,
+                tremoloStep: null,
+                glissTo: null,
+              });
+              // 主音は、借りたぶんだけ遅く始めて、短くする
+              event.startTick = event.startTick + graceTicks;
+              event.ticks = event.ticks - graceTicks;
+              event.soundTicks = Math.max(event.soundTicks - graceTicks, 1);
+              event.glissLastTicks = event.glissLastTicks - graceTicks;
+            }
+            events.push(event);
+            nowEvents.set(midi, event);
           }
-          events.push(event);
-          tiedEvent = event;
-        }
+        });
 
         // 緑にする音符の一覧に入れる（タイの後ろの音符も、その音符の時間だけ緑にする）
         highlights.push({ part: p, measure: i, note: j, startTick: tick, endTick: tick + length, fermataEnd: !!note.fermata });
@@ -963,8 +975,8 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
           fermatas.push({ at: tick + length, extra: CAESURA_PAUSE });
         }
 
-        // この音にタイが付いていなければ、つながりはここで終わり
-        if (!note.tie) tiedEvent = null;
+        // この音にタイが付いていれば、次の音のために高さごとの鳴らす音を覚えておく。付いていなければ、つながりはここで終わり
+        tiedEvents = note.tie ? nowEvents : new Map();
 
         tick = tick + length;
       });

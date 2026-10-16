@@ -6,6 +6,8 @@
 //   番号はどれも 0 から数える（1小節目は measure: 0）
 // ==========================================================
 
+import { notePitches } from "./model.js"; // 音符の高さを低い順の配列にする（重音なら全部）（ステップ14-1）
+
 // 音名を日本語（ドレミ）で表すための表
 const STEP_NAMES = { C: "ド", D: "レ", E: "ミ", F: "ファ", G: "ソ", A: "ラ", B: "シ" };
 
@@ -95,6 +97,8 @@ export function durationToJapanese(duration, dots, isRest) {
 // 関数：describeSelection
 // 選択中の場所と音を、画面に出す文章にする
 // 例：'Viola　3小節目　2つ目　ラ3（A3）・4分音符'
+// 重音なら、低い順に「＋」でつなぐ（ステップ14-1）
+// 例：'Violin I　1小節目　1つ目　ラ4＋ミ5（A4＋E5）・4分音符'
 // ----------------------------------------------------------
 export function describeSelection(score, selection) {
   const note = getSelectedNote(score, selection);
@@ -110,7 +114,10 @@ export function describeSelection(score, selection) {
     return `${where}　${length}`;
   }
   // 日本語の音名のうしろに、英語の音名をかっこで付ける（ステップ12-1）
-  return `${where}　${pitchToJapanese(note.pitch)}（${pitchToEnglish(note.pitch)}）・${length}`;
+  const pitches = notePitches(note);
+  const japanese = pitches.map((pitch) => pitchToJapanese(pitch)).join("＋");
+  const english = pitches.map((pitch) => pitchToEnglish(pitch)).join("＋");
+  return `${where}　${japanese}（${english}）・${length}`;
 }
 
 // ==========================================================

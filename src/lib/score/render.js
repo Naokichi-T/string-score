@@ -15,7 +15,7 @@
 //   render/widths.js   … 小節ごとの、音符を並べるのに要る幅を決める（ステップ13-2）
 // ==========================================================
 
-import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest } from "./model.js";
+import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -109,13 +109,14 @@ export function renderScore(VF, container, score, width, selection = null, range
 
   // ----- 2. パートごと・小節ごとの臨時記号を決める -----
   // accidentalsList[p][i] = パート p の i 小節目の臨時記号の配列
+  // accidentalsList[p][i][j] は、j 番目の音の「高さごとの臨時記号の配列」（ステップ14-1：重音のため配列になった）
   const accidentalsList = score.parts.map((part) => {
-    let tiedIn = false; // 前の小節の最後の音がタイでつながっているか
+    let tiedIn = null; // 前の小節の最後の音が、タイでつながっているならその音（ステップ14-1：true / false から変えた）
     return part.measures.map((measure, i) => {
       const accidentals = computeAccidentals(measure.notes, states[i].key, tiedIn);
-      // 次の小節のために、この小節の最後の音がタイかどうかを覚えておく
+      // 次の小節のために、この小節の最後の音がタイでつながっているなら覚えておく
       const last = measure.notes[measure.notes.length - 1];
-      tiedIn = !!(last && !last.rest && last.tie);
+      tiedIn = last && !last.rest && last.tie ? last : null;
       return accidentals;
     });
   });
@@ -520,13 +521,28 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       if (current.data.rest || next.data.rest) continue;
       if (!current.data.tie) continue;
 
+      // つなぐ玉の組を探す：この音と次の音で、同じ高さのものどうし（ステップ14-1：重音のため）
+      //   firstIndexes … この音の、何番目の玉（低い順）から出すか
+      //   lastIndexes  … 次の音の、何番目の玉へつなぐか
+      const nextPitches = notePitches(next.data);
+      const firstIndexes = [];
+      const lastIndexes = [];
+      notePitches(current.data).forEach((pitch, index) => {
+        const match = nextPitches.findIndex((other) => samePitch(other, pitch));
+        if (match >= 0) {
+          firstIndexes.push(index);
+          lastIndexes.push(match);
+        }
+      });
+      if (firstIndexes.length === 0) continue; // 同じ高さの音がない（つなぐ相手がない）
+
       if (current.line === next.line) {
-        // 同じ段の中：1本の弧でつなぐ
-        drawTie(VF, context, current.staveNote, next.staveNote);
+        // 同じ段の中：1本の弧でつなぐ（重音なら、組ごとに1本ずつ）
+        drawTie(VF, context, current.staveNote, next.staveNote, firstIndexes, lastIndexes);
       } else {
         // 段をまたぐ：段の終わりまでの弧と、次の段の頭からの弧に分ける
-        drawTie(VF, context, current.staveNote, null);
-        drawTie(VF, context, null, next.staveNote);
+        drawTie(VF, context, current.staveNote, null, firstIndexes, lastIndexes);
+        drawTie(VF, context, null, next.staveNote, firstIndexes, lastIndexes);
       }
     }
   });

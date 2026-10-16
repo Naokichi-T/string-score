@@ -3,7 +3,7 @@
 // 音符・休符1つ分のデータから VexFlow の音符を作る
 // ==========================================================
 
-import { DURATIONS, CLEFS, pitchToVexKey } from "../model.js";
+import { DURATIONS, CLEFS, pitchToVexKey, notePitches } from "../model.js";
 import { addSymbols } from "./symbols.js";
 import { keyAlters } from "../accidentals.js";
 import { GRACES } from "../symbols.js";
@@ -22,11 +22,12 @@ const ALTER_TO_VF = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 //   VF         … VexFlow の部品一式
 //   note       … 音符1つ分のデータ
 //   clef       … 今の音部記号（'treble' など）
-//   accidental … 付ける臨時記号（'#'・'b'・'n' など。付けないときは null）
+//   accidentals … 高さごと（低い順）に付ける臨時記号の配列（'#'・'b'・'n' など。付けない高さは null）
+//                 （ステップ14-1：重音のため、1つの記号から配列に変えた。accidentals.js の computeAccidentals で決めたもの）
 //   keySignature … 今の調号（前打音の臨時記号を決めるのに使う）（ステップ11-8a）
 //   measureRest  … 小節まるごとの休符として描くか（model.js の isMeasureRest で調べたもの）（ステップ13-3）
 // ----------------------------------------------------------
-export function createNote(VF, note, clef, accidental, keySignature = 0, measureRest = false) {
+export function createNote(VF, note, clef, accidentals = [], keySignature = 0, measureRest = false) {
   // 小節まるごとの休符：拍子に関係なく、全休符を小節のまん中に描く（ステップ13-3）
   if (measureRest) return createMeasureRest(VF, note, clef);
 
@@ -41,22 +42,25 @@ export function createNote(VF, note, clef, accidental, keySignature = 0, measure
   }
 
   // 音の高さ（休符は五線のまん中に置く）
-  const key = note.rest ? CLEFS[clef].restKey : pitchToVexKey(note.pitch);
+  // 重音なら、高さを低い順に全部並べる（VexFlow は keys に並べた高さの玉を、1本の符尾にまとめて描く）（ステップ14-1）
+  const keys = note.rest ? [CLEFS[clef].restKey] : notePitches(note).map((pitch) => pitchToVexKey(pitch));
 
   // VexFlow の音符を作る
   const staveNote = new VF.StaveNote({
-    keys: [key], // 音の高さ（重音は今回なしなので1つだけ）
+    keys: keys, // 音の高さ（重音なら2つ以上）
     duration: duration, // 長さ
     clef: CLEFS[clef].vf, // 音部記号（これで五線上の位置が決まる）
     autoStem: true, // 符尾（棒）の向きを自動で決める
   });
 
-  // 臨時記号を付ける（0 は「1つ目の音」という意味。重音なしなので常に 0）
-  if (accidental) {
-    staveNote.addModifier(new VF.Accidental(accidental), 0);
-  }
+  // 臨時記号を、高さごとに付ける（addModifier の2つ目の数は「keys の何番目の玉か」）（ステップ14-1）
+  // 重音で臨時記号が重なるときは、VexFlow が左右にずらして並べてくれる
+  (accidentals ?? []).forEach((accidental, index) => {
+    if (accidental) staveNote.addModifier(new VF.Accidental(accidental), index);
+  });
 
   // 付点の「点」を描くための部品を付ける（長さの計算は上の 'd' で済んでいる）
+  // all: true … 重音なら、全部の玉に点を付ける（ステップ14-1）
   for (let i = 0; i < (note.dots ?? 0); i++) {
     VF.Dot.buildAndAttach([staveNote], { all: true });
   }

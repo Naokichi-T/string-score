@@ -25,7 +25,11 @@
 //             { rest: true, duration: 'quarter', dots: 0 },
 //             // 連符の中の音には tuplet を付ける（ステップ10-2）
 //             // 例：8分音符の3連符 = 「8分音符2つ分の長さに、8分音符を3つ入れる」
-//             { pitch: { step: 'D', alter: 0, octave: 4 }, duration: 'eighth', dots: 0, tie: false, tuplet: { actual: 3, normal: 2 } }
+//             { pitch: { step: 'D', alter: 0, octave: 4 }, duration: 'eighth', dots: 0, tie: false, tuplet: { actual: 3, normal: 2 } },
+//             // 重音（1つの音符に高さが2つ以上）には chord を付ける（ステップ14-1）
+//             //   pitch … いちばん低い音
+//             //   chord … その上に重ねる音（低い順）
+//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'quarter', dots: 0, tie: false }
 //           ]
 //         }
 //       ]
@@ -110,6 +114,75 @@ export function pitchToVexKey(pitch) {
   const step = pitch.step.toLowerCase();
   const acc = alterText[String(pitch.alter ?? 0)];
   return `${step}${acc}/${pitch.octave}`;
+}
+
+// ==========================================================
+// ここから下は、重音の関数（ステップ14-1）
+// 【重音のデータの決まり】
+//   ・pitch にはいちばん低い音、chord にはその上に重ねる音を低い順に入れる
+//   ・chord は、重ねる音がないときは付けない（ふつうの音符と同じ形）
+//   ・同じ高さ（鍵盤で同じ所）の音は2つ入れない
+//   ・1つの重音は MAX_CHORD_NOTES 音まで
+// ==========================================================
+
+// 1つの重音に入れられる音の数（弦楽器の弦は4本なので、同時に弾けるのは4音まで）
+export const MAX_CHORD_NOTES = 4;
+
+// ドからの半音の数（高さをくらべるのに使う）
+const STEP_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+// 音名の並び（同じ高さで書き方が違う音を並べるときの順番に使う）
+const STEP_ORDER = ["C", "D", "E", "F", "G", "A", "B"];
+
+// ----------------------------------------------------------
+// 関数：pitchNumber
+// 音の高さを、くらべられる1つの数にする（MIDI の番号と同じ。ド4 = 60。半音上がるごとに 1 増える）
+// 例：{ step: 'A', alter: 0, octave: 4 } → 69
+// ----------------------------------------------------------
+export function pitchNumber(pitch) {
+  return (pitch.octave + 1) * 12 + STEP_SEMITONES[pitch.step] + (pitch.alter ?? 0);
+}
+
+// ----------------------------------------------------------
+// 関数：samePitch
+// 2つの音が鍵盤で同じ所の高さか調べる（ミ♯ と ファ のように書き方が違っても、同じ高さなら true）
+// ----------------------------------------------------------
+export function samePitch(a, b) {
+  return pitchNumber(a) === pitchNumber(b);
+}
+
+// ----------------------------------------------------------
+// 関数：notePitches
+// 音符の高さを、低い順の配列にして返す（重音でなければ、高さ1つだけの配列）
+//   note … 音符・休符のデータ
+// 戻り値：[{ step, alter, octave }, ...]（休符なら空の配列）
+// 例：ラ4とミ5の重音 → [ラ4, ミ5]、ふつうのド5 → [ド5]
+// ----------------------------------------------------------
+export function notePitches(note) {
+  if (!note || note.rest) return [];
+  return [note.pitch, ...(note.chord ?? [])];
+}
+
+// ----------------------------------------------------------
+// 関数：setNotePitches
+// 音符の高さを、決まりどおりに入れ直す（渡された音符のデータを直接書き換える）
+//   ・低い順に並べて、いちばん低い音を pitch、残りを chord にする
+//   ・残りがなければ chord は付けない
+// コピーした楽譜データの中でだけ使う
+//   note    … 音符のデータ
+//   pitches … 高さの配列（順番はばらばらでもよい。同じ高さが入っていないこと）
+// ----------------------------------------------------------
+export function setNotePitches(note, pitches) {
+  // 低い順に並べる（同じ高さなら、音名の順）
+  const sorted = pitches
+    .map((pitch) => ({ step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave }))
+    .sort((a, b) => pitchNumber(a) - pitchNumber(b) || STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
+  note.pitch = sorted[0];
+  if (sorted.length > 1) {
+    note.chord = sorted.slice(1);
+  } else {
+    delete note.chord;
+  }
 }
 
 // ==========================================================

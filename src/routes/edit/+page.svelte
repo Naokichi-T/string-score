@@ -16,6 +16,7 @@
   // （ステップ7-1：URL の id の楽譜を読み込み、変えるたびに自動で保存する）
   // （ステップ8-4c：MusicXML を読み込んだときに、知らせることを黄色い枠で出す）
   // （ステップ8-1：MusicXML の書き出し）
+  // （ステップ14-1：［重音］が入のとき、鍵盤・音名キーで選んでいる音に音を足す）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -27,7 +28,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
     canFit,
@@ -73,6 +74,8 @@
     toggleJumpMark,
     setJump,
     toggleMeasureRest,
+    toggleChordPitch,
+    chordPitchForLetter,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -576,6 +579,23 @@
     return !!note && !note.rest;
   });
 
+  // 選んでいる音符が重音か（重音のときは ♯♭♮ を押せない）（ステップ14-1）
+  let chordSelected = $derived(!!getSelectedNote(score, selection)?.chord);
+
+  // ［重音］が入っているか（ステップ14-1）
+  // 入のときは、鍵盤・音名キーで、選んでいる音に音を足す（次の音へは進まない）
+  // ページを開き直したら切に戻る（保存しない。［範囲］と同じ）
+  let chordMode = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleChordMode
+  // 「音符」タブの［重音］が押されたとき：入・切を変える（ステップ14-1）
+  // ----------------------------------------------------------
+  function handleChordMode() {
+    chordMode = !chordMode;
+    message = "";
+  }
+
   // ----------------------------------------------------------
   // 選んでいるパートが変わったら、鍵盤の音域をその楽器に合わせる
   // ----------------------------------------------------------
@@ -899,7 +919,8 @@
       message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
       return;
     }
-    inputPitch(pitchForLetter(score, selection, step));
+    // ［重音］が入っていて音符を選んでいるときは、選んでいる重音のすぐ上の高さにする（ステップ14-1）
+    inputPitch(chordMode ? chordPitchForLetter(score, selection, step) : pitchForLetter(score, selection, step));
   }
 
   // ----------------------------------------------------------
@@ -919,12 +940,54 @@
       return;
     }
 
+    // ［重音］が入っていれば、選んでいる音に足す（次の音へは進まない）（ステップ14-1）
+    if (chordMode) {
+      addToChord(pitch);
+      return;
+    }
+
     const dots = dotted ? 1 : 0;
     // 入れる場所がピチカートの範囲かどうか（入れる前に調べる。入れると選択が次の音に進むため）
     const pizz = selection ? isPizzAt(score, selection) : false;
     const ok = putNote({ pitch: pitch, duration: duration, dots: dots, tie: false });
     // 入れたあとは選択が次の音に進むが、同じパートなので楽器は変わらない
     if (ok) playPitch(pitch, currentInstrument, 0.5, pizz);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：addToChord
+  // ［重音］が入のときに、鍵盤・音名キーで押された高さを、選んでいる所に足す（ステップ14-1）
+  //   pitch … 押された高さ { step, alter, octave }
+  // ・選んでいるのが休符 → 今の長さの音を入れる（上書き。挿入モードでも、後ろはずらさない）。次の音へは進まない
+  // ・選んでいるのが音符 → その高さを足す。同じ高さがもうあれば外す（最後の1音は外さない）。長さはその音符のまま
+  // 入れたら、重音全体を鳴らす（響きを確かめられるように）
+  // ----------------------------------------------------------
+  function addToChord(pitch) {
+    if (!selection) {
+      message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
+      return;
+    }
+    const note = getSelectedNote(score, selection);
+
+    // 休符：今の長さで音を入れる（選択はそのまま）
+    if (note.rest) {
+      const dots = dotted ? 1 : 0;
+      if (!canFit(score, selection, duration, dots)) {
+        message = "その長さは小節に入りきりません。短い長さを選んでください";
+        return;
+      }
+      message = "";
+      commit(replaceAt(score, selection, { pitch: pitch, duration: duration, dots: dots, tie: false }));
+      playSelected();
+      return;
+    }
+
+    // 音符：足す・外す
+    const result = toggleChordPitch(score, selection, pitch);
+    message = result.error;
+    if (result.error) return;
+    commit(result.score);
+    playSelected();
   }
 
   // ----------------------------------------------------------
@@ -990,11 +1053,14 @@
   // ----------------------------------------------------------
   // 関数：playSelected
   // 選んでいる音を鳴らす（高さを変えたあとなどに、耳で確かめるため）
+  // 重音なら、全部の音をいっしょに鳴らす（ステップ14-1）
   // ----------------------------------------------------------
   function playSelected() {
     const note = getSelectedNote(score, selection);
+    if (!note || note.rest) return;
     // ピチカートの範囲なら、ピチカートで鳴らす
-    if (note && !note.rest) playPitch(note.pitch, currentInstrument, 0.5, isPizzAt(score, selection));
+    const pizz = isPizzAt(score, selection);
+    notePitches(note).forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
   }
 
   // ----------------------------------------------------------
@@ -1036,7 +1102,7 @@
   //   alter … 1：♯、-1：♭、0：♮
   // ----------------------------------------------------------
   function handleAccidental(alter) {
-    if (!noteSelected) return;
+    if (!noteSelected || chordSelected) return; // 重音のときは使えない（ステップ14-1）
     message = "";
     commit(setAccidental(score, selection, alter));
     playSelected();
@@ -1938,6 +2004,9 @@
       onclipboard={handleClipboard}
       {rangeMode}
       onrangemode={handleRangeMode}
+      {chordMode}
+      onchordmode={handleChordMode}
+      {chordSelected}
     />
     <!-- onmove：前後の音へ移るボタン（ステップ12-10a） -->
     <SelectionInfo {score} {selection} {range} {message} onmove={handleMoveButton} />

@@ -692,6 +692,7 @@ function partXml(score, p, divisions) {
   lines.push(`  <part id="P${p + 1}">`);
 
   let tiedIn = false; // 前の小節の最後の音から、タイでつながってきているか
+  let tiedInNote = null; // 前の小節の最後の音（タイでつながってきているときだけ。臨時記号を決めるのに使う）（ステップ14-1）
 
   // グリッサンドの組を、先に全部探しておく（ステップ11-5c）
   //   glissStarts … すべり始める音（glissando の付いた音）
@@ -742,7 +743,8 @@ function partXml(score, p, divisions) {
     if (p === 0) lines.push(...jumpStartXml(score, i));
 
     // 臨時記号を、五線譜の表示と同じ決め方で決める
-    const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedIn);
+    // （ステップ14-1：重音のため、高さごとの配列が返ってくる。重音の書き出しは 14-3 で入れるので、今はいちばん低い音の分だけ使う）
+    const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedInNote);
 
     // この小節の連符（ステップ10-5）
     const groups = tupletGroups(measure.notes);
@@ -773,11 +775,13 @@ function partXml(score, p, divisions) {
       // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
       if (!note.rest && note.grace) lines.push(...graceXml(note, keyAt(score, i)));
       // 小節まるごとの休符なら、その印も渡す（ステップ13-3）
-      lines.push(...noteXml(xmlNote, accidentals[k], tieStop, divisions, tupletMark, isMeasureRest(measure.notes)));
+      lines.push(...noteXml(xmlNote, accidentals[k][0] ?? null, tieStop, divisions, tupletMark, isMeasureRest(measure.notes)));
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
     });
     tiedIn = prevTie; // 次の小節へ引き継ぐ
+    const lastNote = measure.notes[measure.notes.length - 1];
+    tiedInNote = prevTie ? lastNote : null; // 次の小節の臨時記号のために引き継ぐ（ステップ14-1）
 
     // rit.・accel. の範囲の終わりの小節なら、最後の音のあとに点線の終わりを書く（一番上のパートだけ）（ステップ11-6c）
     if (p === 0 && score.measures[i].gradualEnd) lines.push(...gradualEndXml());

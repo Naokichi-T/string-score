@@ -20,6 +20,9 @@
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!note);
+
+  // 選んでいる音符が重音か（重音には、装飾・前打音を付けられない。もう付いているものは、外すために押せる）（ステップ14-1）
+  let isChord = $derived(!!note?.chord);
 </script>
 
 <div class="symbol-tools">
@@ -65,7 +68,15 @@
   <!-- 装飾（トリルなど）（ステップ11-3a） -->
   <div class="group">
     {#each Object.entries(ORNAMENTS) as [name, symbol] (name)}
-      <button class="tool" class:on={note?.ornament === name} {disabled} onclick={() => onsymbol("ornament", name)} title={symbol.label} aria-label={symbol.label}>
+      <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+      <button
+        class="tool"
+        class:on={note?.ornament === name}
+        disabled={disabled || (isChord && note?.ornament !== name)}
+        onclick={() => onsymbol("ornament", name)}
+        title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
+        aria-label={symbol.label}
+      >
         <span class="icon ornament">{symbol.icon}</span>
       </button>
     {/each}
@@ -116,7 +127,15 @@
   <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
   <div class="group">
     {#each Object.entries(GRACES) as [name, symbol] (name)}
-      <button class="tool" class:on={note?.grace?.type === name} {disabled} onclick={() => onsymbol("grace", name)} title={symbol.label} aria-label={symbol.label}>
+      <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+      <button
+        class="tool"
+        class:on={note?.grace?.type === name}
+        disabled={disabled || (isChord && note?.grace?.type !== name)}
+        onclick={() => onsymbol("grace", name)}
+        title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
+        aria-label={symbol.label}
+      >
         <span class="icon grace">{symbol.glyph}</span>
       </button>
     {/each}

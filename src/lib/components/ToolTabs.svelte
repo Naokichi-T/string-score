@@ -16,6 +16,7 @@
   // （ステップ10-2：「音符」タブに［3連符］のボタンを追加）
   // （ステップ11-2：「奏法」タブを追加。中身は TechniqueTools）
   // （ステップ12-3：「再生」タブを追加。中身は PlaybackTools）
+  // （ステップ14-1：「音符」タブに［重音］のボタンを追加）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -100,7 +101,13 @@
   //   onending     … 1番・2番かっこのボタンが押されたときに呼ぶ関数（1 か 2 を渡す。「小節線」タブで使う）（ステップ11-7b）
   //   onjumpmark   … 𝄋・𝄌・To Coda・Fine のボタンが押されたときに呼ぶ関数（「小節線」タブで使う）（ステップ11-7c）
   //   onjump       … D.C.・D.S. のプルダウンで選んだときに呼ぶ関数（「小節線」タブで使う）（ステップ11-7c）
+  //   chordMode    … ［重音］が入っているか（「音符」タブで使う）（ステップ14-1）
+  //   onchordmode  … ［重音］が押されたときに呼ぶ関数（「音符」タブで使う）（ステップ14-1）
+  //   chordSelected … 選んでいる音符が重音か（true なら ♯♭♮ を押せない。重音の中の音は 14-2 で選べるようにする）（ステップ14-1）
   let {
+    chordMode = false,
+    onchordmode = () => {},
+    chordSelected = false,
     onjumpmark = () => {},
     onjump = () => {},
     onending = () => {},
@@ -315,10 +322,16 @@
         {/if}
       </div>
 
-      <!-- 臨時記号（音符を選んでいるときだけ押せる） -->
+      <!-- 臨時記号（音符を選んでいるときだけ押せる。重音のときは押せない（ステップ14-1）） -->
       <div class="group">
         {#each ACCIDENTALS as acc (acc.alter)}
-          <button class="tool" disabled={!noteSelected} onclick={() => onaccidental(acc.alter)} title={acc.name} aria-label={acc.name}>
+          <button
+            class="tool"
+            disabled={!noteSelected || chordSelected}
+            onclick={() => onaccidental(acc.alter)}
+            title={chordSelected ? `${acc.name}（重音のときは使えません。鍵盤で音を外して、入れ直してください）` : acc.name}
+            aria-label={acc.name}
+          >
             <span class="icon accidental">{acc.icon}</span>
           </button>
         {/each}
@@ -335,6 +348,18 @@
         <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
         <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
           削除
+        </button>
+      </div>
+
+      <!-- 重音（押すたびに入・切。入のとき、鍵盤・音名キーで選んでいる音に音を足す。同じ高さをもう一度押すと外れる）（ステップ14-1） -->
+      <div class="group">
+        <button
+          class="tool text clip"
+          class:on={chordMode}
+          onclick={() => onchordmode()}
+          title="入にすると、鍵盤（音名キー）で、選んでいる音に音を足して重音にする（次の音へは進まない）。同じ高さをもう一度押すと外れる。4音まで"
+        >
+          重音
         </button>
       </div>
 
