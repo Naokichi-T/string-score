@@ -5,6 +5,7 @@
   // ・押すと、その音を親に知らせる（onpress）
   // ・◀ ▶ ボタンで1オクターブずつずらす（onshift）
   // （ステップ12-1：日本語の音名の上に、英語の音名（C・D…）も出す）
+  // （ステップ12-9：［▼］で鍵盤をたたんで、五線譜を広く見られるようにした。たたむと［▲ 鍵盤］だけの細い帯になる）
   // ==========================================================
 
   // 親から受け取るもの
@@ -13,7 +14,9 @@
   //   onpress     … 鍵盤が押されたときに呼ぶ関数（{ step, alter, octave } を渡す）
   //                 黒鍵は「左どなりの白鍵の♯」として渡す（♭にするかは親が決める）
   //   onshift     … ◀ ▶ が押されたときに呼ぶ関数（-1 か 1 を渡す）
-  let { startOctave = 3, octaves = 3, onpress = () => {}, onshift = () => {} } = $props();
+  //   collapsed   … true なら鍵盤をたたむ（ステップ12-9）
+  //   ontoggle    … ［▼］［▲ 鍵盤］が押されたときに呼ぶ関数（ステップ12-9）
+  let { startOctave = 3, octaves = 3, onpress = () => {}, onshift = () => {}, collapsed = false, ontoggle = () => {} } = $props();
 
   // 白鍵の音名（1オクターブ分）
   const WHITE_STEPS = ["C", "D", "E", "F", "G", "A", "B"];
@@ -64,34 +67,44 @@
   });
 </script>
 
-<div class="keyboard-area">
-  <!-- 1オクターブ下へ -->
-  <button class="shift" onclick={() => onshift(-1)} title="1オクターブ下へ">◀</button>
-
-  <div class="keyboard" style="width: {whiteKeys.length * WHITE_WIDTH}px">
-    <!-- 白鍵 -->
-    {#each whiteKeys as key (key.step + key.octave)}
-      <button class="white-key" style="width: {WHITE_WIDTH}px" onclick={() => onpress({ step: key.step, alter: 0, octave: key.octave })}>
-        <!-- 音名は2行で書く（上：英語、下：日本語） -->
-        <!-- ドの鍵盤にだけ、オクターブの数字も付ける（どこが何オクターブかわかるように） -->
-        <span class="label">
-          <!-- 英語の音名（key.step がそのまま "C" "D" などの英語の音名になっている） -->
-          <span class="label-en">{key.step}{key.step === "C" ? key.octave : ""}</span>
-          <!-- 日本語の音名 -->
-          <span class="label-ja">{STEP_NAMES[key.step]}{key.step === "C" ? key.octave : ""}</span>
-        </span>
-      </button>
-    {/each}
-
-    <!-- 黒鍵（白鍵の上に重ねる） -->
-    {#each blackKeys as key (key.step + key.octave)}
-      <button class="black-key" style="left: {key.left}px" aria-label="{STEP_NAMES[key.step]}♯{key.octave}" onclick={() => onpress({ step: key.step, alter: 1, octave: key.octave })}></button>
-    {/each}
+{#if collapsed}
+  <!-- たたんでいるとき：［▲ 鍵盤］だけの細い帯（ステップ12-9） -->
+  <div class="keyboard-area collapsed">
+    <button class="toggle" onclick={() => ontoggle()} title="鍵盤を出す">▲ 鍵盤</button>
   </div>
+{:else}
+  <div class="keyboard-area">
+    <!-- 1オクターブ下へ -->
+    <button class="shift" onclick={() => onshift(-1)} title="1オクターブ下へ">◀</button>
 
-  <!-- 1オクターブ上へ -->
-  <button class="shift" onclick={() => onshift(1)} title="1オクターブ上へ">▶</button>
-</div>
+    <div class="keyboard" style="width: {whiteKeys.length * WHITE_WIDTH}px">
+      <!-- 白鍵 -->
+      {#each whiteKeys as key (key.step + key.octave)}
+        <button class="white-key" style="width: {WHITE_WIDTH}px" onclick={() => onpress({ step: key.step, alter: 0, octave: key.octave })}>
+          <!-- 音名は2行で書く（上：英語、下：日本語） -->
+          <!-- ドの鍵盤にだけ、オクターブの数字も付ける（どこが何オクターブかわかるように） -->
+          <span class="label">
+            <!-- 英語の音名（key.step がそのまま "C" "D" などの英語の音名になっている） -->
+            <span class="label-en">{key.step}{key.step === "C" ? key.octave : ""}</span>
+            <!-- 日本語の音名 -->
+            <span class="label-ja">{STEP_NAMES[key.step]}{key.step === "C" ? key.octave : ""}</span>
+          </span>
+        </button>
+      {/each}
+
+      <!-- 黒鍵（白鍵の上に重ねる） -->
+      {#each blackKeys as key (key.step + key.octave)}
+        <button class="black-key" style="left: {key.left}px" aria-label="{STEP_NAMES[key.step]}♯{key.octave}" onclick={() => onpress({ step: key.step, alter: 1, octave: key.octave })}></button>
+      {/each}
+    </div>
+
+    <!-- 1オクターブ上へ -->
+    <button class="shift" onclick={() => onshift(1)} title="1オクターブ上へ">▶</button>
+
+    <!-- 鍵盤をたたむ（ステップ12-9） -->
+    <button class="toggle" onclick={() => ontoggle()} title="鍵盤をたたんで、五線譜を広く見る">▼</button>
+  </div>
+{/if}
 
 <style>
   .keyboard-area {
@@ -103,6 +116,17 @@
     background: #f3f4f6;
     border-top: 1px solid #ddd;
     overflow-x: auto; /* 画面が狭いときは横スクロール */
+  }
+  /* たたんでいるときの細い帯（ステップ12-9） */
+  .keyboard-area.collapsed {
+    padding: 4px 16px;
+  }
+  /* ［▼］［▲ 鍵盤］のボタン（ステップ12-9） */
+  .toggle {
+    height: 40px;
+    padding: 0 14px;
+    font-size: 14px;
+    white-space: nowrap;
   }
   .shift {
     height: 60px;

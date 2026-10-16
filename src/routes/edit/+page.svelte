@@ -208,6 +208,19 @@
     saveSetting("beatLines", beatLines);
   }
 
+  // 鍵盤をたたんでいるか（ステップ12-9）
+  // アプリ全体で1つ（設定として保存する）。ページを開いたときに読み込む
+  let keyboardCollapsed = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleToggleKeyboard
+  // 鍵盤の［▼］［▲ 鍵盤］が押されたとき：たたむ・出すを変えて保存する（ステップ12-9）
+  // ----------------------------------------------------------
+  function handleToggleKeyboard() {
+    keyboardCollapsed = !keyboardCollapsed;
+    saveSetting("keyboardCollapsed", keyboardCollapsed);
+  }
+
   // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
   // アプリ全体で1つ（音の種類と同じく、設定として保存する）。ページを開いたときに読み込む
   let metronome = $state({ on: false, volume: 70, countIn: false });
@@ -477,6 +490,9 @@
 
     // 前に決めた拍の線の入・切を読み込む（保存していなければ切のまま）（ステップ12-7）
     beatLines = loadSettings().beatLines === true;
+
+    // 前に決めた鍵盤のたたみ方を読み込む（保存していなければ出したまま）（ステップ12-9）
+    keyboardCollapsed = loadSettings().keyboardCollapsed === true;
 
     // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
     loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
@@ -1646,7 +1662,8 @@
       <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} {beatLines} />
     </main>
 
-    <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} />
+    <!-- collapsed・ontoggle：鍵盤をたたむ（ステップ12-9） -->
+    <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} collapsed={keyboardCollapsed} ontoggle={handleToggleKeyboard} />
   </div>
 
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
