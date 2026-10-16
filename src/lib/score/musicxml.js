@@ -5,6 +5,7 @@
 // （ステップ8-1b：コモンタイム（C）・カットタイム（¢）の拍子記号）
 // （ステップ8-2：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 // （ステップ14-3：重音。1つ目の音の <note> のあとに、<chord/> を付けた <note> を低い順に並べる）
+// （ステップ14-4b：アルペジオ。重音の全部の音の <notations> に <arpeggiate/> を書く）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -33,7 +34,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
 import { computeAccidentals, keyAlters } from "./accidentals.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -555,6 +556,9 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
     inner.push("          </ornaments>");
   }
 
+  // アルペジオ（ステップ14-4b）：重音のどの音にも書く（chordParts で、全部の音に arpeggio の印を付けてある）
+  if (note.arpeggio) inner.push(`          <${ARPEGGIO.musicxml}/>`);
+
   // フェルマータ（upright：五線の上に付く、ふつうの向き）
   if (note.fermata) inner.push(`          <${FERMATA.musicxml} type="upright"/>`);
 
@@ -698,6 +702,7 @@ function sameTimeSignature(a, b) {
 //   ・2つ目からは、高さ・長さ・連符の印だけ（記号を2回書かないため）
 //   ・タイの「ここから」は、次の音に同じ高さがある高さだけ。「ここまで」は、前の音に同じ高さがある高さだけ
 //   ・指番号：指番号の数と高さの数が同じなら、付けた順に下の高さから1つずつ。ちがうときは、全部を1つ目に
+//   ・アルペジオ：重音なら、全部の音に書く（1音だけの音符には書かない）（ステップ14-4b）
 // ----------------------------------------------------------
 function chordParts(note, tiedFrom, nextNote) {
   const pitches = notePitches(note);
@@ -715,11 +720,13 @@ function chordParts(note, tiedFrom, nextNote) {
       piece = { ...note, pitch: pitch, tie: tieStart };
       delete piece.chord;
       if (splitFingers) piece.fingerings = [fingerings[0]];
+      if (pitches.length === 1) delete piece.arpeggio; // 1音だけの音符には書かない（ステップ14-4b）
     } else {
       // 2つ目から：高さ・長さ・連符の印だけ
       piece = { pitch: pitch, duration: note.duration, dots: note.dots ?? 0, tie: tieStart };
       if (note.tuplet) piece.tuplet = note.tuplet;
       if (splitFingers) piece.fingerings = [fingerings[h]];
+      if (note.arpeggio) piece.arpeggio = true; // アルペジオは全部の音に書く（ステップ14-4b）
     }
     return { note: piece, tieStop: tieStop };
   });

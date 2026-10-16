@@ -5,6 +5,7 @@
 // （ステップ8-4a：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 // （ステップ8-4b：重音・2つ目の声部・装飾音・アウフタクト）
 // （ステップ14-3：重音を読むようにした。<chord/> の付いた音を、1つ前の音に重ねる）
+// （ステップ14-4b：アルペジオ（<arpeggiate>）を読むようにした。1音だけの音符に付いていたら使わずに数える）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -125,13 +126,28 @@ const UNSUPPORTED_LABELS = {
   "open-string": "開放弦の記号",
   "thumb-position": "親指の位置",
   string: "弦の指定",
-  arpeggiate: "アルペジオ",
   "other-dynamics": "強弱（その他）",
 };
 
 // 数えなくてよい（ほかの所で扱う・中身だけを見る）記号の名前（tuplet は連符の印。連符の小節は別に知らせる）
 // （ステップ11-5c：グリッサンド（glissando・slide）は読むようにしたので、ここに入れた）
-const IGNORED_NOTATIONS = ["tied", "slur", "fermata", "articulations", "technical", "ornaments", "dynamics", "wavy-line", "accidental-mark", "other-notation", "tuplet", "glissando", "slide"];
+// （ステップ14-4b：アルペジオ（arpeggiate）も読むようにしたので、ここに入れた）
+const IGNORED_NOTATIONS = [
+  "tied",
+  "slur",
+  "fermata",
+  "articulations",
+  "technical",
+  "ornaments",
+  "dynamics",
+  "wavy-line",
+  "accidental-mark",
+  "other-notation",
+  "tuplet",
+  "glissando",
+  "slide",
+  "arpeggiate",
+];
 
 // ----------------------------------------------------------
 // 関数：childElements
@@ -561,7 +577,11 @@ function readNotations(noteElement, note, state, counter) {
     const glissandos = [...childElements(notations, "glissando"), ...childElements(notations, "slide")];
     if (glissandos.some((element) => element.getAttribute("type") === "start")) note.glissando = true;
 
-    // そのほか（アルペジオなど）
+    // アルペジオ（ステップ14-4b）：上向き・下向きの矢印付きも、ふつうの波線として読む
+    // （重音の2つ目からの音に付いていても、重音全体のアルペジオになる。1音だけの音符なら、あとで外して数える）
+    if (childElement(notations, "arpeggiate")) note.arpeggio = true;
+
+    // そのほか（アルペジオのない、このアプリにない記号）
     for (const child of Array.from(notations.childNodes)) {
       if (child.nodeType === 1 && !IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
     }
@@ -1179,6 +1199,16 @@ function readPart(partElement, counter, skipped) {
 
   // 重音を、決まりどおりの形にする（ステップ14-3）
   chords.forEach((chord) => finishChord(chord, skipped, counter));
+
+  // 1音だけの音符に付いたアルペジオは使わない（アルペジオは重音だけの決まり）（ステップ14-4b）
+  measures.forEach((measure) => {
+    measure.notes.forEach((note) => {
+      if (note.arpeggio && !note.chord) {
+        delete note.arpeggio;
+        report(counter, "1つの音に付いたアルペジオ");
+      }
+    });
+  });
 
   return { measures: measures, firstClef: firstClef, problems: problems };
 }
