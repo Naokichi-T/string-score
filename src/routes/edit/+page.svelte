@@ -668,7 +668,8 @@
   // ----------------------------------------------------------
   function handleSelect(newSelection, shift = false) {
     message = "";
-    if (shift && selection && newSelection && newSelection.part === selection.part) {
+    // Shift を押していたとき、または［範囲］が入っているとき（タブレット用）は、範囲を作る（ステップ12-8b）
+    if ((shift || rangeMode) && selection && newSelection && newSelection.part === selection.part) {
       // 範囲のもう一方の端にする（選んでいる音そのものをクリックしたら範囲をやめる）
       rangeEnd = samePlace(newSelection, selection) ? null : newSelection;
       return;
@@ -676,6 +677,20 @@
     // ふつうのクリック（または違うパート）：その音だけを選ぶ
     selection = newSelection;
     rangeEnd = null;
+  }
+
+  // ［範囲］が入っているか（ステップ12-8b）
+  // 入のときは、Shift を押さなくても、選んでいる音から次にタップした音までが範囲になる（タブレットで範囲を選ぶため）
+  // ページを開き直したら切に戻る（保存しない）
+  let rangeMode = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleRangeMode
+  // 「音符」タブの［範囲］が押されたとき：入・切を変える（ステップ12-8b）
+  // 切にしても、今の範囲はそのまま残す
+  // ----------------------------------------------------------
+  function handleRangeMode() {
+    rangeMode = !rangeMode;
   }
 
   // ----------------------------------------------------------
@@ -1617,6 +1632,8 @@
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}
+      {rangeMode}
+      onrangemode={handleRangeMode}
     />
     <SelectionInfo {score} {selection} {range} {message} />
     <!-- MusicXML を読み込んだときに知らせること（なければ何も出ない）（ステップ8-4c） -->

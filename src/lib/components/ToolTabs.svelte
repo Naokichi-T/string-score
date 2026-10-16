@@ -81,7 +81,11 @@
   //   repeatOn     … 区間リピートが入っているか（「再生」タブで使う）（ステップ12-5b）
   //   repeatText   … くり返す範囲の文字（例："3〜5小節目"）（「再生」タブで使う）（ステップ12-5b）
   //   onrepeat     … ［区間リピート］が押されたときに呼ぶ関数（「再生」タブで使う）（ステップ12-5b）
+  //   rangeMode    … ［範囲］が入っているか（「音符」タブで使う）（ステップ12-8b）
+  //   onrangemode  … ［範囲］が押されたときに呼ぶ関数（「音符」タブで使う）（ステップ12-8b）
   let {
+    rangeMode = false,
+    onrangemode = () => {},
     hiddenParts = [],
     ontoggleview = () => {},
     beatLines = false,
@@ -285,6 +289,13 @@
         <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
         <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
           削除
+        </button>
+      </div>
+
+      <!-- 範囲（押すたびに入・切。入のとき、次にタップした音までを範囲にする。Shift＋クリックと同じ）（ステップ12-8b） -->
+      <div class="group">
+        <button class="tool text clip" class:on={rangeMode} onclick={() => onrangemode()} title="入にすると、選んでいる音から、次にタップ（クリック）した音までを範囲にする（Shift＋クリックと同じ）">
+          範囲
         </button>
       </div>
 
