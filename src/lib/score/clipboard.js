@@ -320,6 +320,12 @@ export function pasteNotes(score, selection, clip) {
         last[field] = "stop";
       }
     });
+    // グリッサンドは、分けた音の最後の部分から次の音へすべらせる（ステップ11-5a）
+    // （最初の部分のままだと、タイでつながった同じ高さの音へ線を引いてしまう）
+    if (first.glissando) {
+      delete first.glissando;
+      last.glissando = true;
+    }
   });
 
   // ⑧ 相手のいなくなったスラー・松葉を外す

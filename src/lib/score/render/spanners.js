@@ -4,7 +4,7 @@
 // 「音をまたぐ記号」のことを英語で spanner（スパナー）という
 // ==========================================================
 
-import { DYNAMICS } from "../symbols.js";
+import { DYNAMICS, GLISSANDO } from "../symbols.js";
 import { dynamicBaselineY } from "./symbols.js";
 
 // ----------------------------------------------------------
@@ -17,6 +17,10 @@ const SLUR_THICKNESS = 2; // スラーのまん中の太さ
 const HAIRPIN_HALF = 5; // 松葉の開いた側の、まん中からの幅（上下それぞれ）
 const HAIRPIN_GAP = 6; // 松葉と強弱記号のすき間
 const HAIRPIN_SLUR_GAP = 4; // 松葉と、下側に描いたスラーのすき間
+const GLISS_GAP = 3; // グリッサンドの線と、音符の玉（臨時記号・付点）とのすき間（ステップ11-5a）
+const GLISS_TEXT_SIZE = 11; // 「gliss.」の文字の大きさ
+const GLISS_TEXT_RAISE = 3; // 「gliss.」の文字を、線からどれだけ上に離すか
+const GLISS_TEXT_MARGIN = 6; // 線の長さが「文字の幅＋これ」より短いときは、文字を書かない
 
 // ----------------------------------------------------------
 // 関数：drawSpanners
@@ -61,6 +65,16 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
       if (data.wedge === "crescendo" || data.wedge === "diminuendo") {
         wedgeStart = k;
         wedgeType = data.wedge;
+      }
+    });
+
+    // ①-2 グリッサンドを描く（ステップ11-5a）
+    // glissando の付いた音から、次の音まで線を引く
+    // 次の音が休符・次の音がない・タイが付いているときは描かない
+    notesOfPart.forEach((entry, k) => {
+      const next = notesOfPart[k + 1];
+      if (entry.data.glissando && !entry.data.rest && !entry.data.tie && next && !next.data.rest) {
+        drawGlissando(context, entry, next, lineBounds);
       }
     });
 
@@ -275,6 +289,92 @@ function drawWedgeSpan(VF, context, entries, type, lineBounds, slurBelows) {
     context.stroke();
     context.restore();
   });
+}
+
+// ----------------------------------------------------------
+// 関数：drawGlissando
+// 1つのグリッサンドを描く（ステップ11-5a）
+// 1つ目の音の玉の右から、2つ目の音の玉の左まで、まっすぐな線を引き、
+// 線の上に、線と同じ傾きで「gliss.」と書く（線が短くて入らないときは線だけ）
+// 段をまたぐときは、スラーと同じく段の端で切って2本に分ける
+//   ・1段目：1つ目の音から段の右端まで（高さは、2つ目の音の方へ半分だけ進める）
+//   ・2段目：段の頭から2つ目の音まで（残りの半分）
+//   from / to  … すべり始める音・次の音（render.js で作った { staveNote, data, line }）
+//   lineBounds … 段ごとの左右の端の位置 [{ startX, endX }, ...]
+// ----------------------------------------------------------
+function drawGlissando(context, from, to, lineBounds) {
+  const fromNote = from.staveNote;
+  const toNote = to.staveNote;
+
+  // 線の両端の横の位置
+  // ・始まり：1つ目の音の玉の右端（付点があれば、その右）
+  // ・終わり：2つ目の音の玉の左端（臨時記号があれば、その左）
+  const x1 = fromNote.getNoteHeadEndX() + fromNote.getMetrics().modRightPx + GLISS_GAP;
+  const x2 = toNote.getNoteHeadBeginX() - toNote.getMetrics().modLeftPx - GLISS_GAP;
+
+  // 線の両端の高さ：それぞれの音の玉のまん中
+  const y1 = fromNote.getYs()[0];
+  const y2 = toNote.getYs()[0];
+
+  // 同じ段なら、1本の線で描く
+  if (from.line === to.line) {
+    drawGlissLine(context, x1, y1, x2, y2);
+    return;
+  }
+
+  // 段をまたぐとき：五線の一番上の線からの高さで比べて、半分ずつ進める
+  // （段が違うと五線の位置が違うので、そのままの y では比べられないため）
+  const fromTop = fromNote.getStave().getYForLine(0);
+  const toTop = toNote.getStave().getYForLine(0);
+  const half = (y2 - toTop - (y1 - fromTop)) / 2; // 高さの差の半分
+  const hasText = drawGlissLine(context, x1, y1, lineBounds[from.line].endX - 4, y1 + half);
+  // 1段目に文字が入らなかったときだけ、2段目に文字を書く
+  drawGlissLine(context, lineBounds[to.line].startX - 4, y2 - half, x2, y2, !hasText);
+}
+
+// ----------------------------------------------------------
+// 関数：drawGlissLine
+// グリッサンドの線を1本描き、入るなら線の上に「gliss.」と書く（ステップ11-5a）
+//   x1, y1 … 線の始まり
+//   x2, y2 … 線の終わり
+//   withText … 文字を書こうとするか（省略したら書こうとする）
+// 戻り値：文字を書いたら true、書かなかったら false
+// ----------------------------------------------------------
+function drawGlissLine(context, x1, y1, x2, y2, withText = true) {
+  if (x2 <= x1) return false; // 線を引く場所がない（音がくっついている）ときは描かない
+
+  // 線を引く
+  context.save();
+  context.setLineWidth(1.2);
+  context.beginPath();
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+  context.restore();
+
+  if (!withText) return false;
+
+  // 線の長さと傾き
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const angle = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI; // 度（右下がりはプラス）
+
+  // 文字の幅を測って、線に入らなければ書かない
+  context.save();
+  context.setFont("Academico", GLISS_TEXT_SIZE, "normal", "italic");
+  const textWidth = context.measureText(GLISSANDO.text).width;
+  if (length < textWidth + GLISS_TEXT_MARGIN) {
+    context.restore();
+    return false;
+  }
+
+  // 線のまん中を中心にして、線と同じ傾きに回してから、線の少し上に書く
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  context.openRotation(angle, cx, cy);
+  context.fillText(GLISSANDO.text, cx - textWidth / 2, cy - GLISS_TEXT_RAISE);
+  context.closeRotation();
+  context.restore();
+  return true;
 }
 
 // ----------------------------------------------------------

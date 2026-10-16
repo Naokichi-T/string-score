@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -15,7 +15,8 @@
   //   spanState    … 選んだ範囲に付いているスラー・松葉 { slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
-  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {} } = $props();
+  //   canGlissando … 選んでいる音にグリッサンドを付けられるか（次の音が音符で、タイが付いていないか）（ステップ11-5a）
+  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {}, canGlissando = false } = $props();
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!note);
@@ -95,6 +96,21 @@
         <span class="icon dynamic">{symbol.glyph}</span>
       </button>
     {/each}
+  </div>
+
+  <!-- グリッサンド（ステップ11-5a） -->
+  <!-- 付けられないときは押せない。ただし、もう付いている音なら、外すために押せる -->
+  <div class="group">
+    <button
+      class="tool text wide"
+      class:on={!!note?.glissando}
+      disabled={disabled || (!canGlissando && !note?.glissando)}
+      onclick={() => onsymbol("glissando")}
+      title={GLISSANDO.label}
+      aria-label={GLISSANDO.label}
+    >
+      <span class="gliss-text">{GLISSANDO.text}</span>
+    </button>
   </div>
 
   <!-- スラー・松葉（範囲を選んだときだけ押せる） -->
@@ -191,5 +207,9 @@
   }
   .icon.dynamic {
     top: -2px;
+  }
+  .gliss-text {
+    font-style: italic; /* 楽譜の「gliss.」と同じく斜めの文字 ステップ11-5a */
+    pointer-events: none;
   }
 </style>

@@ -48,6 +48,7 @@
   //   spanState    … 選んだ範囲に付いているスラー・松葉（「記号」タブで使う）
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（「記号」タブで使う）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（「記号」タブで使う）
+  //   canGlissando … 選んでいる音にグリッサンドを付けられるか（「記号」タブで使う）（ステップ11-5a）
   //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
   //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
   //   canDeleteMeasure … 小節を消せるか（「小節」タブで使う）
@@ -124,6 +125,7 @@
     spanState = { slur: false, wedge: null },
     canSpanRange = false,
     onspanner = () => {},
+    canGlissando = false,
     mode = "overwrite",
     onmode = () => {},
     duration,
@@ -306,7 +308,7 @@
         <button class="tool text clip" disabled={!canPaste} onclick={() => onclipboard("paste")} title="選んでいる音の頭から、コピーした音を上書きで貼り付ける（⌘ / Ctrl＋V）"> 貼り付け </button>
       </div>
     {:else if activeTab === "symbol"}
-      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} />
+      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} {canGlissando} />
     {:else if activeTab === "technique"}
       <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
       <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />

@@ -60,6 +60,7 @@
     addPart,
     movePart,
     deletePart,
+    canGlissando,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -103,6 +104,9 @@
 
   // 範囲に付いているスラー・松葉（ボタンを青くするため）
   let spanState = $derived(getSpanState(score, range));
+
+  // 選んでいる音にグリッサンドを付けられるか（「記号」タブのボタンを押せるようにするため）（ステップ11-5a）
+  let glissandoAllowed = $derived(canGlissando(score, selection));
 
   // 範囲の中に音符が1つでもあるか（範囲をまとめて ▲ ▼・削除できるかどうかに使う）
   let rangeEditable = $derived(!!range && rangeHasNotes(score, range));
@@ -1638,6 +1642,7 @@
       {spanState}
       {canSpanRange}
       onspanner={handleSpanner}
+      canGlissando={glissandoAllowed}
       {score}
       onsettings={handleSettings}
       {canDeleteMeasure}

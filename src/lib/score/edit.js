@@ -358,6 +358,7 @@ export function toggleTie(score, selection) {
     const newScore = cloneScore(score);
     const notes = newScore.parts[selection.part].measures[selection.measure].notes;
     notes[selection.note].tie = true;
+    delete notes[selection.note].glissando; // タイを付けたら、グリッサンドは外す（ステップ11-5a）
     const nextNotes = newScore.parts[next.part].measures[next.measure].notes;
     nextNotes[next.note] = {
       pitch: { ...note.pitch },
@@ -377,6 +378,7 @@ export function toggleTie(score, selection) {
   return {
     score: updateNote(score, selection, (n) => {
       n.tie = true;
+      delete n.glissando; // タイを付けたら、グリッサンドは外す（ステップ11-5a）
     }),
     error: "",
   };
@@ -533,6 +535,26 @@ function toggleInList(list, value) {
 }
 
 // ----------------------------------------------------------
+// 関数：canGlissando
+// 選んでいる音にグリッサンドを付けられるか調べる（ステップ11-5a）
+// 次のときだけ付けられる
+//   ・選んでいるのが音符（休符ではない）
+//   ・タイが付いていない（タイは同じ高さどうしをつなぐので、いっしょには使わない）
+//   ・次の音がある（小節をまたいでもよい）
+//   ・次の音が休符ではない
+// 戻り値：true / false
+// ----------------------------------------------------------
+export function canGlissando(score, selection) {
+  if (!selection) return false;
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest || note.tie) return false;
+  const next = findNext(score, selection);
+  if (!next) return false; // 最後の音
+  const nextNote = score.parts[next.part].measures[next.measure].notes[next.note];
+  return !nextNote.rest;
+}
+
+// ----------------------------------------------------------
 // 関数：toggleNoteSymbol
 // 選んでいる音符に記号を付ける（すでに付いていれば外す）
 //   kind  … 記号の種類
@@ -550,6 +572,19 @@ function toggleInList(list, value) {
 export function toggleNoteSymbol(score, selection, kind, value) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest) return score;
+
+  // グリッサンド（kind が 'glissando'）：付いていれば外す、なければ付ける（ステップ11-5a）
+  // 付けるのは、canGlissando で付けられるときだけ（外すのはいつでもできる）
+  if (kind === "glissando") {
+    if (!note.glissando && !canGlissando(score, selection)) return score;
+    return updateNote(score, selection, (n) => {
+      if (n.glissando) {
+        delete n.glissando;
+      } else {
+        n.glissando = true;
+      }
+    });
+  }
 
   return updateNote(score, selection, (n) => {
     if (kind === "bowing") {
