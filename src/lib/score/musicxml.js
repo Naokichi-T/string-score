@@ -31,7 +31,7 @@
 // ==========================================================
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel } from "./model.js";
-import { computeAccidentals } from "./accidentals.js";
+import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符1つ分のティック
@@ -423,6 +423,54 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark) {
   return lines;
 }
 
+// 長前打音の小さな音符の形：主音の半分の長さ（画面の表示と同じ。render/notes.js を参照）（ステップ11-8b）
+const HALF_TYPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th", "16th": "32nd" };
+
+// alter（♯♭の数） → MusicXML の臨時記号の名前（前打音の臨時記号に使う）（ステップ11-8b）
+const ALTER_TO_XML = { "-2": "flat-flat", "-1": "flat", 0: "natural", 1: "sharp", 2: "double-sharp" };
+
+// ----------------------------------------------------------
+// 関数：graceXml
+// 前打音の小さな音符の <note> を作る（主音の <note> のすぐ前に書く）（ステップ11-8b）
+//   ・短前打音 … <grace slash="yes"/>（斜線あり）、8分音符の形
+//   ・長前打音 … <grace/>（斜線なし）、主音の半分の長さの形（付点の主音なら、付点を取った形）
+//   ・<duration> は書かない（前打音は小節の長さに数えない決まり）
+//   ・主音とはスラーでつなぐ（ふつうのスラーと重ならないように、番号は 2）
+//   ・臨時記号は、調号と違う ♯♭ のときだけ書く（画面の表示と同じ）
+//   note         … 主音のデータ（note.grace に前打音が入っている）
+//   keySignature … その小節の調号
+// 戻り値：XML の行の配列
+// ----------------------------------------------------------
+function graceXml(note, keySignature) {
+  const grace = note.grace;
+  const isShort = grace.type === "short";
+  // 小さな音符の形
+  let type = "eighth";
+  if (!isShort) type = (note.dots ?? 0) > 0 ? note.duration : (HALF_TYPE[note.duration] ?? "eighth");
+  const alter = grace.pitch.alter ?? 0;
+
+  const lines = [];
+  lines.push("      <note>");
+  lines.push(isShort ? `        <grace slash="yes"/>` : "        <grace/>");
+  lines.push("        <pitch>");
+  lines.push(`          <step>${grace.pitch.step}</step>`);
+  if (alter !== 0) lines.push(`          <alter>${alter}</alter>`);
+  lines.push(`          <octave>${grace.pitch.octave}</octave>`);
+  lines.push("        </pitch>");
+  lines.push("        <voice>1</voice>");
+  lines.push(`        <type>${type}</type>`);
+  // 臨時記号：調号どおりでなければ書く
+  if (alter !== keyAlters(keySignature)[grace.pitch.step]) {
+    lines.push(`        <accidental>${ALTER_TO_XML[alter] ?? "natural"}</accidental>`);
+  }
+  lines.push("        <stem>up</stem>"); // 前打音の符尾は上向き（画面と同じ）
+  lines.push("        <notations>");
+  lines.push(`          <slur type="start" number="2"/>`);
+  lines.push("        </notations>");
+  lines.push("      </note>");
+  return lines;
+}
+
 // ----------------------------------------------------------
 // 関数：notationsXml
 // 音符の中に書く記号の <notations> を作る（ステップ8-2）
@@ -455,6 +503,8 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
   // スラー（このアプリは同時に1本だけなので、番号はいつも 1）
   if (note.slur === "start") inner.push(`          <slur type="start" number="1"/>`);
   if (note.slur === "stop") inner.push(`          <slur type="stop" number="1"/>`);
+  // 前打音から主音へのスラーの終わり（ふつうのスラーと重ならないように、番号は 2）（ステップ11-8b）
+  if (!note.rest && note.grace) inner.push(`          <slur type="stop" number="2"/>`);
 
   // スタッカート・テヌート・アクセントなどと、ブレス・カエスーラ（symbols.js の musicxml の名前を使う）（ブレス・カエスーラはステップ11-1c）
   const articulations = note.articulations ?? [];
@@ -714,6 +764,8 @@ function partXml(score, p, divisions) {
       lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
       // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
+      // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
+      if (!note.rest && note.grace) lines.push(...graceXml(note, keyAt(score, i)));
       lines.push(...noteXml(xmlNote, accidentals[k], tieStop, divisions, tupletMark));
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;

@@ -987,7 +987,8 @@ function readPart(partElement, counter, skipped) {
   //   slurNumber … 開いているスラーの番号（開いていなければ null）
   //   pending    … <direction> で読んで、次の音符に付ける記号
   //   lastNote   … ここまでに読んだ最後の音符（松葉の終わりを付ける）
-  const state = { slurNumber: null, pending: {}, lastNote: null };
+  //   pendingGrace … 読んだ前打音で、次の主音に付けるもの { type, pitch }（なければ null）（ステップ11-8b）
+  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null };
 
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
@@ -1051,9 +1052,31 @@ function readPart(partElement, counter, skipped) {
 
       // 音符・休符
       if (element.nodeName === "note") {
-        // 装飾音（大きさのない音）は使わない（ステップ8-4b：数を知らせる）
-        if (childElement(element, "grace")) {
-          report(skipped, "装飾音");
+        // 装飾音（大きさのない音）：前打音として、次の主音に付ける（ステップ11-8b）
+        // （ステップ8-4b では使わずに数を知らせていた。今も、使えないものは数を知らせる）
+        //   ・斜線（slash="yes"）があれば短前打音、なければ長前打音
+        //   ・2つ以上並んでいたら、主音にいちばん近い（最後の）1つだけを使う
+        //   ・重音の前打音・2つ目の声部の前打音・高さのないものは使わない
+        //   ・前打音と主音をつなぐスラーは読まない（このアプリでは、いつも自動で描く）
+        const graceElement = childElement(element, "grace");
+        if (graceElement) {
+          const graceVoice = childText(element, "voice") ?? "1";
+          const pitchElement = childElement(element, "pitch");
+          const usable = !childElement(element, "chord") && (mainVoice === null || graceVoice === mainVoice) && pitchElement;
+          if (!usable) {
+            report(skipped, "装飾音");
+            continue;
+          }
+          // 前に読んだ前打音がまだ主音に付いていなければ、それは使わない（近いほうを使う）
+          if (state.pendingGrace) report(skipped, "装飾音");
+          state.pendingGrace = {
+            type: graceElement.getAttribute("slash") === "yes" ? "short" : "long",
+            pitch: {
+              step: childText(pitchElement, "step"),
+              alter: Math.round(Number(childText(pitchElement, "alter") ?? 0)),
+              octave: Number(childText(pitchElement, "octave")),
+            },
+          };
           continue;
         }
 
@@ -1087,6 +1110,14 @@ function readPart(partElement, counter, skipped) {
         }
 
         const { note, ticks } = readNote(element, divisions);
+
+        // 前打音を、この音に付ける（休符や読めない音には付けられないので、数を知らせる）（ステップ11-8b）
+        if (state.pendingGrace) {
+          if (note && !note.rest) note.grace = state.pendingGrace;
+          else report(skipped, "装飾音");
+          state.pendingGrace = null;
+        }
+
         if (note) {
           // 記号を付ける（ステップ8-4a）
           applyPending(note, state, counter);
@@ -1110,6 +1141,9 @@ function readPart(partElement, counter, skipped) {
     if (!measure.readable) problems.push(index + 1);
     measures.push(measure);
   });
+
+  // 最後まで主音が来なかった前打音は使わない（ステップ11-8b）
+  if (state.pendingGrace) report(skipped, "装飾音");
 
   return { measures: measures, firstClef: firstClef, problems: problems };
 }
