@@ -60,6 +60,12 @@
   // クリックした場所から、この距離（ピクセル）までは「当たり」にする
   const HIT_MARGIN = 4;
 
+  // 指でタップしたときの「当たり」の距離（指は細かい所を押しにくいので広くする）（ステップ12-8a）
+  const TOUCH_HIT_MARGIN = 12;
+
+  // 最後に押したのが、マウス（"mouse"）・指（"touch"）・ペン（"pen"）のどれか（ステップ12-8a）
+  let lastPointerType = "mouse";
+
   // 自動スクロールで、最後に見えるようにした段の上端の位置（段が変わったときだけスクロールするため）
   let lastScrollLineTop = null;
 
@@ -155,8 +161,25 @@
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
-    // 当たり判定の四角の中に入っている音符を探す
-    const hit = hitBoxes.find((box) => x >= box.x - HIT_MARGIN && x <= box.x + box.w + HIT_MARGIN && y >= box.y - HIT_MARGIN && y <= box.y + box.h + HIT_MARGIN);
+    // 当たりにする距離（指のときは広く）（ステップ12-8a）
+    const margin = lastPointerType === "touch" ? TOUCH_HIT_MARGIN : HIT_MARGIN;
+
+    // 当たり判定の四角（＋余白）の中に入っている音符を探す
+    // 余白を広くすると、となりの音符の四角と重なることがあるので、
+    // 入っているものの中で、四角の真ん中がいちばん近い音符を選ぶ（ステップ12-8a）
+    let hit = null;
+    let best = Infinity;
+    hitBoxes.forEach((box) => {
+      const inside = x >= box.x - margin && x <= box.x + box.w + margin && y >= box.y - margin && y <= box.y + box.h + margin;
+      if (!inside) return;
+      const dx = x - (box.x + box.w / 2);
+      const dy = y - (box.y + box.h / 2);
+      const distance = dx * dx + dy * dy; // 真ん中までの距離（の2乗。くらべるだけなので、ルートはいらない）
+      if (distance < best) {
+        best = distance;
+        hit = box;
+      }
+    });
 
     if (hit) {
       // Shift キーを押しながらのクリックかどうかも一緒に知らせる（範囲選択に使う）
@@ -218,7 +241,8 @@
 <div class="score-view" bind:this={wrapper}>
   <!-- クリックで音符を選ぶ（キーボードでの操作は編集ページでまとめて受け取る） -->
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div bind:this={container} onclick={handleClick}></div>
+  <!-- onpointerdown：マウスか指かを覚えておく（指のときは当たりを広くする）（ステップ12-8a） -->
+  <div bind:this={container} onclick={handleClick} onpointerdown={(event) => (lastPointerType = event.pointerType)}></div>
 </div>
 
 <style>
