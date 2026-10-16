@@ -415,6 +415,8 @@ function computeWedges(part) {
 //                  （ステップ12-4a2）緑にする音符の一覧には、鳴らすパートに加えて、ミュートしたパートも入れる
 //                  （ミュート＝自分で弾くので音を消す、という使い方のため。ソロで外れたパートは入れない）
 //                  フェルマータは、鳴らさないパートのものも数える（ほかのパートも、その間は待つ）
+//   endMeasure   … 何小節目まで鳴らすか（0 から数える。この小節も鳴らす。省略したら最後の小節まで）（ステップ12-5a）
+//                  区間リピートで、範囲の分だけ作るのに使う。範囲の外へのタイは、範囲の終わりで切る
 // 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧,
 //          measureStarts: 小節ごとの始まりの時刻 }
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
@@ -425,7 +427,9 @@ function computeWedges(part) {
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
-export function buildEvents(score, startMeasure, mixer = {}) {
+export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) {
+  // 鳴らす最後の小節（省略したら楽譜の最後の小節）（ステップ12-5a）
+  const lastMeasure = endMeasure ?? score.measures.length - 1;
   // let：あとで、鳴らすパート・緑にするパートの分だけに入れ替えるため（ステップ12-4a2）
   let events = [];
   let highlights = []; // 緑にする音符の一覧（ステップ6-2）
@@ -433,7 +437,7 @@ export function buildEvents(score, startMeasure, mixer = {}) {
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
   let totalTicks = 0;
-  for (let i = startMeasure; i < score.measures.length; i++) {
+  for (let i = startMeasure; i <= lastMeasure; i++) {
     totalTicks = totalTicks + measureTicks(timeAt(score, i));
   }
 
@@ -460,7 +464,7 @@ export function buildEvents(score, startMeasure, mixer = {}) {
     const wedges = computeWedges(part); // 松葉の中の音の強さ（ステップ6-3d）
 
     part.measures.forEach((measure, i) => {
-      const playing = i >= startMeasure; // この小節は鳴らすか
+      const playing = i >= startMeasure && i <= lastMeasure; // この小節は鳴らすか（ステップ12-5a：終わりの小節より後ろも鳴らさない）
 
       // 始める小節の頭では、前の小節からのタイは切る（頭の音を鳴らし直す）
       if (i === startMeasure) tiedEvent = null;
@@ -613,7 +617,7 @@ export function buildEvents(score, startMeasure, mixer = {}) {
   const measureStarts = [];
   const clicks = [];
   let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
-  for (let i = startMeasure; i < score.measures.length; i++) {
+  for (let i = startMeasure; i <= lastMeasure; i++) {
     measureStarts.push({ measure: i, startTick: measureTick + shiftBefore(points, measureTick, true) });
     // この小節の拍の頭ごとにクリックを1つ（1拍目は strong）
     const time = timeAt(score, i);
