@@ -1020,6 +1020,61 @@ export function toggleATempo(score, i) {
   return newScore;
 }
 
+// ----------------------------------------------------------
+// 関数：setBarline
+// i 小節目の「終わり」の線を決める（ステップ11-7a）
+//   type … null（ふつう）・"double"（複縦線）・"final"（終止線）
+// 小節の終わりには、くり返しの終わり（:‖）か、複縦線・終止線のどちらか1つだけ
+// （ふつうにすると、くり返しの終わりも外れる）
+// 何も決めていない小節は、今までどおり自動（調が変わる前は複縦線、曲の最後は終止線）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function setBarline(score, i, type) {
+  const newScore = cloneScore(score);
+  const info = newScore.measures[i];
+  delete info.repeatEnd;
+  if (type) {
+    info.barline = type;
+  } else {
+    delete info.barline;
+  }
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：toggleRepeatStart
+// i 小節目の「頭」に、くり返しの始まり（‖:）を付ける・外す（ステップ11-7a）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleRepeatStart(score, i) {
+  const newScore = cloneScore(score);
+  const info = newScore.measures[i];
+  if (info.repeatStart) {
+    delete info.repeatStart;
+  } else {
+    info.repeatStart = true;
+  }
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：toggleRepeatEnd
+// i 小節目の「終わり」に、くり返しの終わり（:‖）を付ける・外す（ステップ11-7a）
+// 付けるときは、その小節の複縦線・終止線は外す（小節の終わりの線は1つだけ）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleRepeatEnd(score, i) {
+  const newScore = cloneScore(score);
+  const info = newScore.measures[i];
+  if (info.repeatEnd) {
+    delete info.repeatEnd;
+  } else {
+    info.repeatEnd = true;
+    delete info.barline;
+  }
+  return newScore;
+}
+
 // ==========================================================
 // ここから下は、小節を足す・消す関数（ステップ5-2）
 // ==========================================================

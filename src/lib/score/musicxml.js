@@ -501,12 +501,28 @@ function directionsAfterXml(note) {
 // ふつうの小節線のときは空の配列を返す（書かなくてもふつうの線になる）
 // （五線譜の表示（render.js）と同じ決め方）
 // ----------------------------------------------------------
-function barlineXml(isLast, nextKeyChanges) {
+function barlineXml(isLast, nextKeyChanges, measureInfo = {}) {
+  // くり返しの終わり（:‖）：細い線＋太い線と、「戻る」の印（ステップ11-7a）
+  if (measureInfo.repeatEnd) {
+    return [`      <barline location="right">`, "        <bar-style>light-heavy</bar-style>", `        <repeat direction="backward"/>`, "      </barline>"];
+  }
   let style = null;
-  if (isLast) style = "light-heavy";
+  // 自分で決めた線（ステップ11-7a）：複縦線は light-light、終止線は light-heavy
+  if (measureInfo.barline === "double") style = "light-light";
+  else if (measureInfo.barline === "final") style = "light-heavy";
+  else if (isLast) style = "light-heavy";
   else if (nextKeyChanges) style = "light-light";
   if (!style) return [];
   return [`      <barline location="right">`, `        <bar-style>${style}</bar-style>`, "      </barline>"];
+}
+
+// ----------------------------------------------------------
+// 関数：repeatStartXml
+// くり返しの始まり（‖:）の <barline location="left"> を作る（小節の頭に書く）（ステップ11-7a）
+//   heavy-light … 太い線＋細い線、repeat forward … 「ここから」の印
+// ----------------------------------------------------------
+function repeatStartXml() {
+  return [`      <barline location="left">`, "        <bar-style>heavy-light</bar-style>", `        <repeat direction="forward"/>`, "      </barline>"];
 }
 
 // ----------------------------------------------------------
@@ -557,6 +573,8 @@ function partXml(score, p, divisions) {
   part.measures.forEach((measure, i) => {
     const isFirst = i === 0;
     lines.push(`    <measure number="${i + 1}">`);
+    // くり返しの始まり（‖:）は、小節のいちばん頭に書く（ステップ11-7a）
+    if (score.measures[i].repeatStart) lines.push(...repeatStartXml());
 
     // 小節の頭の情報（1小節目はいつも書く。途中は、前の小節と違うときだけ書く）
     // （ステップ8-1b：データに書いてあっても、前と同じなら書かない。小節の削除などで同じ拍子が残ることがあるため）
@@ -617,7 +635,7 @@ function partXml(score, p, divisions) {
     // 小節の終わりの線
     const isLast = i === lastIndex;
     const nextKeyChanges = !isLast && score.measures[i + 1].key !== undefined && score.measures[i + 1].key !== keyAt(score, i);
-    lines.push(...barlineXml(isLast, nextKeyChanges));
+    lines.push(...barlineXml(isLast, nextKeyChanges, score.measures[i])); // 小節の情報も渡す（ステップ11-7a）
 
     lines.push("    </measure>");
   });

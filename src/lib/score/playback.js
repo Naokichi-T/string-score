@@ -493,6 +493,52 @@ function computeWedges(part) {
   return wedges;
 }
 
+// ----------------------------------------------------------
+// 関数：playOrder
+// 楽譜のくり返し（‖: 〜 :‖）をたどって、鳴らす小節の順番を作る（ステップ11-7a）
+//   例：1 2 ‖: 3 4 :‖ 5 → [0, 1, 2, 3, 2, 3, 4]（小節の番号は 0 から）
+//   ・:‖ に来て、まだくり返していなければ、戻る（2回目はそのまま次へ進む）
+//   ・戻る先：前にある ‖:（その前に別の :‖ があれば、その :‖ のすぐあと。どちらもなければ曲の頭）
+//   score        … 楽譜データ
+//   startMeasure … 何小節目から鳴らすか（そこから順番を作る。前の ‖: へ戻ることもある）
+//   endMeasure   … 何小節目まで鳴らすか（区間リピートのとき）。指定したときは、くり返しはたどらず、まっすぐ並べる
+// 戻り値：小節の番号の配列
+// ----------------------------------------------------------
+export function playOrder(score, startMeasure, endMeasure = null) {
+  const order = [];
+  // 区間リピート：範囲の中は、楽譜のくり返しをたどらずに、まっすぐ並べる
+  if (endMeasure !== null) {
+    for (let i = startMeasure; i <= endMeasure; i++) order.push(i);
+    return order;
+  }
+
+  const measures = score.measures;
+  const repeated = new Set(); // もうくり返した :‖ の小節（2回目は戻らない）
+  let i = startMeasure;
+  while (i < measures.length) {
+    order.push(i);
+    if (measures[i].repeatEnd && !repeated.has(i)) {
+      repeated.add(i);
+      // 戻る先を探す：前へさかのぼって ‖: を探す（別の :‖ に当たったら、そのすぐあと）
+      let target = 0;
+      for (let k = i; k >= 0; k--) {
+        if (measures[k].repeatStart) {
+          target = k;
+          break;
+        }
+        if (k < i && measures[k].repeatEnd) {
+          target = k + 1;
+          break;
+        }
+      }
+      i = target;
+      continue;
+    }
+    i = i + 1;
+  }
+  return order;
+}
+
 // rit.・accel. で、範囲の終わりまでに何倍の速さにするか（ステップ11-6b）
 const RIT_RATE = 0.7; // rit.：元の 7割の速さまで遅くする
 const ACCEL_RATE = 1.3; // accel.：元の 1.3倍の速さまで速くする
@@ -511,15 +557,16 @@ const WARP_STEPS = 16;
 //   ・rit.・accel. の範囲：範囲の頭の速さから、範囲の終わりで RIT_RATE・ACCEL_RATE 倍まで、だんだん変える
 //   ・範囲のあと：その速さのまま（a tempo かテンポ変更が来るまで）
 //   ・a tempo・テンポ変更：その小節のテンポ（tempoAt と同じもの）に戻る
+// （ステップ11-7a：小節を、くり返しをたどった順番（order）で並べる。くり返しで戻ったときは、1回目にその小節に来たときの速さに戻す）
 //   score        … 楽譜データ
 //   startMeasure … 再生を始める小節（ここを 0 ティックとして数える）
-//   lastMeasure  … 再生する最後の小節
+//   order        … 鳴らす小節の順番（playOrder で作ったもの）
 // 戻り値：{ at, factorAt }
 //   at(tick)             … 伸び縮みさせる前の時刻（ティック）を、伸び縮みさせたあとの時刻にする
 //   factorAt(tick, left) … その時刻の倍率（left が true なら、区切りのちょうど頭では前の区切りの倍率）
 //                          （フェルマータのように「その音の終わり」で測るものは、left を true にする）
 // ----------------------------------------------------------
-function makeTempoWarp(score, startMeasure, lastMeasure) {
+function makeTempoWarp(score, startMeasure, order) {
   // 細かい区切りごとの { from: 伸び縮みさせる前の始まり, warpedFrom: 伸び縮みさせたあとの始まり, factor: 倍率 }
   const segments = [];
   let tempo = score.tempo; // 今のテンポ（テンポ変更をたどる）
@@ -529,9 +576,23 @@ function makeTempoWarp(score, startMeasure, lastMeasure) {
   let raw = 0; // 再生を始める所から何ティック目か（伸び縮みさせる前）
   let warped = 0; // 伸び縮みさせたあと
 
-  for (let i = 0; i <= lastMeasure; i++) {
+  // たどる小節の並び：始める小節より前（速さをたどるだけ）＋ 鳴らす小節の順番（ステップ11-7a）
+  const sequence = [];
+  for (let i = 0; i < startMeasure; i++) sequence.push(i);
+  sequence.push(...order);
+  const firstVisit = new Map(); // 小節の番号 → 1回目にその小節に来たときの { tempo, rate }（くり返しで戻ったときに使う）
+
+  sequence.forEach((i, s) => {
     const info = score.measures[i];
     const length = measureTicks(timeAt(score, i));
+
+    // くり返しで戻ったとき（前の小節のすぐ次ではないとき）：1回目にこの小節に来たときの速さに戻す（ステップ11-7a）
+    if (s > 0 && i !== sequence[s - 1] + 1 && firstVisit.has(i)) {
+      const saved = firstVisit.get(i);
+      tempo = saved.tempo;
+      rate = saved.rate;
+      gradual = null;
+    }
 
     // テンポ変更・a tempo：その小節のテンポ・元の速さに戻る（rit.・accel. の途中でも、そこで終わる）
     if (i > 0 && info.tempo !== undefined) tempo = info.tempo;
@@ -550,8 +611,11 @@ function makeTempoWarp(score, startMeasure, lastMeasure) {
       gradual = { startTick: tick, length: rangeLength, fromRate: rate, toRate: toRate, to: to };
     }
 
+    // 1回目に来たときの速さを覚えておく（この小節のテンポ変更などを当てたあと）
+    if (!firstVisit.has(i)) firstVisit.set(i, { tempo: tempo, rate: rate });
+
     // この小節を WARP_STEPS に分けて、分けた所ごとの倍率を決める（始める小節より前は、たどるだけ）
-    if (i >= startMeasure) {
+    if (s >= startMeasure) {
       const step = length / WARP_STEPS;
       for (let k = 0; k < WARP_STEPS; k++) {
         let nowRate = rate;
@@ -575,7 +639,7 @@ function makeTempoWarp(score, startMeasure, lastMeasure) {
       rate = gradual.toRate;
       gradual = null;
     }
-  }
+  });
 
   // ----------------------------------------------------------
   // 関数：segmentAt（makeTempoWarp の中だけで使う）
@@ -610,6 +674,7 @@ function makeTempoWarp(score, startMeasure, lastMeasure) {
 //                  フェルマータは、鳴らさないパートのものも数える（ほかのパートも、その間は待つ）
 //   endMeasure   … 何小節目まで鳴らすか（0 から数える。この小節も鳴らす。省略したら最後の小節まで）（ステップ12-5a）
 //                  区間リピートで、範囲の分だけ作るのに使う。範囲の外へのタイは、範囲の終わりで切る
+//                  （ステップ11-7a：省略したときは、楽譜のくり返しをたどる。指定したときは、範囲をまっすぐ並べる）
 // 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧,
 //          measureStarts: 小節ごとの始まりの時刻 }
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
@@ -621,8 +686,8 @@ function makeTempoWarp(score, startMeasure, lastMeasure) {
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) {
-  // 鳴らす最後の小節（省略したら楽譜の最後の小節）（ステップ12-5a）
-  const lastMeasure = endMeasure ?? score.measures.length - 1;
+  // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときは範囲をまっすぐ）
+  const order = playOrder(score, startMeasure, endMeasure);
   // let：あとで、鳴らすパート・緑にするパートの分だけに入れ替えるため（ステップ12-4a2）
   let events = [];
   let highlights = []; // 緑にする音符の一覧（ステップ6-2）
@@ -630,9 +695,14 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
   let totalTicks = 0;
-  for (let i = startMeasure; i <= lastMeasure; i++) {
+  order.forEach((i) => {
     totalTicks = totalTicks + measureTicks(timeAt(score, i));
-  }
+  });
+
+  // 小節をたどる並び：始める小節より前（強弱などの状態を数えるだけ）＋ 鳴らす小節の順番（ステップ11-7a）
+  const sequence = [];
+  for (let i = 0; i < startMeasure; i++) sequence.push({ i: i, playing: false });
+  order.forEach((i) => sequence.push({ i: i, playing: true }));
 
   // 鳴らすパートと、緑にするパートの番号（ステップ12-4a2）
   // 全パートを計算してから、最後にこの2つで分ける（フェルマータを全パートで数えるため）
@@ -655,12 +725,24 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     let pizz = false; // 今ピチカートか（pizz. の付いた音から、arco の付いた音の1つ前まで true）
     let muted = false; // 今弱音器を付けているか（con sord. の付いた音から、senza sord. の付いた音の1つ前まで true）（ステップ11-2）
     const wedges = computeWedges(part); // 松葉の中の音の強さ（ステップ6-3d）
+    const firstVisit = new Map(); // 小節の番号 → 1回目にその小節に来たときの状態（くり返しで戻ったときに使う）（ステップ11-7a）
 
-    part.measures.forEach((measure, i) => {
-      const playing = i >= startMeasure && i <= lastMeasure; // この小節は鳴らすか（ステップ12-5a：終わりの小節より後ろも鳴らさない）
+    sequence.forEach(({ i, playing }, s) => {
+      const measure = part.measures[i];
 
-      // 始める小節の頭では、前の小節からのタイは切る（頭の音を鳴らし直す）
-      if (i === startMeasure) tiedEvent = null;
+      // 鳴らし始める小節の頭と、くり返しで戻った所（前の小節のすぐ次ではない所）では、タイを切る（頭の音を鳴らし直す）
+      const jumped = s > 0 && i !== sequence[s - 1].i + 1;
+      if (playing && (s === startMeasure || jumped)) tiedEvent = null;
+
+      // くり返しで戻ったときは、強弱・スラー・pizz.・弱音器を、1回目にこの小節に来たときの状態に戻す（ステップ11-7a）
+      if (jumped && firstVisit.has(i)) {
+        const saved = firstVisit.get(i);
+        dynamic = saved.dynamic;
+        inSlur = saved.inSlur;
+        pizz = saved.pizz;
+        muted = saved.muted;
+      }
+      if (!firstVisit.has(i)) firstVisit.set(i, { dynamic: dynamic, inSlur: inSlur, pizz: pizz, muted: muted });
 
       measure.notes.forEach((note, j) => {
         const length = noteTicks(note);
@@ -793,7 +875,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
 
   // テンポの変化のぶん、ティックの数を伸び縮みさせる（ステップ11-6a）
   // （フェルマータでずらす前に行う。フェルマータでのばす量も、その所のテンポに合わせる）
-  const warp = makeTempoWarp(score, startMeasure, lastMeasure);
+  const warp = makeTempoWarp(score, startMeasure, order);
   events.forEach((event) => {
     const start = event.startTick;
     const end = start + event.ticks;
@@ -842,7 +924,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   const measureStarts = [];
   const clicks = [];
   let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
-  for (let i = startMeasure; i <= lastMeasure; i++) {
+  order.forEach((i) => {
     // テンポの変化のぶん伸び縮みさせてから、フェルマータのぶんずらす（ステップ11-6a）
     const measureStart = warp.at(measureTick);
     measureStarts.push({ measure: i, startTick: measureStart + shiftBefore(points, measureStart, true) });
@@ -854,7 +936,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
       clicks.push({ startTick: t + shiftBefore(points, t, true), strong: b === 0 });
     }
     measureTick = measureTick + measureTicks(time);
-  }
+  });
 
   // 装飾・トレモロの付いた音を、短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b・11-4）
   const played = [];
@@ -905,7 +987,7 @@ export function addCountIn(result, score, startMeasure) {
   const time = timeAt(score, startMeasure);
   // 始める小節のテンポに合わせて、伸び縮みさせる（ステップ11-6a）
   // （拍を数えるのは伸び縮みさせる前の数で行い、クリックの時刻だけ倍にする。小数の足し算の誤差で、拍が1つ増えないようにするため）
-  const factor = makeTempoWarp(score, startMeasure, startMeasure).factorAt(0);
+  const factor = makeTempoWarp(score, startMeasure, [startMeasure]).factorAt(0);
   const length = measureTicks(time) * factor; // カウントインの長さ（1小節ぶん）
   const beat = beatTicks(time); // 1拍の長さ（伸び縮みさせる前）
 

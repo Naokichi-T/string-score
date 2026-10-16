@@ -65,6 +65,9 @@
     removeTempoChange,
     toggleGradual,
     toggleATempo,
+    setBarline,
+    toggleRepeatStart,
+    toggleRepeatEnd,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -1272,6 +1275,53 @@
     rangeEnd = end;
   }
 
+  // 「小節線」タブで使う小節（ステップ11-7a）
+  //   barlineEndMeasure   … 終わりの線・くり返しの終わりを付ける小節（範囲なら最後の小節、音を選んでいればその小節）
+  //   barlineStartMeasure … くり返しの始まりを付ける小節（範囲なら最初の小節、音を選んでいればその小節）
+  let barlineEndMeasure = $derived(range ? range.end.measure : selection ? selection.measure : null);
+  let barlineStartMeasure = $derived(tempoMeasure);
+
+  // 「小節線」タブのボタンを青くするための情報（何も選んでいなければ null）（ステップ11-7a）
+  let currentBarline = $derived(
+    barlineEndMeasure === null
+      ? null
+      : {
+          barline: score.measures[barlineEndMeasure].barline ?? null,
+          repeatEnd: !!score.measures[barlineEndMeasure].repeatEnd,
+          repeatStart: !!score.measures[barlineStartMeasure].repeatStart,
+        },
+  );
+
+  // ----------------------------------------------------------
+  // 関数：handleBarline
+  // 「小節線」タブの終わりの線のボタンが押されたとき（ステップ11-7a）
+  //   type … null（ふつう）・"double"（複縦線）・"final"（終止線）
+  // ----------------------------------------------------------
+  function handleBarline(type) {
+    if (barlineEndMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    commit(setBarline(score, barlineEndMeasure, type));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleRepeatMark
+  // 「小節線」タブのくり返しのボタンが押されたとき：付ける・外す（ステップ11-7a）
+  //   kind … "start"（‖: を範囲の最初の小節の頭に）か "end"（:‖ を範囲の最後の小節の終わりに）
+  // ----------------------------------------------------------
+  function handleRepeatMark(kind) {
+    if (barlineEndMeasure === null) return;
+    message = "";
+    const end = rangeEnd;
+    if (kind === "start") {
+      commit(toggleRepeatStart(score, barlineStartMeasure));
+    } else {
+      commit(toggleRepeatEnd(score, barlineEndMeasure));
+    }
+    rangeEnd = end;
+  }
+
   // 選んでいるパート・小節の音部記号（「小節」タブのボタンを青くするのに使う。何も選んでいないときは null）
   let currentClef = $derived(selection ? clefAt(score.parts[selection.part], selection.measure) : null);
 
@@ -1735,6 +1785,9 @@
       {currentGradual}
       ongradual={handleGradual}
       onatempo={handleATempo}
+      {currentBarline}
+      onbarline={handleBarline}
+      onrepeatmark={handleRepeatMark}
       onkey={handleKeySignature}
       {currentClef}
       onclef={handleClef}

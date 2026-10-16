@@ -24,6 +24,7 @@
   import TechniqueTools from "./TechniqueTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
   import MeasureTools from "./MeasureTools.svelte";
+  import BarlineTools from "./BarlineTools.svelte"; // ステップ11-7a
   import PartTools from "./PartTools.svelte";
   import PlaybackTools from "./PlaybackTools.svelte";
 
@@ -90,7 +91,13 @@
   //   onrepeat     … ［区間リピート］が押されたときに呼ぶ関数（「再生」タブで使う）（ステップ12-5b）
   //   rangeMode    … ［範囲］が入っているか（「音符」タブで使う）（ステップ12-8b）
   //   onrangemode  … ［範囲］が押されたときに呼ぶ関数（「音符」タブで使う）（ステップ12-8b）
+  //   currentBarline … 選んでいる所の小節線（何も選んでいないときは null。「小節線」タブで使う）（ステップ11-7a）
+  //   onbarline    … 終わりの線のボタンが押されたときに呼ぶ関数（「小節線」タブで使う）（ステップ11-7a）
+  //   onrepeatmark … くり返しのボタンが押されたときに呼ぶ関数（"start" か "end" を渡す。「小節線」タブで使う）（ステップ11-7a）
   let {
+    currentBarline = null,
+    onbarline = () => {},
+    onrepeatmark = () => {},
     rangeMode = false,
     onrangemode = () => {},
     hiddenParts = [],
@@ -161,6 +168,7 @@
     { id: "symbol", label: "記号" },
     { id: "technique", label: "奏法" }, // ステップ11-2
     { id: "measure", label: "小節" },
+    { id: "barline", label: "小節線" }, // ステップ11-7a
     { id: "part", label: "パート" },
     { id: "playback", label: "再生" }, // ステップ12-3
     { id: "settings", label: "楽譜の設定" },
@@ -341,6 +349,8 @@
         {ongradual}
         {onatempo}
       />
+    {:else if activeTab === "barline"}
+      <BarlineTools current={currentBarline} {onbarline} {onrepeatmark} />
     {:else if activeTab === "part"}
       <PartTools parts={score.parts} {selectedPart} {onaddpart} {onmovepart} {ondeletepart} {hiddenParts} {ontoggleview} {beatLines} {ontogglebeats} />
     {:else if activeTab === "playback"}

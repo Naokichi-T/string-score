@@ -41,6 +41,7 @@ const TEMPO_CHANGE_GAP = 6; // 音符が五線より上に出ているときの�
 const TEMPO_MARK_SPACE = 10; // テンポ変更・a tempo・rit. を同じ小節に並べるときの間（ステップ11-6b）
 const GRADUAL_DASH_GAP = 6; // 「rit.」の文字と点線の間（ステップ11-6b）
 const GRADUAL_TEXTS = { rit: "rit.", accel: "accel." }; // rit.・accel. で書く文字（ステップ11-6b）
+const REPEAT_BAR_WIDTH = 14; // くり返しの小節線のために、小節に足す幅（ステップ11-7a）
 const MEASURE_BASE_WIDTH = 40; // 小節の最低限の幅
 const NOTE_WIDTH = 32; // 音符1つあたりに足す幅
 const ACCIDENTAL_WIDTH = 12; // 臨時記号1つあたりに足す幅
@@ -117,6 +118,9 @@ export function renderScore(VF, container, score, width, selection = null, range
       const w = MEASURE_BASE_WIDTH + notes.length * NOTE_WIDTH + accCount * ACCIDENTAL_WIDTH;
       if (w > maxNotes) maxNotes = w;
     }
+    // くり返しの小節線（点の付いた太い線）があれば、そのぶん少し広くする（ステップ11-7a）
+    if (score.measures[i].repeatStart) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
+    if (score.measures[i].repeatEnd) maxNotes = maxNotes + REPEAT_BAR_WIDTH;
     noteWidths.push(maxNotes);
 
     // 記号の幅（段の頭のときと、途中のときの2通り）
@@ -274,16 +278,31 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       // 次の小節で調が変わるなら、この小節の終わりを複縦線にする
       const nextKeyChanges = !isLast && states[i + 1].keyChanged;
 
+      // 小節の終わりの線の種類（ステップ11-7a：くり返し・自分で決めた線を先に見る）
+      //   "repeat"（くり返しの終わり :‖）・"final"（終止線）・"double"（複縦線）・null（ふつう）
+      //   何も決めていなければ、今までどおり：曲の最後は終止線、調が変わる前は複縦線
+      const measureInfo = score.measures[i];
+      let endBar = null;
+      if (measureInfo.repeatEnd) endBar = "repeat";
+      else if (measureInfo.barline) endBar = measureInfo.barline;
+      else if (isLast) endBar = "final";
+      else if (nextKeyChanges) endBar = "double";
+
       // --- パートごとに五線を作り、記号を付ける ---
       const staves = score.parts.map((part, p) => {
         const y = staveYs[l][p]; // この段・このパートの五線を置く高さ（spacing.js で決めたもの）
         const stave = new VF.Stave(x, y, measureWidth);
         addModifiers(VF, stave, state, p, isLineStart, isFirst);
 
+        // 小節の頭の線：くり返しの始まり（‖:）（ステップ11-7a）
+        if (measureInfo.repeatStart) stave.setBegBarType(VF.Barline.type.REPEAT_BEGIN);
+
         // 小節の終わりの線の種類
-        if (isLast) {
+        if (endBar === "repeat") {
+          stave.setEndBarType(VF.Barline.type.REPEAT_END); // くり返しの終わり（点＋細い線＋太い線）（ステップ11-7a）
+        } else if (endBar === "final") {
           stave.setEndBarType(VF.Barline.type.END); // 曲の終わり（細い線＋太い線）
-        } else if (nextKeyChanges) {
+        } else if (endBar === "double") {
           stave.setEndBarType(VF.Barline.type.DOUBLE); // 複縦線
         }
         return stave;
@@ -394,12 +413,16 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         const topStave = staves[0];
         const bottomStave = staves[partCount - 1];
         let connectorType = VF.StaveConnector.type.SINGLE_RIGHT; // ふつうの小節線
-        if (isLast) {
-          connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり
-        } else if (nextKeyChanges) {
+        if (endBar === "final" || endBar === "repeat") {
+          connectorType = VF.StaveConnector.type.BOLD_DOUBLE_RIGHT; // 曲の終わり・くり返しの終わり（ステップ11-7a）
+        } else if (endBar === "double") {
           connectorType = VF.StaveConnector.type.THIN_DOUBLE; // 複縦線
         }
         new VF.StaveConnector(topStave, bottomStave).setType(connectorType).setContext(context).draw();
+        // くり返しの始まり（段の途中のときだけ。段の頭では、音部記号のあとに各パートの五線で描かれる）（ステップ11-7a）
+        if (measureInfo.repeatStart && !isLineStart) {
+          new VF.StaveConnector(topStave, bottomStave).setType(VF.StaveConnector.type.BOLD_DOUBLE_LEFT).setContext(context).draw();
+        }
       }
 
       if (isLineStart) lineStartStaves = staves;

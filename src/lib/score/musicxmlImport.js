@@ -704,6 +704,61 @@ function readTempoMarks(measureElements, score) {
 }
 
 // ----------------------------------------------------------
+// 関数：readBarlines
+// 小節線（<barline>）を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-7a）
+// 一番上のパートの小節だけを見る（小節線は全パート共通なので）
+//   ・location="left" ＋ <repeat direction="forward">  … くり返しの始まり（repeatStart）
+//   ・location="right"（書いていなければ right）＋ <repeat direction="backward"> … くり返しの終わり（repeatEnd）
+//   ・location="right" の bar-style：light-light → 複縦線、light-heavy → 終止線
+//       ただし、このアプリが自動で描く線（曲の最後の終止線・調が変わる前の複縦線）と同じものは入れない
+//   measureElements … 一番上のパートの <measure> の並び
+//   score           … 作った楽譜データ（measures に書き足す）
+// ----------------------------------------------------------
+function readBarlines(measureElements, score) {
+  const last = score.measures.length - 1;
+  measureElements.forEach((measureElement, i) => {
+    if (i > last) return;
+    const info = score.measures[i];
+    childElements(measureElement, "barline").forEach((barline) => {
+      const location = barline.getAttribute("location") ?? "right";
+      const repeat = childElement(barline, "repeat");
+      const direction = repeat ? repeat.getAttribute("direction") : null;
+      const style = childText(barline, "bar-style");
+
+      if (location === "left") {
+        if (direction === "forward") info.repeatStart = true;
+        return;
+      }
+      if (location !== "right") return; // まん中の線（middle）は使わない
+
+      if (direction === "backward") {
+        info.repeatEnd = true;
+        delete info.barline;
+        return;
+      }
+      if (info.repeatEnd) return; // くり返しの終わりがあれば、線の形はそちらで決まる
+
+      // 自動で描く線と同じなら入れない（曲の最後の終止線・調が変わる前の複縦線）
+      const nextKeyChanges = i < last && score.measures[i + 1].key !== undefined && score.measures[i + 1].key !== keyAtMeasures(score.measures, i);
+      if (style === "light-heavy" && i !== last) info.barline = "final";
+      if (style === "light-light" && !nextKeyChanges) info.barline = "double";
+    });
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：keyAtMeasures
+// i 小節目の調を、小節の情報から探す（前の小節にさかのぼって探す）（ステップ11-7a）
+// （model.js の keyAt と同じ考え方。楽譜データを作っている途中でも使えるように、小節の情報だけで調べる）
+// ----------------------------------------------------------
+function keyAtMeasures(measures, i) {
+  for (let k = i; k >= 0; k--) {
+    if (measures[k].key !== undefined) return measures[k].key;
+  }
+  return 0;
+}
+
+// ----------------------------------------------------------
 // 関数：readDirection
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
 //   direction … <direction>
@@ -1121,7 +1176,11 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   };
 
   // ⑧ 2小節目からのテンポの指示（途中のテンポ変更・rit.・accel.・a tempo）（ステップ11-6c）
+  // ⑧ 2小節目からのテンポの指示（途中のテンポ変更・rit.・accel.・a tempo）（ステップ11-6c）
   readTempoMarks(childElements(partElements[0], "measure"), score);
+
+  // ⑨ 小節線とくり返し（ステップ11-7a）
+  readBarlines(childElements(partElements[0], "measure"), score);
 
   return { score: score, warnings: warnings };
 }
