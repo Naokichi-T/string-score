@@ -10,7 +10,7 @@
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, keyAt, tempoAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, keyAt, tempoAt, measureTicks, restsForSpan, INSTRUMENTS, renameParts, tupletGroups, createPartId, isMeasureRest, DURATION_ORDER } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
@@ -1226,6 +1226,67 @@ export function setJump(score, i, type) {
   } else {
     delete info.jump;
   }
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：measureRestShape
+// 1小節の長さ（ティック）を、休符1つで書くときの形を返す（ステップ13-3b）
+// 例：4分の3拍子 → 付点2分休符 { duration: "half", dots: 1 }、4分の4拍子 → 全休符 { duration: "whole", dots: 0 }
+//   total … 1小節の長さ（ティック）
+// 戻り値：{ duration, dots }（休符1つで書けない長さ（5拍子など）なら null）
+// ----------------------------------------------------------
+function measureRestShape(total) {
+  for (const duration of DURATION_ORDER) {
+    for (const dots of [0, 1]) {
+      if (durationToTicks(duration, dots) === total) return { duration: duration, dots: dots };
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------
+// 関数：toggleMeasureRest
+// part パートの from 小節目から to 小節目までを、小節まるごとの休符（全休符）にする・戻す（ステップ13-3b）
+//   ・全部の小節がもう全休符なら：拍ごとの休符（4分休符3つなど）に戻す
+//   ・そうでなければ：全部の小節を全休符にする（中の音符は消える。元に戻すで戻せる）
+//     休符1つで書けない長さ（5拍子など）の小節は、拍ごとの休符にする
+//   ・前の小節の最後の音から、この範囲へタイが出ていたら外す（つなぐ相手がいなくなるため）
+//   ・相手がいなくなったスラー・松葉も外す
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function toggleMeasureRest(score, part, from, to) {
+  const newScore = cloneScore(score);
+  const measures = newScore.parts[part].measures;
+
+  // 範囲の小節が全部、もう全休符か
+  let allMeasureRest = true;
+  for (let i = from; i <= to; i++) {
+    if (!isMeasureRest(measures[i].notes)) allMeasureRest = false;
+  }
+
+  for (let i = from; i <= to; i++) {
+    const time = timeAt(newScore, i);
+    const total = measureTicks(time);
+    const shape = measureRestShape(total);
+    if (allMeasureRest || !shape) {
+      // 拍ごとの休符にする
+      measures[i].notes = restsForSpan(0, total, time);
+    } else {
+      // 全休符（小節まるごとの休符）にする
+      measures[i].notes = [{ rest: true, duration: shape.duration, dots: shape.dots, measureRest: true }];
+    }
+  }
+
+  // 前の小節の最後の音から入ってくるタイを外す
+  if (from > 0) {
+    const prevNotes = measures[from - 1].notes;
+    const last = prevNotes[prevNotes.length - 1];
+    if (last && !last.rest && last.tie) last.tie = false;
+  }
+
+  // 相手がいなくなったスラー・松葉を外す
+  cleanSpanners(newScore.parts[part]);
   return newScore;
 }
 

@@ -36,6 +36,9 @@
   //   ondot        … 付点のボタンが押されたときに呼ぶ関数
   //   onrest       … 休符のボタンが押されたときに呼ぶ関数
   //   canRest      … 休符のボタンを押せるか（今の長さの休符を、選んでいる場所に入れられるか）
+  //   onmeasurerest … ［全休符］が押されたときに呼ぶ関数（ステップ13-3b）
+  //   canMeasureRest … ［全休符］を押せるか（音か休符を選んでいるか）（ステップ13-3b）
+  //   measureRestActive … 選んでいる小節がもう全休符か（ボタンを青くする）（ステップ13-3b）
   //   noteSelected … 音符（休符ではない）を選んでいるか（false なら臨時記号などのボタンを押せない）
   //   rangeEditable … 選んだ範囲の中に音符があるか（true なら ▲ ▼・削除のボタンを押せる）
   //   onaccidental … 臨時記号のボタンが押されたときに呼ぶ関数（1：♯、-1：♭、0：♮ を渡す）
@@ -160,6 +163,9 @@
     ondot = () => {},
     onrest = () => {},
     canRest = true,
+    onmeasurerest = () => {},
+    canMeasureRest = false,
+    measureRestActive = false,
     noteSelected = false,
     rangeEditable = false,
     onaccidental = () => {},
@@ -196,6 +202,7 @@
   // 付点・休符のボタンに出す記号（楽譜用フォントの文字）
   const DOT_ICON = "\uE1D5\uE1E7"; // 4分音符＋付点
   const REST_ICON = "\uE4E5"; // 4分休符
+  const MEASURE_REST_ICON = "\uE4E3"; // 全休符（ステップ13-3b）
 
   // 臨時記号のボタン（alter：音の高さをどれだけ変えるか、icon：楽譜用フォントの文字）
   const ACCIDENTALS = [
@@ -266,6 +273,17 @@
       <div class="group">
         <button class="tool" disabled={!canRest} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
           <span class="icon flat">{REST_ICON}</span>
+        </button>
+        <!-- 全休符（小節まるごとの休符）（ステップ13-3b） -->
+        <button
+          class="tool"
+          class:on={measureRestActive}
+          disabled={!canMeasureRest}
+          onclick={() => onmeasurerest()}
+          title="全休符：選んでいる小節を、小節まるごとの休符にする（中の音符は消える）。全休符の小節で押すと、拍ごとの休符に戻す。範囲を選んでいるときは、範囲にかかる小節すべて"
+          aria-label="全休符"
+        >
+          <span class="icon measure-rest">{MEASURE_REST_ICON}</span>
         </button>
       </div>
 
@@ -442,6 +460,10 @@
   }
   .icon.flat {
     top: -1px; /* 全音符・休符は符尾がないので、ずらす量を小さくする */
+  }
+  .icon.measure-rest {
+    font-size: 32px; /* 全休符は小さな形なので、ほかより大きく出す */
+    top: -2px; /* 全休符は線からぶら下がる平たい形なので、まん中に見えるよう少し上げる（ステップ13-3b） */
   }
   .icon.accidental {
     top: 0; /* 臨時記号は文字の基準線の上下にまたがる形なので、ずらさない */

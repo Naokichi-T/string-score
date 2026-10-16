@@ -27,7 +27,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange } from "#lib/score/selection.js";
   import {
     canFit,
@@ -72,6 +72,7 @@
     toggleEnding,
     toggleJumpMark,
     setJump,
+    toggleMeasureRest,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -932,6 +933,25 @@
   // ----------------------------------------------------------
   function handleRest() {
     putNote({ rest: true, duration: duration, dots: dotted ? 1 : 0 });
+  }
+
+  // ［全休符］を押せるか（音か休符を選んでいるとき）と、選んでいる小節がもう全休符か（ボタンを青くする）（ステップ13-3b）
+  let canMeasureRest = $derived(selection !== null);
+  let measureRestActive = $derived(!!selection && isMeasureRest(score.parts[selection.part].measures[selection.measure].notes));
+
+  // ----------------------------------------------------------
+  // 関数：handleMeasureRest
+  // ［全休符］が押されたとき：選んでいる小節を、小節まるごとの休符にする・拍ごとの休符に戻す（ステップ13-3b）
+  // 範囲を選んでいるときは、範囲にかかる小節すべてに効かせる（全部が全休符なら戻す）
+  // 押したあとは、最初の小節の1つ目（全休符なら全休符そのもの）を選ぶ
+  // ----------------------------------------------------------
+  function handleMeasureRest() {
+    if (!selection) return;
+    message = "";
+    const part = selection.part;
+    const from = range ? range.start.measure : selection.measure;
+    const to = range ? range.end.measure : selection.measure;
+    commit(toggleMeasureRest(score, part, from, to), { part: part, measure: from, note: 0 });
   }
 
   // 連符のボタンを押せるか（音か休符を1つ選んでいるとき）（ステップ10-2）
@@ -1855,6 +1875,9 @@
       ondot={handleDot}
       onrest={handleRest}
       {canRest}
+      onmeasurerest={handleMeasureRest}
+      {canMeasureRest}
+      {measureRestActive}
       {canTuplet}
       ontuplet={handleTuplet}
       inTuplet={selectedInTuplet}
