@@ -733,6 +733,24 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleMoveButton
+  // 青い帯の［◀ 前の音］［次の音 ▶］が押されたとき（ステップ12-10a）
+  //   direction … 1 なら次の音へ、-1 なら前の音へ
+  // ［範囲］が入っていれば、範囲の端を動かす（Shift＋← → と同じ）
+  // 入っていなければ、前後の音を選ぶ（← → と同じ。範囲選択はやめる）
+  // ----------------------------------------------------------
+  function handleMoveButton(direction) {
+    if (!selection) return;
+    if (rangeMode) {
+      extendRange(direction);
+      return;
+    }
+    selection = moveSelection(score, selection, direction);
+    rangeEnd = null;
+    message = "";
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleDuration
   // 長さのボタンが押されたとき
   //   ・次に入れる長さを変える
@@ -1651,7 +1669,8 @@
       {rangeMode}
       onrangemode={handleRangeMode}
     />
-    <SelectionInfo {score} {selection} {range} {message} />
+    <!-- onmove：前後の音へ移るボタン（ステップ12-10a） -->
+    <SelectionInfo {score} {selection} {range} {message} onmove={handleMoveButton} />
     <!-- MusicXML を読み込んだときに知らせること（なければ何も出ない）（ステップ8-4c） -->
     <ImportNotice />
 
