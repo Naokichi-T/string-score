@@ -30,7 +30,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
@@ -258,6 +258,67 @@ function tempoMarksXml(score, i) {
 // ----------------------------------------------------------
 function gradualEndXml() {
   return ["      <direction>", "        <direction-type>", `          <dashes type="stop" number="1"/>`, "        </direction-type>", "      </direction>"];
+}
+
+// ----------------------------------------------------------
+// 関数：jumpStartXml
+// 小節の頭の 𝄋（Segno）・𝄌（Coda）の <direction> を作る（いちばん上のパートの、小節の頭に書く）（ステップ11-7c）
+//   見た目の印（<segno/>・<coda/>）と、ほかのアプリが再生に使う印（<sound segno>・<sound coda>）を両方書く
+//   info … 小節の情報（score.measures[i]）
+// 戻り値：XML の行の配列（何もなければ空の配列）
+// ----------------------------------------------------------
+function jumpStartXml(info) {
+  const lines = [];
+  if (info.segno) {
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push("          <segno/>");
+    lines.push("        </direction-type>");
+    lines.push(`        <sound segno="segno"/>`);
+    lines.push("      </direction>");
+  }
+  if (info.coda) {
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push("          <coda/>");
+    lines.push("        </direction-type>");
+    lines.push(`        <sound coda="coda"/>`);
+    lines.push("      </direction>");
+  }
+  return lines;
+}
+
+// ----------------------------------------------------------
+// 関数：jumpEndXml
+// 小節の終わりの To Coda・Fine・D.C.・D.S. の <direction> を作る（いちばん上のパートの、最後の音のあとに書く）（ステップ11-7c）
+//   見た目の文字（<words>）と、ほかのアプリが再生に使う印（<sound>）を両方書く
+//     To Coda … tocoda="coda"（𝄌 の小節へ飛ぶ）
+//     Fine    … fine="yes"（ここで終わる）
+//     D.C.    … dacapo="yes"（曲の頭へ戻る）
+//     D.S.    … dalsegno="segno"（𝄋 へ戻る）
+//   info … 小節の情報（score.measures[i]）
+// 戻り値：XML の行の配列（何もなければ空の配列）
+// ----------------------------------------------------------
+function jumpEndXml(info) {
+  // 書くものを { text: 文字, sound: <sound> に付けるもの } の形で並べる
+  const items = [];
+  if (info.toCoda) items.push({ text: "To Coda", sound: `tocoda="coda"` });
+  if (info.fine) items.push({ text: "Fine", sound: `fine="yes"` });
+  if (info.jump) {
+    const sound = info.jump.startsWith("ds") ? `dalsegno="segno"` : `dacapo="yes"`;
+    items.push({ text: JUMP_TEXTS[info.jump] ?? info.jump, sound: sound });
+  }
+
+  const lines = [];
+  items.forEach((item) => {
+    lines.push(`      <direction placement="above">`);
+    lines.push("        <direction-type>");
+    lines.push(`          <words font-style="italic">${escapeXml(item.text)}</words>`);
+    lines.push("        </direction-type>");
+    lines.push(`        <sound ${item.sound}/>`);
+    lines.push("      </direction>");
+  });
+  return lines;
 }
 
 // ----------------------------------------------------------
@@ -611,6 +672,8 @@ function partXml(score, p, divisions) {
     if (isFirst && p === 0) lines.push(...tempoXml(score));
     // 2小節目からのテンポの指示（途中のテンポ変更・a tempo・rit.・accel.）も、一番上のパートにだけ書く（ステップ11-6c）
     if (p === 0) lines.push(...tempoMarksXml(score, i));
+    // 𝄋・𝄌 も、一番上のパートの小節の頭にだけ書く（ステップ11-7c）
+    if (p === 0) lines.push(...jumpStartXml(score.measures[i]));
 
     // 臨時記号を、五線譜の表示と同じ決め方で決める
     const accidentals = computeAccidentals(measure.notes, keyAt(score, i), tiedIn);
@@ -649,6 +712,8 @@ function partXml(score, p, divisions) {
 
     // rit.・accel. の範囲の終わりの小節なら、最後の音のあとに点線の終わりを書く（一番上のパートだけ）（ステップ11-6c）
     if (p === 0 && score.measures[i].gradualEnd) lines.push(...gradualEndXml());
+    // To Coda・Fine・D.C.・D.S. は、一番上のパートの、最後の音のあとに書く（ステップ11-7c）
+    if (p === 0) lines.push(...jumpEndXml(score.measures[i]));
 
     // 小節の終わりの線
     const isLast = i === lastIndex;

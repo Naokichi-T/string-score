@@ -628,6 +628,122 @@ function tempoWordKind(text) {
   return TEMPO_WORDS[normalizeWords(text)] ?? null;
 }
 
+// 文字の指示（空白と「.」を取って小文字にしたもの） → D.C.・D.S.・Fine・To Coda の種類 の表（ステップ11-7c）
+//   "dc" などは小節の情報の jump に入れる種類（model.js の JUMP_TEXTS）、"fine"・"toCoda" はその印
+//   例："D.C. al Fine" → "dcalfine" → "dcFine"、"Dal Segno" → "dalsegno" → "ds"
+const JUMP_WORDS = {
+  dc: "dc",
+  dacapo: "dc",
+  dcalfine: "dcFine",
+  dacapoalfine: "dcFine",
+  dcalcoda: "dcCoda",
+  dacapoalcoda: "dcCoda",
+  ds: "ds",
+  dalsegno: "ds",
+  dsalfine: "dsFine",
+  dalsegnoalfine: "dsFine",
+  dsalcoda: "dsCoda",
+  dalsegnoalcoda: "dsCoda",
+  fine: "fine",
+  tocoda: "toCoda",
+};
+
+// ----------------------------------------------------------
+// 関数：jumpWordKind
+// 文字の指示が、D.C.・D.S.・Fine・To Coda なら、その種類を返す（ステップ11-7c）
+// 「D. C.」のように間に空白があるものも同じに見るため、空白も取ってから比べる
+// 例："D.S. al Coda" → "dsCoda"、"Fine" → "fine"、"To Coda" → "toCoda"、"dolce" → null
+// ----------------------------------------------------------
+function jumpWordKind(text) {
+  return JUMP_WORDS[normalizeWords(text).replaceAll(" ", "")] ?? null;
+}
+
+// ----------------------------------------------------------
+// 関数：readJumpMarks
+// D.C.・D.S.・Fine・To Coda・𝄋（Segno）・𝄌（Coda）を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-7c）
+// 一番上のパートの小節だけを見る（全パート共通の印なので）
+//   ・文字（<words>）："Fine" → fine、"To Coda" → toCoda、"D.C. al Fine" など → jump
+//   ・文字がなくても、<sound> の印でも読む：fine="yes" → fine、tocoda → toCoda、dacapo="yes" → D.C.、dalsegno → D.S.
+//   ・<segno/> → 𝄋、<coda/> → 𝄌
+//       ただし同じ <direction> に「To Coda」か tocoda があれば、𝄌 の記号は To Coda の印として使われているので To Coda にする
+//       D.C.・D.S. と同じ <direction> にある記号は、その文字の飾りなので 𝄋・𝄌 にはしない
+//   ・𝄋・𝄌 は楽譜に1つだけ：2つ目からは使わずに数える
+//   measureElements … 一番上のパートの <measure> の並び
+//   score           … 作った楽譜データ（measures に書き足す）
+// 戻り値：使わなかった 𝄋・𝄌 の数
+// ----------------------------------------------------------
+function readJumpMarks(measureElements, score) {
+  let extra = 0; // 使わなかった 𝄋・𝄌 の数
+  let hasSegno = false; // もう 𝄋 を付けたか
+  let hasCoda = false; // もう 𝄌 を付けたか
+
+  measureElements.forEach((measureElement, i) => {
+    if (i >= score.measures.length) return;
+    const info = score.measures[i];
+
+    // 調べるまとまり：小節の中の <direction> ごと＋小節にじかに書いてある <sound>（<direction> の外に書くアプリもある）
+    const groups = childElements(measureElement, "direction").map((direction) => ({
+      types: childElements(direction, "direction-type"),
+      sound: childElement(direction, "sound"),
+    }));
+    childElements(measureElement, "sound").forEach((sound) => groups.push({ types: [], sound: sound }));
+
+    groups.forEach(({ types, sound }) => {
+      // 文字から種類を集める
+      const kinds = [];
+      types.forEach((type) => {
+        childElements(type, "words").forEach((words) => {
+          const kind = jumpWordKind(words.textContent);
+          if (kind) kinds.push(kind);
+        });
+      });
+      // <sound> の印（文字がないときのため）
+      const attr = (name) => (sound ? sound.getAttribute(name) : null);
+      const segnoGlyph = types.some((type) => childElements(type, "segno").length > 0) || !!attr("segno");
+      const codaGlyph = types.some((type) => childElements(type, "coda").length > 0) || !!attr("coda");
+
+      // ① Fine・To Coda
+      if (kinds.includes("fine") || attr("fine") === "yes") info.fine = true;
+      const toCodaHere = kinds.includes("toCoda") || !!attr("tocoda");
+      if (toCodaHere) info.toCoda = true;
+
+      // ② D.C.・D.S.（文字があれば文字で決める。なければ <sound> の印で、ただの D.C.・D.S. にする）
+      const jumpKind = kinds.find((kind) => kind !== "fine" && kind !== "toCoda");
+      let jumpHere = false;
+      if (jumpKind) {
+        info.jump = jumpKind;
+        jumpHere = true;
+      } else if (attr("dacapo") === "yes") {
+        info.jump = info.jump ?? "dc";
+        jumpHere = true;
+      } else if (attr("dalsegno")) {
+        info.jump = info.jump ?? "ds";
+        jumpHere = true;
+      }
+
+      // ③ 𝄋・𝄌（To Coda・D.C.・D.S. の飾りとして使われているものは除く。2つ目からは数えるだけ）
+      if (jumpHere) return;
+      if (segnoGlyph) {
+        if (hasSegno) {
+          extra = extra + 1;
+        } else {
+          info.segno = true;
+          hasSegno = true;
+        }
+      }
+      if (codaGlyph && !toCodaHere) {
+        if (hasCoda) {
+          extra = extra + 1;
+        } else {
+          info.coda = true;
+          hasCoda = true;
+        }
+      }
+    });
+  });
+  return extra;
+}
+
 // ----------------------------------------------------------
 // 関数：readTempoMarks
 // 2小節目からの、テンポの指示を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-6c）
@@ -810,6 +926,7 @@ function readDirection(direction, state, counter) {
       const text = normalizeWords(words.textContent);
       if (text === "") return;
       if (tempoWordKind(words.textContent)) return; // rit.・a tempo などは、楽譜全体の印として readTempoMarks で読む（ステップ11-6c）
+      if (jumpWordKind(words.textContent)) return; // D.C.・Fine などは、楽譜全体の印として readJumpMarks で読む（ステップ11-7c）
       const name = WORDS_TO_TECHNIQUE[text];
       if (name) state.pending.techniques = addTechnique(state.pending.techniques, name);
       else report(counter, "文字の指示（dolce・cresc. など）");
@@ -1202,11 +1319,16 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   };
 
   // ⑧ 2小節目からのテンポの指示（途中のテンポ変更・rit.・accel.・a tempo）（ステップ11-6c）
-  // ⑧ 2小節目からのテンポの指示（途中のテンポ変更・rit.・accel.・a tempo）（ステップ11-6c）
   readTempoMarks(childElements(partElements[0], "measure"), score);
 
   // ⑨ 小節線とくり返し（ステップ11-7a）
   readBarlines(childElements(partElements[0], "measure"), score);
+
+  // ⑩ D.C.・D.S.・Fine・To Coda・𝄋・𝄌（ステップ11-7c）
+  const extraJumpMarks = readJumpMarks(childElements(partElements[0], "measure"), score);
+  if (extraJumpMarks > 0) {
+    warnings.push(`𝄋・𝄌 が2つ以上あったので、最初のものだけを使いました（使わなかったもの：${extraJumpMarks}個）`);
+  }
 
   return { score: score, warnings: warnings };
 }
