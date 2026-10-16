@@ -99,24 +99,60 @@ function noteCenterX(staveNote) {
   return (staveNote.getNoteHeadBeginX() + staveNote.getNoteHeadEndX()) / 2;
 }
 
+// スラーがよけて通る記号の種類（VexFlow の部品の種類の名前）（ステップ13-4）
+//   Annotation   … 指番号・奏法の文字・フェルマータ
+//   Articulation … 弓・スタッカートなど・弦楽器の記号
+//   Ornament     … トリルなどの装飾
+const SLUR_AVOID_CATEGORIES = ["Annotation", "Articulation", "Ornament"];
+
 // ----------------------------------------------------------
 // 関数：noteTopY / noteBottomY
 // 音符の一番上・一番下の位置（符尾も含む）
+// （ステップ13-4：玉より上（下）に描いた指番号・弓などの記号も含める。スラーがそれをよけて通るようにするため）
+// （記号の位置は、描いたあとでないと分からない。スラーは音符を全部描いたあとに描くので、ここでは分かっている）
 // ----------------------------------------------------------
 function noteTopY(VF, staveNote) {
-  let top = Math.min(...staveNote.getYs()) - 5; // 玉の上端
+  const headTop = Math.min(...staveNote.getYs()) - 5; // 玉の上端
+  let top = headTop;
   if (staveNote.hasStem() && staveNote.getStemDirection() === VF.Stem.UP) {
     top = Math.min(top, staveNote.getStemExtents().topY); // 上向きの符尾の先
   }
+  // 玉より上に描いた記号の上端（ステップ13-4）
+  modifierBoxes(staveNote).forEach((box) => {
+    if (box.getY() < headTop) top = Math.min(top, box.getY());
+  });
   return top;
 }
 
 function noteBottomY(VF, staveNote) {
-  let bottom = Math.max(...staveNote.getYs()) + 5; // 玉の下端
+  const headBottom = Math.max(...staveNote.getYs()) + 5; // 玉の下端
+  let bottom = headBottom;
   if (staveNote.hasStem() && staveNote.getStemDirection() === VF.Stem.DOWN) {
     bottom = Math.max(bottom, staveNote.getStemExtents().topY); // 下向きの符尾の先
   }
+  // 玉より下に描いた記号の下端（ステップ13-4）
+  modifierBoxes(staveNote).forEach((box) => {
+    const boxBottom = box.getY() + box.getH();
+    if (boxBottom > headBottom) bottom = Math.max(bottom, boxBottom);
+  });
   return bottom;
+}
+
+// ----------------------------------------------------------
+// 関数：modifierBoxes
+// 音符に付いた記号（指番号・弓など）のうち、描き終わったものの四角の一覧を返す（ステップ13-4）
+//   staveNote … VexFlow の音符（描いたあとのもの）
+// 戻り値：BoundingBox の配列（getY が上端、getH が高さ）
+// ----------------------------------------------------------
+function modifierBoxes(staveNote) {
+  const boxes = [];
+  staveNote.getModifiers().forEach((modifier) => {
+    if (!SLUR_AVOID_CATEGORIES.includes(modifier.getCategory())) return;
+    if (!modifier.isRendered()) return; // まだ描いていないものは、位置が分からないので使わない
+    const box = modifier.getBoundingBox();
+    if (box) boxes.push(box);
+  });
+  return boxes;
 }
 
 // ----------------------------------------------------------

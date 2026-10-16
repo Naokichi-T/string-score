@@ -1948,7 +1948,8 @@
     <main class="score-area">
       <!-- visibleParts：表示するパートだけを描く（ステップ12-6a） -->
       <!-- beatLines：拍の線（ステップ12-7） -->
-      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} {beatLines} />
+      <!-- focus：範囲を広げているときは動かしている端、そうでなければ選んでいる音が見えるようにスクロールする（ステップ13-4） -->
+      <ScoreView {score} {selection} {range} {playingNotes} {playing} onselect={handleSelect} {visibleParts} {beatLines} focus={rangeEnd ?? selection} />
     </main>
 
     <!-- collapsed・ontoggle：鍵盤をたたむ（ステップ12-9） -->

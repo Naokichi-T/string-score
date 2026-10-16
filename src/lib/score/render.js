@@ -407,6 +407,13 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         part.measures[i].notes.forEach((note, j) => shiftTremolo(VF, tickables[j], note));
       });
 
+      // 連桁の高さを先に決めて、連桁でつながった音符の符尾を連桁まで伸ばしておく（ステップ13-4）
+      // （VexFlow は連桁を描くときに符尾を伸ばすので、先に音符を描くと、指番号などの記号が
+      //   伸びる前の短い符尾に合わせて置かれ、あとから描く連桁と重なって隠れてしまうため）
+      // 音符はふつう描くときに五線に結び付けられるが、符尾の長さを決めるには五線の位置が要るので、先に結び付ける
+      voices.forEach((voice, p) => voice.getTickables().forEach((tickable) => tickable.setStave(staves[p])));
+      beamsList.forEach((beams) => beams.forEach((beam) => beam.postFormat()));
+
       // 音符と連桁と連符の数字を描く
       voices.forEach((voice, p) => voice.draw(context, staves[p]));
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));

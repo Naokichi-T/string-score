@@ -24,7 +24,8 @@
   //                  （選ばれた場所か null と、Shift キーを押していたか true / false を渡す）
   //   visibleParts … 表示するパートの本当の番号の配列（例：[0, 2]。null なら全部表示）（ステップ12-6a）
   //   beatLines    … true なら拍の線を描く（ステップ12-7）
-  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {}, visibleParts = null, beatLines = false } = $props();
+  //   focus … 見えるようにしておきたい音の場所（範囲を広げているときは動かしている端、そうでなければ選んでいる音）（ステップ13-4）
+  let { score, selection = null, range = null, playingNotes = [], playing = false, onselect = () => {}, visibleParts = null, beatLines = false, focus = null } = $props();
 
   // 表示するパートの本当の番号の配列（null のときは全部）（ステップ12-6a）
   let shownParts = $derived(visibleParts ?? score.parts.map((_, p) => p));
@@ -72,6 +73,10 @@
   // 自動スクロールで段を上に寄せたとき、上に残す余白（ピクセル）
   const SCROLL_MARGIN = 8;
 
+  // 最後に「見えるようにした」音の場所（"パート-小節-番号" の文字）（ステップ13-4）
+  // 場所が変わったときだけスクロールする（同じ場所のまま描き直したときに、マウスでのスクロールを引き戻さないため）
+  let lastFocusKey = null;
+
   // ----------------------------------------------------------
   // 関数：draw
   // 今の枠の幅に合わせて、五線譜を描く
@@ -91,6 +96,47 @@
     // 当たり判定のパートの番号は、本当の番号に戻しておく（クリック・自動スクロールで使うため）（ステップ12-6a）
     hitBoxes = boxes.map((box) => ({ ...box, part: shownParts[box.part] }));
     followPlaying();
+    followFocus(); // 矢印キーで選ぶ音・範囲の端が動いたら、その段が見えるようにする（ステップ13-4）
+  }
+
+  // ----------------------------------------------------------
+  // 関数：followFocus
+  // 見えるようにしておきたい音（focus）の段が画面から出ていたら、その段が見えるところまでスクロールする（ステップ13-4）
+  // ・focus の場所が変わったときだけ調べる（同じ場所のまま描き直したときは動かさない）
+  // ・再生中は、鳴っている音を追いかける（followPlaying）ので、ここでは動かさない
+  // ・段が下に出ていれば段の下端が見える所まで、上に出ていれば段の上端が見える所までスクロールする
+  //   （矢印キーで1つずつ進むとき、画面が大きく飛ばないように、最小限だけ動かす）
+  // ----------------------------------------------------------
+  function followFocus() {
+    if (!focus || playing) {
+      lastFocusKey = null;
+      return;
+    }
+    const key = `${focus.part}-${focus.measure}-${focus.note}`;
+    if (key === lastFocusKey) return;
+    lastFocusKey = key;
+
+    // focus の音の当たり判定の四角を探す（段の上端・下端がわかる）。隠しているパートの音なら何もしない
+    const box = hitBoxes.find((b) => b.part === focus.part && b.measure === focus.measure && b.note === focus.note);
+    if (!box) return;
+
+    const scroller = findScrollParent(wrapper);
+    if (!scroller) return;
+
+    // 画面の上での位置に直す
+    const containerTop = container.getBoundingClientRect().top;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const lineTop = containerTop + box.lineTop;
+    const lineBottom = containerTop + box.lineBottom;
+
+    if (lineBottom > scrollerRect.bottom) {
+      // 下に出ている：段の下端が見える所まで下へスクロールする（段が見える所より高いときは、上端に合わせる）
+      const down = Math.min(lineBottom - scrollerRect.bottom + SCROLL_MARGIN, lineTop - scrollerRect.top - SCROLL_MARGIN);
+      scroller.scrollBy({ top: down, behavior: "smooth" });
+    } else if (lineTop < scrollerRect.top) {
+      // 上に出ている：段の上端が見える所まで上へスクロールする
+      scroller.scrollBy({ top: lineTop - scrollerRect.top - SCROLL_MARGIN, behavior: "smooth" });
+    }
   }
 
   // ----------------------------------------------------------
@@ -198,6 +244,7 @@
     beatLines; // 拍の線の入・切（ステップ12-7）
     selection;
     range;
+    focus; // 見えるようにしておきたい音（ステップ13-4）
     playingNotes;
     VF;
     requestDraw();
