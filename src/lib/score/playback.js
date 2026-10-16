@@ -275,6 +275,92 @@ function ornamentPieces(event) {
   return pieces;
 }
 
+// ----------------------------------------------------------
+// 関数：glissandoTarget
+// グリッサンドの付いた音の「次の音」の高さを返す（すべって行く先）（ステップ11-5b）
+// 小節をまたいでもよい。次が休符・次の音がないときは null（すべらない）
+//   part … パートのデータ
+//   i    … 何小節目か（0 から）
+//   j    … 小節の中で何番目の音か（0 から）
+// ----------------------------------------------------------
+function glissandoTarget(part, i, j) {
+  let next = part.measures[i].notes[j + 1]; // 同じ小節の次の音
+  if (!next && i + 1 < part.measures.length) next = part.measures[i + 1].notes[0]; // 小節の最後なら、次の小節の最初の音
+  if (!next || next.rest) return null;
+  return next.pitch;
+}
+
+// MIDI の番号から音の高さに直すための表（黒鍵は ♯ で書く）（ステップ11-5b）
+const MIDI_STEPS = ["C", "C", "D", "D", "E", "F", "F", "G", "G", "A", "A", "B"];
+const MIDI_ALTERS = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0];
+
+// ----------------------------------------------------------
+// 関数：midiToPitch
+// MIDI の番号を音の高さにする（pitchToMidi の逆。黒鍵は ♯ で書く）（ステップ11-5b）
+// 例：61 → { step: "C", alter: 1, octave: 4 }（ド♯4）
+// ----------------------------------------------------------
+function midiToPitch(midi) {
+  const index = ((midi % 12) + 12) % 12; // 0〜11（ドからシまでのどこか）
+  return { step: MIDI_STEPS[index], alter: MIDI_ALTERS[index], octave: Math.floor(midi / 12) - 1 };
+}
+
+// ----------------------------------------------------------
+// 関数：glissStartTick
+// グリッサンドで、すべり始める時刻（ティック）を返す（ステップ11-5b）
+// グリッサンドの音（タイの最後の音）の「後半」ですべる
+// フェルマータが付いていたら、のびたあとの後半ですべる（のびた音の長さは FERMATA_RATE 倍）
+//   event … 鳴らす音（glissTo・glissLastTicks が入っているもの。フェルマータでずらしたあとのもの）
+// （電子音で周波数を変えるときにも使うので、ほかのファイルから使えるようにした（export））
+// ----------------------------------------------------------
+export function glissStartTick(event) {
+  const glide = (event.glissLastTicks / 2) * (event.fermataEnd ? FERMATA_RATE : 1); // すべる長さ
+  return event.startTick + event.ticks - glide;
+}
+
+// ----------------------------------------------------------
+// 関数：glissandoPieces
+// グリッサンドの付いた音を、半音ずつのかけらに分ける（楽器の音で鳴らすとき）（ステップ11-5b）
+// （録音した楽器の音は、鳴らし始めたあとで高さを変えられないため、間の半音を順に鳴らす）
+//   ・すべる所（後半）を「高さの差（半音の数）」で等分する
+//   ・最初のかけら：もとの音（前半＋すべる所の最初の1つ分）
+//   ・そのあと：間の半音を1つずつ（行く先の音は、次の音がふつうに鳴る）
+//   例：ド4 → ミ4（半音4つ分）なら、ド4・ド♯4・レ4・レ♯4 のあとにミ4（次の音）
+//   event … 鳴らす音（glissTo が入っているもの）
+// 戻り値：分けた音の一覧（高さの差が半音1つ以下なら、間の音がないので分けずにそのまま）
+// ----------------------------------------------------------
+export function glissandoPieces(event) {
+  const from = pitchToMidi(event.pitch);
+  const diff = pitchToMidi(event.glissTo) - from; // 高さの差（上がるならプラス）
+  const count = Math.abs(diff); // 半音の数
+  if (count < 2) return [event];
+
+  const direction = diff > 0 ? 1 : -1;
+  const glideStart = glissStartTick(event); // すべり始める時刻
+  const end = event.startTick + event.ticks; // 次の音が鳴り始める時刻
+  const step = (end - glideStart) / count; // かけら1つ分の長さ
+
+  const pieces = [];
+  for (let k = 0; k < count; k++) {
+    // かけらの始まりと終わり（最初のかけらだけ、音の頭から始まる）
+    const start = k === 0 ? event.startTick : glideStart + step * k;
+    const pieceEnd = glideStart + step * (k + 1);
+    const isLast = k === count - 1;
+    pieces.push({
+      ...event,
+      pitch: midiToPitch(from + direction * k), // k = 0 はもとの音
+      startTick: start,
+      ticks: pieceEnd - start,
+      // 音を出す長さ：最後のかけらは、もとの音の終わりまで（次の音とつなげる）
+      soundTicks: isLast ? event.startTick + event.soundTicks - start : pieceEnd - start,
+      // 最後のかけら以外は、余韻を短くして次のかけらと少しだけ重ねる（ornamentPiece のしくみを使う）
+      connected: isLast ? event.connected : false,
+      ornamentPiece: !isLast,
+      glissTo: null, // 分けたかけらは、もうすべらない
+    });
+  }
+  return pieces;
+}
+
 // 弱音器（con sord.）を付けている間の音の強さの割合（ステップ11-2）
 const MUTE_RATE = 0.75;
 
@@ -515,6 +601,10 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         let gate = plucked ? GATE_NORMAL : noteGate(note, legato);
         // ブレス・カエスーラの付いた音は、スタッカートなどでもっと短くなっていなければ 7割で切る（ピチカートは除く）（ステップ11-1c）
         if (note.breath && !plucked) gate = Math.min(gate, GATE_BREATH);
+        // グリッサンドの付いた音：次の音の高さへすべらせて、切れ目なしでつなげる（ステップ11-5b）
+        // （ピチカートの音・トリルやトレモロも付いている音は、すべらせない）
+        const glissTo = note.glissando && !note.tie && !plucked && !note.ornament && !note.tremolo ? glissandoTarget(part, i, j) : null;
+        if (glissTo) gate = 1;
         const soundLength = length * gate;
         // いっぱいに鳴らす音（スラーの中・テヌート）は、次の音となめらかにつなげる
         const connected = gate >= 1;
@@ -539,6 +629,8 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
           tiedEvent.ticks = tiedEvent.ticks + length;
           tiedEvent.connected = connected; // つなげるかどうかは、タイの最後の音で決める
           tiedEvent.fermataEnd = !!note.fermata; // 最後の音にフェルマータがあるか
+          tiedEvent.glissTo = glissTo; // タイの最後の音にグリッサンドがあれば、その音の後半ですべる（ステップ11-5b）
+          tiedEvent.glissLastTicks = length;
         } else {
           // 新しく鳴らす音
           const event = {
@@ -558,6 +650,8 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
             upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
             lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
             tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
+            glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
+            glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
           };
           events.push(event);
           tiedEvent = event;

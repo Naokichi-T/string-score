@@ -13,7 +13,7 @@
 //   ・B は、のばすときにくり返す範囲（ループ）の情報を、自分で作ったファイルから読み込む
 // ==========================================================
 
-import { pitchToMidi } from "../score/playback.js";
+import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
 
 // 音を鳴らすための仕組み（AudioContext）
 // ブラウザは「ユーザーが何か操作したあと」でないと音を鳴らせないが、
@@ -223,9 +223,11 @@ export function pitchToFrequency(pitch) {
 //   startTime … 鳴らし始める時刻（AudioContext の時計で。省略したら今すぐ）
 //   velocity  … 音の強さ（0〜127。省略したら 100）
 //   pluck     … true なら、はじいたような音（ピチカート）にする（ステップ6-3c）
+//   glide     … グリッサンドですべるときだけ { pitch: 行く先の高さ, startTime: すべり始める時刻 }（ステップ11-5b）
+//               すべり始める時刻から音の終わりまで、周波数をなめらかに変える（すべらないときは null）
 // 戻り値：途中で止めるための関数
 // ----------------------------------------------------------
-function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluck = false) {
+function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluck = false, glide = null) {
   const ctx = resumeAudio();
   const start = startTime ?? ctx.currentTime;
   // ピチカートは、楽譜の長さより早く自然に消える（長くても PIZZ_SYNTH_DECAY 秒まで）
@@ -242,6 +244,12 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluc
   const oscillator = ctx.createOscillator();
   oscillator.type = "sawtooth";
   oscillator.frequency.value = pitchToFrequency(pitch);
+  // グリッサンド：すべり始める時刻までは同じ高さ、そこから音の終わりまでに行く先の高さへ（ステップ11-5b）
+  // （exponentialRamp は、音の高さが耳に「同じ速さ」で上がる・下がるように聞こえる変え方）
+  if (glide) {
+    oscillator.frequency.setValueAtTime(pitchToFrequency(pitch), glide.startTime);
+    oscillator.frequency.exponentialRampToValueAtTime(pitchToFrequency(glide.pitch), end);
+  }
 
   // 高い成分を少し削って、やわらかい音にするフィルター
   const filter = ctx.createBiquadFilter();
@@ -383,13 +391,20 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
   // 今選んでいる楽器の音（電子音のときは null）
   const instruments = currentInstruments();
 
-  events.forEach((event) => {
+  // グリッサンドの音（ステップ11-5b）
+  // ・電子音：分けずに1つの音のまま鳴らし、playSynth の中で高さをなめらかに変える
+  // ・楽器の音：録音の音は鳴らしたあとで高さを変えられないので、半音ずつのかけらに分ける
+  const list = soundType === "synth" ? events : events.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
+
+  list.forEach((event) => {
     const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
     const duration = event.soundTicks * tickSeconds; // 鳴らす長さ（スタッカートなどは playback.js で決めてある）
 
     // 電子音を選んでいるときは、電子音で予約する
     if (soundType === "synth") {
-      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz));
+      // グリッサンドなら、すべる先の高さと、すべり始める時刻も渡す（ステップ11-5b）
+      const glide = event.glissTo ? { pitch: event.glissTo, startTime: startTime + glissStartTick(event) * tickSeconds } : null;
+      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide));
       return;
     }
 
