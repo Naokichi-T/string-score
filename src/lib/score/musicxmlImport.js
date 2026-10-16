@@ -111,14 +111,13 @@ const UNSUPPORTED_LABELS = {
   "open-string": "開放弦の記号",
   "thumb-position": "親指の位置",
   string: "弦の指定",
-  glissando: "グリッサンド",
-  slide: "グリッサンド",
   arpeggiate: "アルペジオ",
   "other-dynamics": "強弱（その他）",
 };
 
 // 数えなくてよい（ほかの所で扱う・中身だけを見る）記号の名前（tuplet は連符の印。連符の小節は別に知らせる）
-const IGNORED_NOTATIONS = ["tied", "slur", "fermata", "articulations", "technical", "ornaments", "dynamics", "wavy-line", "accidental-mark", "other-notation", "tuplet"];
+// （ステップ11-5c：グリッサンド（glissando・slide）は読むようにしたので、ここに入れた）
+const IGNORED_NOTATIONS = ["tied", "slur", "fermata", "articulations", "technical", "ornaments", "dynamics", "wavy-line", "accidental-mark", "other-notation", "tuplet", "glissando", "slide"];
 
 // ----------------------------------------------------------
 // 関数：childElements
@@ -547,7 +546,13 @@ function readNotations(noteElement, note, state, counter) {
       }
     });
 
-    // そのほか（グリッサンド・アルペジオなど）
+    // グリッサンド（ステップ11-5c）
+    // <glissando type="start"> か <slide type="start">（ほかのアプリがグリッサンドを書くときの名前）があれば付ける
+    // 線の形（まっすぐ・波線）は問わない。type="stop" は読まない（このアプリでは、いつも次の音までなので）
+    const glissandos = [...childElements(notations, "glissando"), ...childElements(notations, "slide")];
+    if (glissandos.some((element) => element.getAttribute("type") === "start")) note.glissando = true;
+
+    // そのほか（アルペジオなど）
     for (const child of Array.from(notations.childNodes)) {
       if (child.nodeType === 1 && !IGNORED_NOTATIONS.includes(child.nodeName)) report(counter, unsupportedLabel(child.nodeName));
     }

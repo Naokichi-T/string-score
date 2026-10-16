@@ -32,7 +32,7 @@
 
 import { INSTRUMENTS, noteTicks, timeAt, keyAt, TICKS_PER_16TH, tupletGroups } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS } from "./symbols.js";
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -371,6 +371,14 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
   // フェルマータ（upright：五線の上に付く、ふつうの向き）
   if (note.fermata) inner.push(`          <${FERMATA.musicxml} type="upright"/>`);
 
+  // グリッサンド（ステップ11-5c）
+  //   すべり始める音 … <glissando type="start">gliss.</glissando>（中の文字は、線の上に書く文字）
+  //   次の音         … <glissando type="stop"/>
+  //   line-type="solid" はまっすぐな線（このアプリのグリッサンドはいつもまっすぐな線）
+  // glissStop・glissStart は、partXml で組を探して付けた印（楽譜データには入っていない）
+  if (note.glissStop) inner.push(`          <${GLISSANDO.musicxml} type="stop" line-type="solid" number="1"/>`);
+  if (note.glissStart) inner.push(`          <${GLISSANDO.musicxml} type="start" line-type="solid" number="1">${GLISSANDO.text}</${GLISSANDO.musicxml}>`);
+
   if (inner.length === 0) return [];
   return ["        <notations>", ...inner, "        </notations>"];
 }
@@ -471,6 +479,21 @@ function partXml(score, p, divisions) {
   lines.push(`  <part id="P${p + 1}">`);
 
   let tiedIn = false; // 前の小節の最後の音から、タイでつながってきているか
+
+  // グリッサンドの組を、先に全部探しておく（ステップ11-5c）
+  //   glissStarts … すべり始める音（glissando の付いた音）
+  //   glissStops  … その次の音（小節をまたいでもよい）
+  // 次が休符・次の音がない・タイが付いている音は、組にしない（書き出さない）
+  const glissStarts = new Set();
+  const glissStops = new Set();
+  const partNotes = part.measures.flatMap((measure) => measure.notes); // パートの音を、小節をまたいで1列に並べたもの
+  partNotes.forEach((note, k) => {
+    const next = partNotes[k + 1];
+    if (note.glissando && !note.rest && !note.tie && next && !next.rest) {
+      glissStarts.add(note);
+      glissStops.add(next);
+    }
+  });
   const lastIndex = part.measures.length - 1;
 
   // 1つ前の小節の拍子・調・音部記号（変わったかどうかを比べるため）（ステップ8-1b）
@@ -525,7 +548,9 @@ function partXml(score, p, divisions) {
       }
 
       lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
-      lines.push(...noteXml(note, accidentals[k], tieStop, divisions, tupletMark));
+      // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
+      const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
+      lines.push(...noteXml(xmlNote, accidentals[k], tieStop, divisions, tupletMark));
       lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
       prevTie = !note.rest && !!note.tie;
     });
