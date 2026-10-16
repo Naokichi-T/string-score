@@ -1615,7 +1615,8 @@
 
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
   {#if printing}
-    <PrintView {score} onclose={() => (printing = false)} />
+    <!-- visibleParts：表示しているパートだけを印刷する（ステップ12-6b） -->
+    <PrintView {score} onclose={() => (printing = false)} {visibleParts} />
   {/if}
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->

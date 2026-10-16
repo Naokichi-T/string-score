@@ -18,7 +18,17 @@
   // 親から受け取るもの
   //   score   … 楽譜データ
   //   onclose … 印刷の画面が閉じたときに呼ぶ関数
-  let { score, onclose = () => {} } = $props();
+  //   visibleParts … 表示しているパートの本当の番号の配列（null なら全部）（ステップ12-6b）
+  //                  表示しているパートだけを印刷する（全部ならスコア、1つならパート譜になる）
+  let { score, onclose = () => {}, visibleParts = null } = $props();
+
+  // 印刷する楽譜データ（表示しているパートだけ）（ステップ12-6b）
+  const printParts = visibleParts ?? score.parts.map((_, p) => p);
+  const printScore = printParts.length === score.parts.length ? score : { ...score, parts: printParts.map((p) => score.parts[p]) };
+
+  // 1ページ目の左上に出すパート名（一部のパートだけのとき。全部のときは空の文字）（ステップ12-6b）
+  // 例："Violin I"、"Violin I・Viola"
+  const partLabel = printParts.length === score.parts.length ? "" : printParts.map((p) => score.parts[p].name).join("・");
 
   // ----------------------------------------------------------
   // 紙の設定
@@ -113,7 +123,7 @@
       draw.style.position = "absolute";
       draw.style.left = "-100000px";
       document.body.appendChild(draw);
-      const result = renderScore(VF, draw, score, width);
+      const result = renderScore(VF, draw, printScore, width); // 表示しているパートだけ（ステップ12-6b）
       const svg = draw.querySelector("svg");
       // 幅は renderScore が決めたもの（最低限の幅より狭いときは広がる）を使う
       const svgWidth = Number(svg.getAttribute("width"));
@@ -142,6 +152,10 @@
   {#each pages as pageSvg, k}
     <div class="page">
       <div class="page-body" use:appendNode={pageSvg}></div>
+      <!-- パート名（一部のパートだけを印刷するとき、1ページ目の左上。作曲者と同じ高さ）（ステップ12-6b） -->
+      {#if k === 0 && partLabel}
+        <div class="part-label">{partLabel}</div>
+      {/if}
       <!-- ページ番号（2ページ目から） -->
       {#if k > 0}
         <div class="page-number">{k + 1}</div>
@@ -179,6 +193,15 @@
   }
   .page-body :global(svg) {
     display: block; /* SVG の下にすき間ができないようにする */
+  }
+  /* パート名：楽譜の作曲者（右寄せ）と同じ高さに、左寄せで書く（ステップ12-6b）
+     作曲者の文字の上端は、楽譜の上から約 56px。それを 75% に縮めて約 42px */
+  .part-label {
+    position: absolute;
+    top: calc(15mm + 42px);
+    left: calc(15mm + 8px); /* 楽譜の左の余白（10px）を 75% にした分 */
+    font-family: Academico, serif;
+    font-size: 13px; /* 楽譜の作曲者の文字と同じくらいに見える大きさ */
   }
   .page-number {
     position: absolute;
