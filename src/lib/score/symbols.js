@@ -102,6 +102,15 @@ export const FERMATA = { label: "フェルマータ", vf: "a@a", musicxml: "ferm
 export const GLISSANDO = { label: "グリッサンド（次の音まですべらせる）", text: "gliss.", musicxml: "glissando" };
 
 // ----------------------------------------------------------
+// アルペジオ（データの arpeggio に true を入れる。重音だけに付けられる）（ステップ14-4a）
+// 重音の左に縦の波線を描き、下の音から順にすばやく弾く
+//   label    … ボタンの説明
+//   musicxml … MusicXML での名前
+// （ボタンの記号は、楽譜用フォントの文字だとブラウザによってボタンからはみ出すので、SymbolTools.svelte で波線を描いている）
+// ----------------------------------------------------------
+export const ARPEGGIO = { label: "アルペジオ（重音を、下の音から順にすばやく弾く）", musicxml: "arpeggiate" };
+
+// ----------------------------------------------------------
 // 前打音（データの grace に { type, pitch } を入れる。1つの音に1つだけ）（ステップ11-8a）
 //   type  … "short"（短前打音）・"long"（長前打音）
 //   pitch … 前打音の高さ（主音と同じ形 { step, alter, octave }）

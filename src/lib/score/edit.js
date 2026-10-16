@@ -602,6 +602,7 @@ export function canGlissando(score, selection) {
 //            'ornament'（トリルなどの装飾）（ステップ11-3a）
 //            'tremolo'（トレモロ。value は斜線の本数）（ステップ11-4）
 //            'grace'（前打音。value は "short"（短前打音）か "long"（長前打音））（ステップ11-8a）
+//            'arpeggio'（アルペジオ。重音だけ。value は使わない）（ステップ14-4a）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
@@ -615,6 +616,18 @@ export function toggleNoteSymbol(score, selection, kind, value) {
   // 重音：装飾・前打音は、付いていなければ付けない（ステップ14-1）
   if (note.chord && kind === "ornament" && !note.ornament) return score;
   if (note.chord && kind === "grace" && !note.grace) return score;
+
+  // アルペジオ（kind が 'arpeggio'）：付いていれば外す。付けるのは重音のときだけ（ステップ14-4a）
+  if (kind === "arpeggio") {
+    if (!note.arpeggio && !note.chord) return score;
+    return updateNote(score, selection, (n) => {
+      if (n.arpeggio) {
+        delete n.arpeggio;
+      } else {
+        n.arpeggio = true;
+      }
+    });
+  }
 
   // グリッサンド（kind が 'glissando'）：付いていれば外す、なければ付ける（ステップ11-5a）
   // 付けるのは、canGlissando で付けられるときだけ（外すのはいつでもできる）
@@ -1007,6 +1020,7 @@ export function toggleChordPitch(score, selection, pitch) {
         n,
         pitches.filter((_, k) => k !== index),
       ); // その音を除いて入れ直す
+      if (!n.chord) delete n.arpeggio; // 1音になったら、アルペジオは外す（ステップ14-4a）
     });
     return { score: newScore, error: "", head: Math.max(0, index - 1) };
   }
@@ -1111,6 +1125,7 @@ export function removeChordHead(score, selection) {
       n,
       pitches.filter((_, k) => k !== head),
     );
+    if (!n.chord) delete n.arpeggio; // 1音になったら、アルペジオは外す（ステップ14-4a）
   });
   return { score: newScore, error: "", head: Math.max(0, head - 1) };
 }

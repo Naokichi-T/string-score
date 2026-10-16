@@ -6,7 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, GRACES, FINGERINGS, DYNAMICS } from "#lib/score/symbols.js";
+  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, GRACES, FINGERINGS, DYNAMICS, ARPEGGIO } from "#lib/score/symbols.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -124,6 +124,24 @@
     </button>
   </div>
 
+  <!-- アルペジオ（重音のときだけ押せる。もう付いているものは、外すために押せる）（ステップ14-4a） -->
+  <div class="group">
+    <button
+      class="tool"
+      class:on={!!note?.arpeggio}
+      disabled={disabled || (!isChord && !note?.arpeggio)}
+      onclick={() => onsymbol("arpeggio")}
+      title={isChord ? ARPEGGIO.label : `${ARPEGGIO.label}（重音のときだけ付けられます）`}
+      aria-label={ARPEGGIO.label}
+    >
+      <!-- 縦の波線を SVG で描く（楽譜用フォントの文字だと、ブラウザによってボタンから大きくはみ出したため） -->
+      <!-- q は「曲がった線」：右・左に交互にふくらませて、上から下へ4回くねらせる -->
+      <svg class="arpeggio-icon" width="16" height="28" viewBox="0 0 16 28">
+        <path d="M8 2 q 5 3 0 6 q -5 3 0 6 q 5 3 0 6 q -5 3 0 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+    </button>
+  </div>
+
   <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
   <div class="group">
     {#each Object.entries(GRACES) as [name, symbol] (name)}
@@ -235,6 +253,10 @@
   }
   .icon.dynamic {
     top: -2px;
+  }
+  /* アルペジオの波線（SVG）。押したときの操作は、下のボタンに通す（ステップ14-4a） */
+  .arpeggio-icon {
+    pointer-events: none;
   }
   .icon.grace {
     top: 6px; /* ステップ11-8a */

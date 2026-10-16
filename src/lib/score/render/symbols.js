@@ -84,6 +84,13 @@ export function addSymbols(VF, staveNote, note) {
     staveNote.addModifier(technique, 0);
   }
 
+  // ④-2 アルペジオ（重音の左に縦の波線。重音のときだけ）（ステップ14-4a）
+  //      ARPEGGIO_DIRECTIONLESS … 矢印のない波線
+  //      allVoices: false … この音符の玉だけにかかる長さにする（ほかの音符まで波線をのばさない）
+  if (note.arpeggio && note.chord) {
+    staveNote.addModifier(new VF.Stroke(VF.Stroke.Type.ARPEGGIO_DIRECTIONLESS, { allVoices: false }), 0);
+  }
+
   // ⑤ フェルマータ（一番上）
   //    VexFlow は「アーティキュレーション」を先に、「文字（Annotation）」をあとに積み重ねるので、
   //    アーティキュレーションとして付けると、指番号（文字）より下に来てしまう。

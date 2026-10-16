@@ -493,6 +493,33 @@ function computeWedges(part) {
   return wedges;
 }
 
+// アルペジオで、1音ごとにずらす時間（秒）（ステップ14-4a）
+// テンポに関係なく、弓でさっと弾いたくらいの速さにする
+const ARPEGGIO_SECONDS = 0.06;
+
+// 3音・4音の重音で、下の2音を鳴らす長さ（ティック）：16分音符1つ分（ステップ14-4a）
+// （バイオリンは3音・4音を同時にのばせないので、下の2音を短く弾いてから上の2音をのばす）
+const BROKEN_CHORD_TICKS = TICKS_PER_16TH;
+
+// ----------------------------------------------------------
+// 関数：brokenRole
+// 3音・4音の重音を弦楽器の弾き方で鳴らすとき、その高さの音をどう鳴らすかを決める（ステップ14-4a）
+//   index … 何番目の高さか（低い順。0 から）
+//   count … 重音の音の数
+// 戻り値：
+//   "short" … 下の2音のうち、上の2音に入らない音：頭で短く鳴らす
+//   "late"  … 上の2音のうち、下の2音に入らない音：少し遅れて鳴らし始め、のばす
+//   "full"  … 下の2音にも上の2音にも入る音（3音のまん中）：頭から鳴らし、のばす
+// 例：4音 → [short, short, late, late]、3音 → [short, full, late]
+// ----------------------------------------------------------
+function brokenRole(index, count) {
+  const inLower = index < 2;
+  const inUpper = index >= count - 2;
+  if (inLower && inUpper) return "full";
+  if (inLower) return "short";
+  return "late";
+}
+
 // 短前打音を鳴らす長さ（ティック）：32分音符1つ分（ステップ11-8a）
 const SHORT_GRACE_TICKS = TICKS_PER_16TH / 2;
 
@@ -764,6 +791,8 @@ function makeTempoWarp(score, startMeasure, order) {
 // ・タイでつながった同じ高さの音は、1つの長い音にまとめる
 // ・強弱・スラー・pizz.・松葉は1小節目から数えておく（途中から鳴らしても、それまでの状態を引き継ぐため）
 // ・重音は、高さごとに鳴らす音を作って、同時に鳴らす（タイも高さごとにつなぐ）（ステップ14-1）
+// ・アルペジオの重音は、下の音から ARPEGGIO_SECONDS 秒ずつずらして鳴らし始める（ステップ14-4a）
+// ・アルペジオのない3音・4音の重音は、弦楽器の弾き方に近づける（下の2音を短く → 上の2音をのばす）（ステップ14-4a）
 // ----------------------------------------------------------
 export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) {
   // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときは範囲をまっすぐ）
@@ -897,7 +926,10 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         // 高さごとに、鳴らす音を作る（重音でなければ1つだけ）（ステップ14-1）
         // nowEvents … この音符の高さごとの鳴らす音（次の音がタイでつながってきたときに、まとめる先になる）
         const nowEvents = new Map();
-        notePitches(note).forEach((pitch, k) => {
+        const pitches = notePitches(note);
+        // 弦楽器の弾き方で鳴らすか：アルペジオがなく、3音以上の重音で、はじく音・トレモロでないとき（ステップ14-4a）
+        const broken = !note.arpeggio && pitches.length >= 3 && !plucked && !note.tremolo;
+        pitches.forEach((pitch, k) => {
           const midi = pitchToMidi(pitch);
           const tiedEvent = tiedEvents.get(midi); // 前の音から、同じ高さでタイがつながっているか
           if (tiedEvent) {
@@ -931,7 +963,23 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
               tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
               glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
               glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
+              rollIndex: note.arpeggio && note.chord ? k : 0, // アルペジオで、何音分ずらして鳴らし始めるか（あとで秒に合わせてずらす）（ステップ14-4a）
             };
+            // 3音・4音の重音：下の2音を短く → 上の2音をのばす（ステップ14-4a）
+            const role = broken ? brokenRole(k, pitches.length) : "full";
+            const brokenTicks = Math.min(BROKEN_CHORD_TICKS, length / 2); // 下の2音を鳴らす長さ（短い音符なら、その半分まで）
+            if (role === "short") {
+              // 頭で短く鳴らすだけ（のばさないので、フェルマータでものびない。タイでもつながない）
+              event.ticks = brokenTicks;
+              event.soundTicks = Math.min(soundLength, brokenTicks);
+              event.connected = false;
+              event.fermataEnd = false;
+            } else if (role === "late") {
+              // 少し遅れて鳴らし始める（終わりは同じ）
+              event.startTick = event.startTick + brokenTicks;
+              event.ticks = event.ticks - brokenTicks;
+              event.soundTicks = Math.max(soundLength - brokenTicks, 1);
+            }
             // 前打音：主音の頭の一部を借りて、先に前打音を鳴らす（ステップ11-8a）
             //   短前打音 … 32分音符の長さ（主音が短いときは、主音の半分まで）
             //   長前打音 … 主音の半分（付点の音符なら3分の2）
@@ -957,7 +1005,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
               event.glissLastTicks = event.glissLastTicks - graceTicks;
             }
             events.push(event);
-            nowEvents.set(midi, event);
+            if (role !== "short") nowEvents.set(midi, event); // 短く鳴らす音は、次の音とタイでつながない
           }
         });
 
@@ -1032,6 +1080,18 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   });
   points.forEach((point) => {
     totalTicks = totalTicks + point.extra; // 曲の終わりも、のばしたぶんだけ後ろになる
+  });
+
+  // アルペジオ：下の音から順に、決まった時間ずつずらして鳴らし始める（終わりは同じ）（ステップ14-4a）
+  // テンポの伸び縮み・フェルマータのあとに行う（ここでのティックは「1小節目のテンポ」の秒に合っているので、決まった秒にできる）
+  // ずらしすぎないように、その音の長さの半分までにする
+  const rollTicks = ARPEGGIO_SECONDS / secondsPerTick(score.tempo);
+  events.forEach((event) => {
+    if (!event.rollIndex) return;
+    const shift = Math.min(event.rollIndex * rollTicks, event.ticks / 2);
+    event.startTick = event.startTick + shift;
+    event.ticks = event.ticks - shift;
+    event.soundTicks = Math.max(event.soundTicks - shift, 1);
   });
 
   // 小節ごとの始まりの時刻（フェルマータのぶんもずらす）（ステップ12-3b）
