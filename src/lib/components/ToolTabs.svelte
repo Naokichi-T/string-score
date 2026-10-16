@@ -347,14 +347,16 @@
   .tab-content {
     min-height: 44px; /* ボタンが並ぶ高さを先に確保しておく */
     display: flex;
+    flex-wrap: wrap; /* 画面が狭くて1行に入りきらないときは、2行目に折り返す（ステップ12-8c） */
     align-items: center;
-    gap: 16px;
+    gap: 8px 12px; /* 縦の間 8px・横の間 12px（ステップ12-8c：横の間を 16px から少しつめた） */
     padding: 6px 16px;
     border-top: 1px solid #ddd;
   }
   .group {
     display: flex;
     gap: 4px;
+    flex-shrink: 0; /* 狭いときもボタンの組を縮めない（縮めずに、組ごと2行目に回す）（ステップ12-8c） */
   }
   .tool {
     display: flex;
@@ -407,6 +409,7 @@
     width: auto; /* コピーなどは文字が長いので、文字に合わせた幅にする */
     padding: 0 10px;
     font-size: 14px;
+    white-space: nowrap; /* 文字を途中で折り返さない（ステップ12-8c） */
   }
   .tool-select {
     height: 40px; /* ボタンと同じ高さ（その他の連符のプルダウン）（ステップ10-3） */
@@ -431,6 +434,7 @@
     height: 40px;
     padding: 0 12px;
     font-size: 14px;
+    white-space: nowrap; /* 「上書き」を途中で折り返さない（ステップ12-8c） */
     border: none;
     background: #fff;
     cursor: pointer;
