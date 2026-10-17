@@ -253,6 +253,9 @@
       <p class="notice-title">⚠ 楽譜はこのブラウザの中に自動で保存されます</p>
       <p>ほかの端末・ほかのブラウザでは見られません。ブラウザのデータを消すと楽譜も消えるので、大事な楽譜は［MusicXML 書き出し］でファイルにしておいてください。</p>
     </div>
+
+    <!-- Q&A のページへのリンク（ステップ17-5） -->
+    <p class="help-link"><a href="/help">くわしい使い方・困ったときは Q&A（よくある質問）へ →</a></p>
   </section>
 </main>
 
@@ -425,6 +428,19 @@
   .notice .notice-title {
     font-weight: bold;
     margin-bottom: 4px; /* 見出しと説明の間を少し空ける */
+  }
+  /* Q&A のページへのリンク（ステップ17-5） */
+  .help-link {
+    margin-top: 16px;
+    font-size: 15px;
+  }
+  .help-link a {
+    color: #2563eb;
+    font-weight: bold;
+    text-decoration: none;
+  }
+  .help-link a:hover {
+    text-decoration: underline;
   }
   /* 幅の狭い画面では、見出しを説明の上に出す（見出しの幅で説明が細くならないように） */
   @media (max-width: 600px) {
