@@ -6,6 +6,7 @@
 // （ステップ8-2：記号（弓・指番号・スタッカートなど・フェルマータ・pizz./arco・強弱・スラー・松葉））
 // （ステップ14-3：重音。1つ目の音の <note> のあとに、<chord/> を付けた <note> を低い順に並べる）
 // （ステップ14-4b：アルペジオ。重音の全部の音の <notations> に <arpeggiate/> を書く）
+// （ステップ14-5b：ハーモニクスのひし形の玉。その高さの <note> に <notehead>diamond</notehead> を書く）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -428,6 +429,14 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest =
     lines.push(`          <actual-notes>${tupletMark.actual}</actual-notes>`);
     lines.push(`          <normal-notes>${tupletMark.normal}</normal-notes>`);
     lines.push("        </time-modification>");
+  }
+
+  // ひし形の玉（ハーモニクスで軽く触れる音）：玉の形を書く（ステップ14-5b）
+  //   ・<notehead> は、連符の印のあと・<notations> の前に書く決まり
+  //   ・意味の印 <harmonic> は書かない（ソフトによっては玉の上に「○」が出てしまうため。決めたことの A）
+  //   ・重音のときは、高さ1つ分ずつの「書き出し用の音」で呼ばれるので、ひし形の高さの <note> にだけ書かれる
+  if (!note.rest && !measureRest && note.pitch.diamond) {
+    lines.push("        <notehead>diamond</notehead>");
   }
 
   // 音符に付く記号（タイの表示・スラー・アーティキュレーション・弓・指番号・フェルマータ・連符の始まりと終わり）

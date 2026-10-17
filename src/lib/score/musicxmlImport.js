@@ -6,6 +6,10 @@
 // （ステップ8-4b：重音・2つ目の声部・装飾音・アウフタクト）
 // （ステップ14-3：重音を読むようにした。<chord/> の付いた音を、1つ前の音に重ねる）
 // （ステップ14-4b：アルペジオ（<arpeggiate>）を読むようにした。1音だけの音符に付いていたら使わずに数える）
+// （ステップ14-5b：ハーモニクスのひし形の玉を読むようにした）
+//   ・<notehead>diamond</notehead> の音、<harmonic> の中に <touching-pitch/>（触れる音）がある音 → ひし形の玉
+//   ・<harmonic> は、中身が空か <natural/> だけのとき（ひし形の玉でもないとき）だけ、今までどおり「○」にする
+//     （<artificial/>（人工）・<touching-pitch/>・<base-pitch/>（押さえる音）がある、またはひし形の玉 → 「○」は付けない）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -55,6 +59,7 @@ import {
   samePitch,
   pitchNumber,
   MAX_CHORD_NOTES,
+  hasDiamond,
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners } from "./edit.js";
@@ -396,6 +401,59 @@ function readTempo(firstMeasure) {
 }
 
 // ----------------------------------------------------------
+// 関数：harmonicElements
+// <note> の中の <notations> → <technical> → <harmonic> を全部集めて返す（ステップ14-5b）
+//   noteElement … <note>
+// 戻り値：<harmonic> の要素の配列（なければ空の配列）
+// ----------------------------------------------------------
+function harmonicElements(noteElement) {
+  const list = [];
+  childElements(noteElement, "notations").forEach((notations) => {
+    childElements(notations, "technical").forEach((technical) => {
+      list.push(...childElements(technical, "harmonic"));
+    });
+  });
+  return list;
+}
+
+// ----------------------------------------------------------
+// 関数：isDiamondNote
+// <note> の玉が、ハーモニクスで軽く触れる音（ひし形の玉）かどうかを調べる（ステップ14-5b）
+//   noteElement … <note>
+// ひし形とみなすもの
+//   ・<notehead>diamond</notehead>（玉の形がひし形）
+//   ・<harmonic> の中に <touching-pitch/>（「この音は触れる音」という意味の印）がある
+// 戻り値：true / false
+// ----------------------------------------------------------
+function isDiamondNote(noteElement) {
+  // 玉の形（filled="yes" などの付け足しは見ない。中の文字だけを見る）
+  const notehead = childElement(noteElement, "notehead");
+  if (notehead && notehead.textContent.trim() === "diamond") return true;
+  // 意味の印
+  return harmonicElements(noteElement).some((harmonic) => childElement(harmonic, "touching-pitch"));
+}
+
+// ----------------------------------------------------------
+// 関数：isCircleHarmonic
+// <harmonic> を、音符の上の「○」（ナチュラルハーモニクス）として読んでよいか調べる（ステップ14-5b）
+//   harmonic    … <harmonic> の要素
+//   noteElement … その <harmonic> が入っている <note>
+// 「○」にしないもの（ひし形の書き方のハーモニクスの一部なので）
+//   ・<artificial/>（人工ハーモニクス）がある
+//   ・<touching-pitch/>（触れる音）・<base-pitch/>（押さえる音）がある
+//   ・玉がひし形（<notehead>diamond</notehead>）
+// それ以外（中身が空・<natural/> だけ・<sounding-pitch/>（聞こえる音で書いてある））は「○」（決めたことの A）
+// 戻り値：true / false
+// ----------------------------------------------------------
+function isCircleHarmonic(harmonic, noteElement) {
+  if (childElement(harmonic, "artificial")) return false;
+  if (childElement(harmonic, "touching-pitch")) return false;
+  if (childElement(harmonic, "base-pitch")) return false;
+  if (isDiamondNote(noteElement)) return false;
+  return true;
+}
+
+// ----------------------------------------------------------
 // 関数：readNote
 // <note> 1つを、このアプリの音符・休符のデータにする
 //   noteElement … <note>
@@ -451,6 +509,8 @@ function readNote(noteElement, divisions) {
   const tie = childElements(noteElement, "tie").some((t) => t.getAttribute("type") === "start");
 
   const note = { pitch: { step: step, alter: alter, octave: octave }, duration: shape.duration, dots: shape.dots, tie: tie };
+  // ひし形の玉なら、高さに印を付ける（重音の2つ目からの音も、この関数で読むので、高さごとに付く）（ステップ14-5b）
+  if (isDiamondNote(noteElement)) note.pitch.diamond = true;
   if (tuplet) note.tuplet = tuplet; // 連符の印（ステップ10-6）
   return { note: note, ticks: ticks };
 }
@@ -519,8 +579,11 @@ function readNotations(noteElement, note, state, counter) {
         if (child.nodeType !== 1) continue;
         if (XML_TO_BOWING[child.nodeName]) {
           note.bowing = XML_TO_BOWING[child.nodeName];
+        } else if (child.nodeName === "harmonic" && !isCircleHarmonic(child, noteElement)) {
+          // ひし形の書き方のハーモニクスの印：「○」は付けない（ひし形の玉は readNote で読んである）（ステップ14-5b）
+          continue;
         } else if (XML_TO_STRING_MARK[child.nodeName]) {
-          // ハーモニクス・左手ピチカート・バルトーク・ピチカート
+          // ハーモニクス（「○」）・左手ピチカート・バルトーク・ピチカート
           // 同じ group の記号（左手ピチカートとバルトーク・ピチカート）がもう付いていたら、あとのほうは入れない
           const name = XML_TO_STRING_MARK[child.nodeName];
           const group = STRING_MARKS[name].group;
@@ -1201,11 +1264,16 @@ function readPart(partElement, counter, skipped) {
   chords.forEach((chord) => finishChord(chord, skipped, counter));
 
   // 1音だけの音符に付いたアルペジオは使わない（アルペジオは重音だけの決まり）（ステップ14-4b）
+  // ひし形の玉のある音符に付いたアルペジオも使わない（ステップ14-5b）
   measures.forEach((measure) => {
     measure.notes.forEach((note) => {
       if (note.arpeggio && !note.chord) {
         delete note.arpeggio;
         report(counter, "1つの音に付いたアルペジオ");
+      } else if (note.arpeggio && hasDiamond(note)) {
+        // ひし形の玉のある重音（ハーモニクス）には、アルペジオを付けない（編集のときと同じ決まり）（ステップ14-5b）
+        delete note.arpeggio;
+        report(counter, "ハーモニクスに付いたアルペジオ");
       }
     });
   });
