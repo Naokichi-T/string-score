@@ -150,6 +150,16 @@
     width: 32px;
     height: 32px;
     font-size: 16px;
+    /* ＋ − をボタンのまん中に置く（iPad の Safari で右に寄るのを直した）
+       ブラウザがボタンに最初から付ける内側の余白（padding）は、ブラウザごとに大きさが違う
+       Safari は余白が大きいので、32px の幅から余白を引いた残りが ＋ の幅（16px）より狭くなり、
+       入りきらない分が右へはみ出して、右に寄って見えていた
+       → 余白を 0 にして、ボタンの中で上下左右のまん中にそろえる */
+    padding: 0;
+    display: inline-flex;
+    align-items: center; /* 上下のまん中 */
+    justify-content: center; /* 左右のまん中 */
+    line-height: 1; /* 文字の行の高さで上下がずれないようにする */
   }
   .parts {
     margin: 16px 0;
