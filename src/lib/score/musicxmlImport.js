@@ -31,7 +31,8 @@
 //   それ以外の連符（付点の連符・長さがまちまちの連符など）がある小節は、休符にする
 //
 // 【このアプリで扱えないもの】（ステップ8-4b）
-//   読めない長さの音（32分音符・読めない連符など）がある小節 … 小節ごと休符にする
+//   読めない長さの音（64分音符・倍全音符・付点の32分音符・読めない連符など）がある小節 … 小節ごと休符にする
+//   （ステップ15-5：32分音符・付点16分音符は読めるようにした）
 //   重音 … 4音までは重音として読む（5音以上なら上の4音を残す）（ステップ14-3。前は一番上の音だけ残していた）
 //          ほかの音に付いていた記号は、重音全体の記号にまとめる
 //   2つ目の声部・装飾音 … 使わない
@@ -43,6 +44,7 @@
 //   音符の中の <notations> … スラー・スタッカートなど・弓・指番号・フェルマータ → その音符に付ける
 //   音符の前の <direction> … 強弱・pizz./arco・松葉の始まり → 次の音符に付ける
 //                            松葉の終わり → その前の音符に付ける
+//                            （1つの音符の中で始まって終わる松葉は、次の音符まで延ばす（ステップ15-6））
 //   休符には記号を付けない（このアプリの決まり。記号タブでも休符には付けられない）
 //   このアプリにない記号（トリルなど）は読まずに、種類ごとの数を知らせる
 // ==========================================================
@@ -71,7 +73,8 @@ import { cleanSpanners, cleanAlternates } from "./edit.js";
 
 // ----------------------------------------------------------
 // 16分音符いくつ分か → 音の長さの名前と付点の数の表
-// このアプリで使える長さは、この8つだけ
+// このアプリで使える長さは、この10個だけ
+// （ステップ15-5：付点16分音符（1.5）と32分音符（0.5）を足した）
 // ----------------------------------------------------------
 const TICKS_TO_DURATION = {
   16: { duration: "whole", dots: 0 }, // 全音符
@@ -81,7 +84,9 @@ const TICKS_TO_DURATION = {
   4: { duration: "quarter", dots: 0 }, // 4分音符
   3: { duration: "eighth", dots: 1 }, // 付点8分音符
   2: { duration: "eighth", dots: 0 }, // 8分音符
+  1.5: { duration: "16th", dots: 1 }, // 付点16分音符（ステップ15-5）
   1: { duration: "16th", dots: 0 }, // 16分音符
+  0.5: { duration: "32nd", dots: 0 }, // 32分音符（ステップ15-5）
 };
 
 // ----------------------------------------------------------
@@ -366,7 +371,7 @@ function sameTime(a, b) {
 // ----------------------------------------------------------
 function readTempo(firstMeasure) {
   // 基準の音符の、4分音符に対する長さ（付点なし）
-  const UNIT_QUARTERS = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25 };
+  const UNIT_QUARTERS = { whole: 4, half: 2, quarter: 1, eighth: 0.5, "16th": 0.25, "32nd": 0.125 }; // 32分音符はステップ15-5
 
   for (const direction of childElements(firstMeasure, "direction")) {
     let tempo = null;
@@ -1057,6 +1062,7 @@ function keyAtMeasures(measures, i) {
 //   state     … パートごとの読みかけの情報
 //                pending … 次の音符に付ける記号 { dynamic, techniques, wedge }（techniques は奏法の名前の並び。ステップ11-2）
 //                lastNote … ここまでに読んだ最後の音符（松葉の終わりを付ける）
+//                wedgeStopNext … 松葉の終わりを、次の音符に付けるか（1つの音符の中で始まって終わる松葉のとき）（ステップ15-6）
 //   counter   … 使えなかった記号を数える表
 // ----------------------------------------------------------
 function readDirection(direction, state, counter) {
@@ -1090,7 +1096,11 @@ function readDirection(direction, state, counter) {
         state.pending.wedge = kind;
       } else if (kind === "stop") {
         // 終わり：ここまでに読んだ最後の音符に付ける（その音符に別の印があれば使えない）
+        // （ステップ15-6：最後の音符が同じ松葉の始まりの音符なら（1つの音符の中で始まって終わる松葉）、
+        //   このアプリでは1つの音符に始まりと終わりを両方付けられないので、終わりを次の音符に付ける（＝次の音符まで延ばす））
+        const startsHere = state.lastNote && (state.lastNote.wedge === "crescendo" || state.lastNote.wedge === "diminuendo");
         if (state.lastNote && state.lastNote.wedge === undefined) state.lastNote.wedge = "stop";
+        else if (startsHere) state.wedgeStopNext = true;
         else report(counter, "つなげられなかった松葉");
       }
     });
@@ -1104,6 +1114,11 @@ function readDirection(direction, state, counter) {
 // ----------------------------------------------------------
 function applyPending(note, state, counter) {
   if (note.rest) return;
+  // 1つの音符の中で始まって終わった松葉の終わりを、この音符に付ける（次の音符まで延ばす）（ステップ15-6）
+  if (state.wedgeStopNext) {
+    note.wedge = "stop";
+    state.wedgeStopNext = false;
+  }
   const pending = state.pending;
   if (pending.dynamic) note.dynamic = pending.dynamic;
   if (pending.techniques) note.techniques = pending.techniques;
@@ -1134,7 +1149,7 @@ function readPart(partElement, counter, skipped) {
   //   pending    … <direction> で読んで、次の音符に付ける記号
   //   lastNote   … ここまでに読んだ最後の音符（松葉の終わりを付ける）
   //   pendingGrace … 読んだ前打音で、次の主音に付けるもの { type, pitch }（なければ null）（ステップ11-8b）
-  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null };
+  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false }; // wedgeStopNext はステップ15-6
 
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
@@ -1314,6 +1329,10 @@ function readPart(partElement, counter, skipped) {
   // 最後まで主音が来なかった前打音は使わない（ステップ11-8b）
   if (state.pendingGrace) report(skipped, "装飾音");
 
+  // 1つの音符の中の松葉で、延ばす先の音符がなかったもの（パートの最後の音符など）は数える（ステップ15-6）
+  // （始まりの印だけが残るが、あとで cleanSpanners が外す）
+  if (state.wedgeStopNext) report(counter, "つなげられなかった松葉");
+
   // 重音を、決まりどおりの形にする（ステップ14-3）
   chords.forEach((chord) => finishChord(chord, skipped, counter));
 
@@ -1344,8 +1363,8 @@ function readPart(partElement, counter, skipped) {
 }
 
 // 2音トレモロにまとめられなかったとき、組の音を「半分の長さの形」にする表（ステップ14-6b）
-// （32分音符はこのアプリにないので、16分音符の組はまとめられないと、小節ごと休符になる）
-const HALF_SHAPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th" };
+// （ステップ15-5：32分音符を足したので、16分音符の組は32分音符2つにできる。32分音符の組は、まとめられないと小節ごと休符になる）
+const HALF_SHAPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th", "16th": "32nd" };
 
 // ----------------------------------------------------------
 // 関数：finishAlternates

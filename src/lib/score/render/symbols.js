@@ -140,7 +140,7 @@ export function drawBreath(VF, context, staveNote, nextStaveNote, stave, breath)
 const BEAM_SPACE = 8;
 
 // 旗・連桁の数（ステップ11-4）
-const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2 };
+const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2, "32nd": 3 }; // 32分音符はステップ15-5
 
 // ----------------------------------------------------------
 // 関数：shiftTremolo

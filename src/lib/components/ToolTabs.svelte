@@ -20,7 +20,7 @@
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
-  import { DURATION_ORDER } from "#lib/score/model.js";
+  import { INPUT_DURATIONS } from "#lib/score/model.js"; // 長さのボタンに並べる長さ（32分音符は入らない）（ステップ15-5）
   import SymbolTools from "./SymbolTools.svelte";
   import TechniqueTools from "./TechniqueTools.svelte";
   import ScoreSettings from "./ScoreSettings.svelte";
@@ -262,7 +262,7 @@
 
       <!-- 長さのボタン（今の長さは色が付く。入らない長さは押せない） -->
       <div class="group">
-        {#each DURATION_ORDER as d (d)}
+        {#each INPUT_DURATIONS as d (d)}
           <button
             class="tool"
             class:on={duration === d}

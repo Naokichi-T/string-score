@@ -61,6 +61,7 @@ export const DURATIONS = {
   quarter: { vf: "q", quarters: 1 }, // 4分音符
   eighth: { vf: "8", quarters: 0.5 }, // 8分音符
   "16th": { vf: "16", quarters: 0.25 }, // 16分音符
+  "32nd": { vf: "32", quarters: 0.125 }, // 32分音符（ステップ15-5：MusicXML の読み込み・表示・再生・書き出しだけ。長さのボタンはない）
 };
 
 // ----------------------------------------------------------
@@ -264,16 +265,28 @@ const DURATION_TICKS = {
   quarter: 4 * TICKS_PER_16TH, // 4分音符 = 16分音符4個分
   eighth: 2 * TICKS_PER_16TH, // 8分音符 = 16分音符2個分
   "16th": 1 * TICKS_PER_16TH, // 16分音符
+  "32nd": TICKS_PER_16TH / 2, // 32分音符 = 16分音符の半分（ステップ15-5）
 };
 
-// 長さの名前を、長い順に並べたもの（ボタンを並べる順番にも使う）
-export const DURATION_ORDER = ["whole", "half", "quarter", "eighth", "16th"];
+// 長さの名前を、長い順に並べたもの（休符で埋めるときの長さの候補・読み込める連符の音の形などに使う）
+// （ステップ15-5：32分音符を足した。長さのボタンには INPUT_DURATIONS を使う）
+export const DURATION_ORDER = ["whole", "half", "quarter", "eighth", "16th", "32nd"];
+
+// 長さのボタンに並べる長さ（長い順）（ステップ15-5）
+// 32分音符は、MusicXML の読み込みで出てくる音のためだけに入れたので、ボタンは作らない
+export const INPUT_DURATIONS = ["whole", "half", "quarter", "eighth", "16th"];
+
+// 付点を付けられない長さ（ステップ15-5）
+//   16分音符 … 付点16分音符を入力すると、残りを埋めるのに32分音符の休符が要り、ボタンのない長さが増えてしまうため
+//              （MusicXML の読み込みで出てくる付点16分音符は、そのまま使える）
+//   32分音符 … 付点を付けると、64分音符が要るため
+export const NO_DOT_DURATIONS = ["16th", "32nd"];
 
 // ----------------------------------------------------------
 // 関数：durationToTicks
 // 音の長さ（名前＋付点の数）を、ティックにする
 // 例：('quarter', 0) → 4分音符のティック、('quarter', 1) → その 1.5倍（付点4分音符）
-// 16分音符に付点は付けられない扱いにする（付点16分音符は 32分音符が必要になるため）
+// （入力で付点を付けられない長さは NO_DOT_DURATIONS。ここでは付点16分音符の長さも計算できる（読み込みで使う））（ステップ15-5）
 // ----------------------------------------------------------
 export function durationToTicks(duration, dots = 0) {
   const base = DURATION_TICKS[duration];

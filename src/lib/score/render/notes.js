@@ -12,7 +12,7 @@ import { GRACES } from "../symbols.js";
 // 前打音の小さな音符の長さ（VexFlow の書き方）（ステップ11-8a）
 //   長前打音は主音の半分の長さで描く：主音の長さ → 1つ短い長さ
 //   （付点の主音では、主音の3分の2 ＝ 付点を取った長さ。例：付点4分音符 → 4分音符）
-const HALF_DURATION = { whole: "h", half: "q", quarter: "8", eighth: "16", "16th": "32" };
+const HALF_DURATION = { whole: "h", half: "q", quarter: "8", eighth: "16", "16th": "32", "32nd": "64" }; // 32分音符はステップ15-5
 
 // alter（♯♭の数） → VexFlow の臨時記号の書き方（前打音の臨時記号に使う）（ステップ11-8a）
 const ALTER_TO_VF = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };

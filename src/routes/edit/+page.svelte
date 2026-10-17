@@ -30,7 +30,21 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches, hasDiamond, measureName, measureNumber, hasPickup } from "#lib/score/model.js";
+  import {
+    createEmptyScore,
+    keyAt,
+    timeAt,
+    tempoAt,
+    INSTRUMENTS,
+    ensurePartIds,
+    isMeasureRest,
+    notePitches,
+    hasDiamond,
+    measureName,
+    measureNumber,
+    hasPickup,
+    NO_DOT_DURATIONS,
+  } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
   import {
     canFit,
@@ -823,8 +837,8 @@
 
     duration = d;
     dotted = dots === 1;
-    // 16分音符には付点を付けられない
-    if (d === "16th") dotted = false;
+    // 16分音符には付点を付けられない（32分音符のボタンはないので、ここには来ない）（ステップ15-5）
+    if (NO_DOT_DURATIONS.includes(d)) dotted = false;
 
     if (selection && canUse(d, dotted ? 1 : 0)) {
       changeLength(d, dotted ? 1 : 0);
@@ -843,7 +857,7 @@
 
     if (!note) {
       // 選んでいない：次に入れる音の付点を切り替えるだけ
-      if (duration === "16th") {
+      if (NO_DOT_DURATIONS.includes(duration)) {
         message = "16分音符には付点を付けられません";
         return;
       }
@@ -860,7 +874,9 @@
     // 選んでいる音の付点を切り替える
     const newDots = (note.dots ?? 0) > 0 ? 0 : 1;
     if (!canUse(note.duration, newDots)) {
-      message = newDots === 1 && note.duration === "16th" ? "16分音符には付点を付けられません" : "付点を付けると小節に入りきりません";
+      // 16分・32分音符：付点を付けられない（32分音符は MusicXML の読み込みで出てくる）（ステップ15-5）
+      const noDot = newDots === 1 && NO_DOT_DURATIONS.includes(note.duration);
+      message = noDot ? `${note.duration === "32nd" ? "32" : "16"}分音符には付点を付けられません` : "付点を付けると小節に入りきりません";
       return;
     }
     changeLength(note.duration, newDots);

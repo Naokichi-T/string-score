@@ -466,7 +466,7 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest =
 }
 
 // 長前打音の小さな音符の形：主音の半分の長さ（画面の表示と同じ。render/notes.js を参照）（ステップ11-8b）
-const HALF_TYPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th", "16th": "32nd" };
+const HALF_TYPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th", "16th": "32nd", "32nd": "64th" }; // 32分音符はステップ15-5
 
 // alter（♯♭の数） → MusicXML の臨時記号の名前（前打音の臨時記号に使う）（ステップ11-8b）
 const ALTER_TO_XML = { "-2": "flat-flat", "-1": "flat", 0: "natural", 1: "sharp", 2: "double-sharp" };
@@ -882,7 +882,7 @@ function partXml(score, p, divisions) {
           normal: group.normal,
           start: k === group.start,
           stop: k === group.end,
-          bracket: !["eighth", "16th"].includes(group.duration) || members.some((n) => n.rest),
+          bracket: !["eighth", "16th", "32nd"].includes(group.duration) || members.some((n) => n.rest), // 32分音符はステップ15-5
         };
       }
 

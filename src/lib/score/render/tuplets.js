@@ -100,7 +100,7 @@ export function createBeams(VF, notes, staveNotes, time, offset = 0) {
     let lengths; // つなぐまとまりの長さの並び（ティック）
     if (segment.isTuplet) {
       // 4分音符以上の連符には連桁がない
-      if (!["eighth", "16th"].includes(segment.duration)) return;
+      if (!["eighth", "16th", "32nd"].includes(segment.duration)) return; // 32分音符はステップ15-5
       // 連符の中は全部1本でつなぐ
       lengths = [segmentEnd - segmentStart];
     } else {

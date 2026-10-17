@@ -34,7 +34,9 @@ const NOTE_VALUES = [
   { duration: "quarter", dots: 0 }, // 4分音符
   { duration: "eighth", dots: 1 }, // 付点8分音符
   { duration: "eighth", dots: 0 }, // 8分音符
+  { duration: "16th", dots: 1 }, // 付点16分音符（ステップ15-5：32分音符を足したので、使えるようになった）
   { duration: "16th", dots: 0 }, // 16分音符
+  { duration: "32nd", dots: 0 }, // 32分音符（ステップ15-5。小節線で分けた残りが32分音符1つ分になることがあるため）
 ].map((value) => ({ ...value, ticks: durationToTicks(value.duration, value.dots) }));
 
 // ----------------------------------------------------------

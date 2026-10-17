@@ -27,6 +27,7 @@ import {
   createPartId,
   isMeasureRest,
   DURATION_ORDER,
+  NO_DOT_DURATIONS,
   notePitches,
   setNotePitches,
   samePitch,
@@ -70,7 +71,7 @@ function noteStart(notes, j) {
 export function canFit(score, selection, duration, dots) {
   if (!selection) return false;
   // 16分音符に付点は付けられない
-  if (duration === "16th" && dots > 0) return false;
+  if (NO_DOT_DURATIONS.includes(duration) && dots > 0) return false; // 16分・32分音符には付点を付けない（ステップ15-5）
 
   const notes = score.parts[selection.part].measures[selection.measure].notes;
   // 連符の中の音は、長さを変えずに高さだけ入れ替えるので、いつでも置ける（ステップ10-2）
@@ -496,7 +497,7 @@ function resizedContents(notes, index, newNote) {
 // ----------------------------------------------------------
 export function canInsert(score, selection, duration, dots) {
   if (!selection) return false;
-  if (duration === "16th" && dots > 0) return false;
+  if (NO_DOT_DURATIONS.includes(duration) && dots > 0) return false; // 16分・32分音符には付点を付けない（ステップ15-5）
   const notes = score.parts[selection.part].measures[selection.measure].notes;
   // 連符の中には挿入できない（連符の数がそろわなくなるため）（ステップ10-2）
   if (notes[selection.note].tuplet) return false;
@@ -511,7 +512,7 @@ export function canInsert(score, selection, duration, dots) {
 // ----------------------------------------------------------
 export function canResize(score, selection, duration, dots) {
   if (!selection) return false;
-  if (duration === "16th" && dots > 0) return false;
+  if (NO_DOT_DURATIONS.includes(duration) && dots > 0) return false; // 16分・32分音符には付点を付けない（ステップ15-5）
   const notes = score.parts[selection.part].measures[selection.measure].notes;
   // 連符の中の音の長さは変えられない（ステップ10-2）
   if (notes[selection.note].tuplet) return false;

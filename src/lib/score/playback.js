@@ -182,7 +182,7 @@ function neighborPitch(score, part, i, j, direction) {
 }
 
 // 旗・連桁の数（トレモロの刻む細かさを決めるのに使う）（ステップ11-4）
-const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2 };
+const FLAG_COUNT = { whole: 0, half: 0, quarter: 0, eighth: 1, "16th": 2, "32nd": 3 }; // 32分音符はステップ15-5
 
 // ----------------------------------------------------------
 // 関数：tremoloStep
