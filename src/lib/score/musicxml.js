@@ -8,6 +8,8 @@
 // （ステップ14-4b：アルペジオ。重音の全部の音の <notations> に <arpeggiate/> を書く）
 // （ステップ14-5b：ハーモニクスのひし形の玉。その高さの <note> に <notehead>diamond</notehead> を書く）
 // （ステップ14-6b：2音トレモロ。2つの <note> の組にして、<tremolo type="start">・<tremolo type="stop"> を書く）
+// （ステップ15-3：アウフタクト。1小節目を <measure number="0" implicit="yes"> にして、次の小節から 1, 2, 3… と数える）
+//   implicit="yes" … 「小節番号として数えない小節」という MusicXML の決まり
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -34,7 +36,23 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, isAlternate } from "./model.js";
+import {
+  INSTRUMENTS,
+  noteTicks,
+  timeAt,
+  keyAt,
+  tempoAt,
+  TICKS_PER_16TH,
+  tupletGroups,
+  JUMP_TEXTS,
+  rehearsalLabel,
+  isMeasureRest,
+  notePitches,
+  samePitch,
+  isAlternate,
+  hasPickup,
+  measureNumber,
+} from "./model.js";
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 
@@ -813,7 +831,9 @@ function partXml(score, p, divisions) {
 
   part.measures.forEach((measure, i) => {
     const isFirst = i === 0;
-    lines.push(`    <measure number="${i + 1}">`);
+    // 小節番号は、画面と同じ番号（アウフタクトがあれば、アウフタクトは 0 で、数えない小節の印 implicit="yes" を付ける）（ステップ15-3）
+    const implicit = isFirst && hasPickup(score) ? ` implicit="yes"` : "";
+    lines.push(`    <measure number="${measureNumber(score, i)}"${implicit}>`);
     // くり返しの始まり（‖:）は、小節のいちばん頭に書く（ステップ11-7a）
     // （ステップ11-7b：1番・2番かっこの始まりも、同じ所に書く）
     lines.push(...leftBarlineXml(score.measures[i]));

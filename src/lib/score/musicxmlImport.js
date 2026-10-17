@@ -35,7 +35,8 @@
 //   重音 … 4音までは重音として読む（5音以上なら上の4音を残す）（ステップ14-3。前は一番上の音だけ残していた）
 //          ほかの音に付いていた記号は、重音全体の記号にまとめる
 //   2つ目の声部・装飾音 … 使わない
-//   アウフタクト（1小節目が拍子より短い）… 1小節目の前を休符で埋める
+//   アウフタクト（1小節目が拍子より短い）… アプリのアウフタクト（pickup）として読む（ステップ15-3。前は1小節目の前を休符で埋めていた）
+//     長さが「拍子の下の数字の音符◯つ」にならないときは、その単位に切り上げて前を休符で埋め、知らせる
 //   どれも、最後にまとめて知らせる
 //
 // 【記号の読み方】（ステップ8-4a）
@@ -1492,18 +1493,38 @@ function finishChord(chord, skipped, counter) {
 }
 
 // ----------------------------------------------------------
+// 関数：isMeasureRestOnly
+// 読んだ1小節分が、小節まるごとの休符（<rest measure="yes"/>）だけか調べる（ステップ15-3）
+// （ソフトによっては、アウフタクトの小節の全休符を、1小節ぶんの長さで書くことがあるので、
+//   アウフタクトの長さを決めるときには数えない）
+//   read … readPart で読んだ1小節分
+// 戻り値：true か false
+// ----------------------------------------------------------
+function isMeasureRestOnly(read) {
+  return !!read && read.readable && read.notes.length > 0 && read.notes.every((note) => note.rest && note.measureRest);
+}
+
+// ----------------------------------------------------------
 // 関数：fitMeasure
 // 読んだ音を、小節の長さに合わせる
 //   ・足りないとき … 残りを1拍ずつの休符で埋める
 //                    （アウフタクトの1小節目は前を、それ以外は後ろを埋める）（ステップ8-4b）
 //   ・多すぎる・読めない音があるとき … 小節を全部休符にする（読めなかったと知らせる）
-//   read     … readPart で読んだ1小節分
-//   time     … その小節の拍子
-//   isPickup … アウフタクトの1小節目か
+//   read        … readPart で読んだ1小節分
+//   time        … その小節の拍子
+//   isPickup    … アウフタクトの1小節目か
+//   pickupTicks … アウフタクトの長さ（ティック）（ステップ15-3）
+//                 0 より大きいときは、小節の長さを拍子どおりではなく、この長さにする
+//                 （0 のときは、アウフタクトでも拍子どおりの長さにして、前を休符で埋める（前と同じ））
 // 戻り値：{ notes: 音符・休符の配列, ok: そのまま使えたか }
 // ----------------------------------------------------------
-function fitMeasure(read, time, isPickup = false) {
-  const total = measureTicks(time);
+function fitMeasure(read, time, isPickup = false, pickupTicks = 0) {
+  const total = isPickup && pickupTicks > 0 ? pickupTicks : measureTicks(time);
+  // アウフタクトの小節の全休符で、長さが合わないもの（1小節ぶんの長さで書いてあるなど）は、
+  // アウフタクトの長さの、拍ごとの休符にする（ステップ15-3）
+  if (isPickup && isMeasureRestOnly(read) && read.ticks !== total) {
+    return { notes: restsForSpan(0, total, time), ok: true };
+  }
   if (!read.readable || read.ticks > total) {
     return { notes: restsForSpan(0, total, time), ok: false };
   }
@@ -1607,16 +1628,34 @@ export function musicXMLToScore(text, fallbackTitle = "") {
 
   // アウフタクトか調べる（ステップ8-4b）
   // 1小節目で、どのパートも拍子より短い（読めた音の長さが一番長いパートでも足りない）ならアウフタクト
+  // （ステップ15-3：全休符だけのパートは数えない。全部のパートが全休符だけなら、全部で調べる）
   const firstTotal = measureTicks(times[0]);
-  const firstLengths = readParts.map((read) => (read.measures[0] && read.measures[0].readable ? read.measures[0].ticks : 0));
+  const firstReads = readParts.map((read) => read.measures[0]);
+  const counted = firstReads.some((read) => read && !isMeasureRestOnly(read)) ? firstReads.filter((read) => !isMeasureRestOnly(read)) : firstReads;
+  const firstLengths = counted.map((read) => (read && read.readable ? read.ticks : 0));
   const longestFirst = Math.max(...firstLengths);
   const isPickup = longestFirst > 0 && longestFirst < firstTotal;
+
+  // アウフタクトの長さを、「拍子の下の数字の音符◯つ」で決める（ステップ15-3）
+  //   ちょうど割り切れないときは切り上げる（例：4/4 で8分音符1つ → 4分音符1つ分。前は8分休符で埋める）
+  //   切り上げると1小節と同じ長さになるときは、アウフタクトにはせず、前と同じく前を休符で埋める
+  let pickupTicks = 0; // アウフタクトの長さ（ティック）。アウフタクトにしないときは 0
   if (isPickup) {
-    warnings.push("1小節目が短い（アウフタクト）ので、前を休符で埋めて拍子どおりの長さにしました");
+    const unit = firstTotal / times[0].beats; // 拍子の下の数字の音符1つ分
+    const count = Math.ceil(longestFirst / unit);
+    if (count < times[0].beats) {
+      measures[0].pickup = count;
+      pickupTicks = count * unit;
+      if (pickupTicks !== longestFirst) {
+        warnings.push(`1小節目（アウフタクト）の長さが拍の単位で割り切れないので、${times[0].beatType}分音符${count}つ分のアウフタクトにして、前を休符で埋めました`);
+      }
+    } else {
+      warnings.push("1小節目が短い（アウフタクト）ので、前を休符で埋めて拍子どおりの長さにしました");
+    }
   }
 
   // ⑥ パートのデータを作る
-  const problemMeasures = new Set(); // 休符にした小節の番号（1 から。同じ小節は1回だけ）（ステップ8-4c）
+  const problemMeasures = new Set(); // 休符にした小節の番号（0 から数えたデータの順番。同じ小節は1回だけ）（ステップ8-4c。ステップ15-3：1 からの番号から変えた）
   const parts = readParts.map((read, p) => {
     const id = partElements[p].getAttribute("id");
     const info = partInfo[id] ?? { name: "", sound: "", instrumentName: "" };
@@ -1634,8 +1673,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const partMeasures = [];
     for (let i = 0; i < measureCount; i++) {
       const readMeasure = read.measures[i] ?? { notes: [], ticks: 0, readable: true };
-      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup);
-      if (!fitted.ok) problemMeasures.add(i + 1);
+      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup, pickupTicks);
+      if (!fitted.ok) problemMeasures.add(i);
 
       const measure = { notes: fitted.notes };
       // 音部記号：1小節目は必ず書く。途中は変わったときだけ
@@ -1679,7 +1718,9 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   // 休符にした小節を「12か所（12・36・53・120・122 小節目 …）」の形で知らせる（6つ目からは「…」）（ステップ8-4c）
   if (problemMeasures.size > 0) {
     const numbers = [...problemMeasures].sort((a, b) => a - b);
-    const shown = numbers.slice(0, 5).join("・") + (numbers.length > 5 ? " 小節目 …" : " 小節目");
+    // 画面と同じ小節番号で書く（アウフタクトがあれば、アウフタクトは「アウフタクト」、次の小節から 1, 2…）（ステップ15-3）
+    const labels = numbers.map((i) => (pickupTicks > 0 ? (i === 0 ? "アウフタクト" : String(i)) : String(i + 1)));
+    const shown = labels.slice(0, 5).join("・") + (labels.length > 5 ? " 小節目 …" : " 小節目");
     warnings.push(`連符などの読めない音があったので、休符にした小節：${numbers.length}か所（${shown}）`);
   }
 
