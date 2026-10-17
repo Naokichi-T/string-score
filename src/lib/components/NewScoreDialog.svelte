@@ -2,8 +2,9 @@
   // ==========================================================
   // NewScoreDialog.svelte
   // 新しい楽譜を作る窓（トップページの上に重ねて出す）
-  // バイオリン・ビオラ・チェロの数を選んで［作成］を押す
+  // バイオリン・ビオラ・チェロ・コントラバスの数を選んで［作成］を押す
   // （ステップ7-3）
+  // （ステップ18-3a：コントラバスを追加。最初の数は 0）
   // ==========================================================
   import { INSTRUMENTS, renameParts } from "#lib/score/model.js";
 
@@ -16,10 +17,10 @@
   const MAX_COUNT = 4;
 
   // 並べる楽器の順（楽譜の上から、この順に並ぶ）
-  const ORDER = ["violin", "viola", "cello"];
+  const ORDER = ["violin", "viola", "cello", "contrabass"];
 
-  // 楽器ごとの数（最初は弦楽四重奏）
-  let counts = $state({ violin: 2, viola: 1, cello: 1 });
+  // 楽器ごとの数（最初は弦楽四重奏。コントラバスは 0）
+  let counts = $state({ violin: 2, viola: 1, cello: 1, contrabass: 0 });
 
   // 上から順の楽器の配列（例：["violin", "violin", "viola", "cello"]）
   let instruments = $derived(ORDER.flatMap((instrument) => Array(counts[instrument]).fill(instrument)));
@@ -35,7 +36,7 @@
   // ----------------------------------------------------------
   // 関数：changeCount
   // 楽器の数を1つ増やす・減らす（0〜MAX_COUNT の間だけ）
-  //   instrument … 楽器（"violin"・"viola"・"cello"）
+  //   instrument … 楽器（"violin"・"viola"・"cello"・"contrabass"）
   //   delta      … 1（増やす）か -1（減らす）
   // ----------------------------------------------------------
   function changeCount(instrument, delta) {
@@ -138,7 +139,7 @@
     gap: 8px;
   }
   .label {
-    width: 90px; /* 楽器名の幅をそろえて、ボタンの縦の位置を合わせる */
+    width: 110px; /* 楽器名の幅をそろえて、ボタンの縦の位置を合わせる（ステップ18-3a：「コントラバス」が入るように 90px から広げた） */
   }
   .count {
     width: 24px;

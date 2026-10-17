@@ -13,7 +13,8 @@
   // ----------------------------------------------------------
   const SITE_URL = "https://string-score.vercel.app";
   const OGP_TITLE = "string-score｜弦楽器の楽譜作成";
-  const DESCRIPTION = "バイオリン・ビオラ・チェロの楽譜を、ブラウザで作って再生・PDF出力・MusicXML の書き出しができる無料のアプリです。";
+  // （ステップ18-3：コントラバスを足した）
+  const DESCRIPTION = "バイオリン・ビオラ・チェロ・コントラバスの楽譜を、ブラウザで作って再生・PDF出力・MusicXML の書き出しができる無料のアプリです。";
 </script>
 
 <svelte:head>

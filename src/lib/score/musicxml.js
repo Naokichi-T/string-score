@@ -113,12 +113,14 @@ const CLEF_TO_XML = {
 // ----------------------------------------------------------
 // 楽器の表（ほかのアプリが楽器を見分けられるように書いておく）
 //   sound   … MusicXML で決められている楽器の名前
-//   program … MIDI の楽器の番号（バイオリン 41・ビオラ 42・チェロ 43）
+//   program … MIDI の楽器の番号（バイオリン 41・ビオラ 42・チェロ 43・コントラバス 44）
+// （ステップ18-3：コントラバスを追加。1オクターブ下で鳴ることは、1小節目の <attributes> に <transpose> で書く）
 // ----------------------------------------------------------
 const INSTRUMENT_TO_XML = {
   violin: { sound: "strings.violin", program: 41 },
   viola: { sound: "strings.viola", program: 42 },
   cello: { sound: "strings.cello", program: 43 },
+  contrabass: { sound: "strings.contrabass", program: 44 },
 };
 
 // ----------------------------------------------------------
@@ -197,12 +199,14 @@ function partListXml(score) {
 //   time    … 拍子（変わらないときは undefined）
 //   clef    … 音部記号（変わらないときは undefined）
 //   divisions … 4分音符をいくつに分けるか（scoreDivisions で決めたもの）（ステップ10-5）
+//   soundOctaves … 鳴る高さが、書いた高さから何オクターブずれるか（コントラバスは −1）（ステップ18-3）
+//                  1小節目で 0 でなければ <transpose> を書く（ほかのアプリが、1オクターブ下で鳴らせるように）
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function attributesXml(isFirst, key, time, clef, divisions) {
+function attributesXml(isFirst, key, time, clef, divisions, soundOctaves = 0) {
   if (!isFirst && key === undefined && !time && !clef) return [];
 
-  // 書く順番は MusicXML の決まり（divisions → key → time → clef）に合わせる
+  // 書く順番は MusicXML の決まり（divisions → key → time → clef → transpose）に合わせる
   const lines = [];
   lines.push("      <attributes>");
   if (isFirst) lines.push(`        <divisions>${divisions}</divisions>`);
@@ -226,6 +230,16 @@ function attributesXml(isFirst, key, time, clef, divisions) {
     lines.push(`          <sign>${c.sign}</sign>`);
     lines.push(`          <line>${c.line}</line>`);
     lines.push("        </clef>");
+  }
+  // 1オクターブ下で鳴る楽器（コントラバス）（ステップ18-3）
+  //   diatonic・chromatic … 音名・半音でのずれ（オクターブだけずれるので 0）
+  //   octave-change       … オクターブのずれ（−1 ＝ 1オクターブ下で鳴る）
+  if (isFirst && soundOctaves !== 0) {
+    lines.push("        <transpose>");
+    lines.push("          <diatonic>0</diatonic>");
+    lines.push("          <chromatic>0</chromatic>");
+    lines.push(`          <octave-change>${soundOctaves}</octave-change>`);
+    lines.push("        </transpose>");
   }
   lines.push("      </attributes>");
   return lines;
@@ -939,7 +953,8 @@ function partXml(score, p, divisions) {
     const time = isFirst || !sameTimeSignature(nowTime, prevTime) ? nowTime : undefined;
     const key = isFirst || nowKey !== prevKey ? nowKey : undefined;
     const clef = isFirst || nowClef !== prevClef ? nowClef : undefined;
-    lines.push(...attributesXml(isFirst, key, time, clef, divisions));
+    // （ステップ18-3：コントラバスは、1小節目に1オクターブ下で鳴る印も書く）
+    lines.push(...attributesXml(isFirst, key, time, clef, divisions, INSTRUMENTS[part.instrument].soundOctaves ?? 0));
     prevTime = nowTime;
     prevKey = nowKey;
     prevClef = nowClef;

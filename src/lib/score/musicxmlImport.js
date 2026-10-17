@@ -98,8 +98,11 @@ const TICKS_TO_DURATION = {
 // パート名から楽器を決めるための言葉（小文字で比べる）
 // 上から順に調べる（"violoncello" に "violin" が入っていないか、などに気をつけて
 // チェロ → ビオラ → バイオリンの順にしている）
+// （ステップ18-3：コントラバスを、いちばん前に追加。"Double Bass"・"Kontrabass" などは "bass" で見分ける。
+//   書いてある音はどのアプリも「楽譜に書いた高さ」なので、そのまま読めばよい（<transpose> は読まなくてよい））
 // ----------------------------------------------------------
 const NAME_RULES = [
+  { instrument: "contrabass", words: ["contrabass", "contrabbasso", "contrebasse", "kontrabass", "bass", "cb.", "d.b.", "kb.", "コントラバス"] },
   { instrument: "cello", words: ["violoncello", "cello", "vc.", "vlc", "チェロ"] },
   { instrument: "viola", words: ["viola", "vla", "alto", "ビオラ", "ヴィオラ"] },
   { instrument: "violin", words: ["violin", "violino", "vln", "vn.", "バイオリン", "ヴァイオリン"] },

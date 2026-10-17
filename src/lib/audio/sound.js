@@ -7,6 +7,10 @@
 //   ・楽譜の再生は playEvents で全部の音をまとめて予約し、stopPlayback でまとめて止める
 // （ステップ6-1 追加：setSoundType で「楽器の音」と「電子音」を切り替えられるようにした）
 // （ステップ6-3c：pizz. の音は、ピチカートの録音（電子音のときは、はじいたような音）で鳴らす）
+// （ステップ18-3：コントラバスを追加）
+//   ・コントラバスの録音も読み込む（楽器の音B のくり返しの範囲は、ほかの楽器と同じく自分で作った）
+//   ・コントラバスは楽譜に書いた高さより1オクターブ低く鳴るので、鳴らすときに高さを下げる（soundingEvent・playPitch）
+//   ・楽器の音A のコントラバスの録音は、鳴る高さで シ♭3 から上が無音なので、その高さはチェロの録音で鳴らす（samplerFor）
 // （ステップ12-2：楽器の音を2種類にした。「楽器の音A」（FluidR3_GM）と「楽器の音B」（MusyngKite））
 //   ・ページを開いたら、選んでいる方の楽器の音だけを読み込む（電子音のときは A）
 //   ・もう一方は、初めて選んだときに読み込む（一度読み込んだら、切り替えても読み直さない）
@@ -14,6 +18,7 @@
 // ==========================================================
 
 import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
+import { INSTRUMENTS } from "../score/model.js"; // 楽器ごとの、鳴る高さのずれ（soundOctaves）を見るため（ステップ18-3）
 
 // 音を鳴らすための仕組み（AudioContext）
 // ブラウザは「ユーザーが何か操作したあと」でないと音を鳴らせないが、
@@ -26,8 +31,8 @@ let audioContext = null;
 const KITS = { instrument: "FluidR3_GM", instrumentB: "MusyngKite" };
 
 // 音の種類ごとの、読み込んだ楽器の音（読み込みが終わるまでは null）（ステップ12-2）
-// 中身は { violin: …, viola: …, cello: …, pizz: … }
-// pizz はピチカートの音（弦楽合奏のピチカート。3つの楽器で共通に使う）
+// 中身は { violin: …, viola: …, cello: …, contrabass: …, pizz: … }
+// pizz はピチカートの音（弦楽合奏のピチカート。4つの楽器で共通に使う）
 let instrumentsByType = { instrument: null, instrumentB: null };
 
 // 音の種類ごとの、読み込みの途中の Promise（2回呼ばれても、読み込みは1回だけにするため）（ステップ12-2）
@@ -58,7 +63,8 @@ export function getPlaybackTime() {
 const DETUNE_CENTS = 1200 * Math.log2(442 / 440);
 
 // 読み込む楽器（データの instrument の名前 → サウンドフォントの楽器の名前）
-const SOUNDFONT_NAMES = { violin: "violin", viola: "viola", cello: "cello" };
+// （ステップ18-3：コントラバスを追加）
+const SOUNDFONT_NAMES = { violin: "violin", viola: "viola", cello: "cello", contrabass: "contrabass" };
 
 // 鍵盤を押したときの音の強さ（0〜127）
 const KEY_VELOCITY = 90;
@@ -69,11 +75,22 @@ const KEY_VELOCITY = 90;
 // 録音を1つずつ取り出して、耳に聞こえる大きさ（LUFS）を測り、楽器の音A に合わせるために足す量（dB）を決めた
 //   測った値（強さ 100 のとき。楽器の音A → 楽器の音B）
 //     バイオリン −21.5 → −30.4、ビオラ −22.4 → −28.9、チェロ −23.3 → −25.5、ピチカート −22.5 → −34.4
+//   （ステップ18-3）コントラバス −29.7 → −29.4（鳴る高さ ミ1〜ミ3 の8つの音で測った。B のほうが少しだけ大きい）
 // 楽器の音A は合わせる基準なので、足す量は 0
 // ----------------------------------------------------------
 const KIT_GAIN_DB = {
   FluidR3_GM: {},
-  MusyngKite: { violin: 8.9, viola: 6.5, cello: 2.2, pizz: 11.9 },
+  MusyngKite: { violin: 8.9, viola: 6.5, cello: 2.2, contrabass: -0.3, pizz: 11.9 },
+};
+
+// ----------------------------------------------------------
+// 録音が無音になっている高さ（ステップ18-3）
+// 楽器の音A（FluidR3_GM）のコントラバスの録音は、鳴る高さで シ♭3（MIDI の番号 58）から上が無音になっている
+// （コントラバスで書いた シ♭4 から上。高い音を書いたときに何も鳴らなくなるので、その高さはチェロの録音で鳴らす）
+//   { 録音のセットの名前: { 楽器: 無音になる最初の MIDI の番号 } }
+// ----------------------------------------------------------
+const SILENT_FROM = {
+  FluidR3_GM: { contrabass: 58 },
 };
 
 // smplr の Soundfont が、もともと音量にかけている倍率（何も指定しないと 5 倍）
@@ -121,6 +138,61 @@ function currentInstruments() {
 }
 
 // ----------------------------------------------------------
+// 関数：samplerFor
+// 楽器の名前と高さから、鳴らすのに使う録音を選ぶ（ステップ18-3）
+//   instruments … 読み込んだ楽器の音（currentInstruments の結果）
+//   instrument  … 楽器（"violin" など）
+//   pizz        … true ならピチカートの録音
+//   midi        … 鳴らす高さ（MIDI の番号。鳴る高さに直したもの）
+// ・録音が無音になっている高さ（SILENT_FROM）は、チェロの録音で鳴らす
+// ・読み込んでいない楽器（ふつうはない）も、チェロの録音で鳴らす（止まらないようにするため）
+// ----------------------------------------------------------
+function samplerFor(instruments, instrument, pizz, midi) {
+  if (pizz) return instruments.pizz;
+  const silentFrom = SILENT_FROM[KITS[soundType]]?.[instrument];
+  if (silentFrom !== undefined && midi >= silentFrom) return instruments.cello;
+  return instruments[instrument] ?? instruments.cello;
+}
+
+// ----------------------------------------------------------
+// 関数：shiftOctave
+// 音の高さを、決めたオクターブの数だけずらす（ステップ18-3）
+//   pitch   … 音の高さ { step, alter, octave }（null のときは null のまま返す）
+//   octaves … ずらすオクターブの数（−1 なら1オクターブ下）
+// ----------------------------------------------------------
+function shiftOctave(pitch, octaves) {
+  if (!pitch || octaves === 0) return pitch;
+  return { ...pitch, octave: pitch.octave + octaves };
+}
+
+// ----------------------------------------------------------
+// 関数：soundOctavesOf
+// 楽器の、鳴る高さが書いた高さから何オクターブずれるかを返す（ステップ18-3）
+// 例："contrabass" → −1（1オクターブ下で鳴る）、"violin" → 0
+// ----------------------------------------------------------
+function soundOctavesOf(instrument) {
+  return INSTRUMENTS[instrument]?.soundOctaves ?? 0;
+}
+
+// ----------------------------------------------------------
+// 関数：soundingEvent
+// 鳴らす音の高さを、書いた高さから「鳴る高さ」に直す（ステップ18-3）
+// コントラバスは1オクターブ下げる。ほかの楽器は、渡されたものをそのまま返す
+//   event … 鳴らす音（playback.js の buildEvents で作ったもの）
+// 直すのは、高さを持っている所（音の高さ・グリッサンドの行き先）
+// （トリル・トレモロなどのかけらは、buildEvents の中ですでに1つずつの音になっている）
+// ----------------------------------------------------------
+function soundingEvent(event) {
+  const octaves = soundOctavesOf(event.instrument);
+  if (octaves === 0) return event;
+  return {
+    ...event,
+    pitch: shiftOctave(event.pitch, octaves),
+    glissTo: shiftOctave(event.glissTo, octaves),
+  };
+}
+
+// ----------------------------------------------------------
 // 関数：getAudioContext
 // 音を鳴らす仕組みを用意する（まだなければ作る）
 // ----------------------------------------------------------
@@ -161,7 +233,7 @@ function loopDataUrl(name) {
 
 // ----------------------------------------------------------
 // 関数：loadInstruments
-// バイオリン・ビオラ・チェロと、ピチカートの録音した音を、インターネットから読み込む
+// バイオリン・ビオラ・チェロ・コントラバスと、ピチカートの録音した音を、インターネットから読み込む
 //   type … どちらの楽器の音を読み込むか（"instrument"：楽器の音A、"instrumentB"：楽器の音B）（ステップ12-2）
 // （同じ type で2回目からは同じ Promise を返す。読み込みは1回だけ）
 // 戻り値：読み込みが終わったら完了する Promise
@@ -177,7 +249,7 @@ export function loadInstruments(type = "instrument") {
     const { Soundfont } = await import("smplr");
     const ctx = getAudioContext();
 
-    // 3つの楽器をいっしょに読み込み始める
+    // 4つの楽器をいっしょに読み込み始める（ステップ18-3：コントラバスを追加）
     const loaded = {};
     const waits = Object.entries(SOUNDFONT_NAMES).map(([key, name]) => {
       // 読み込みの設定
@@ -324,13 +396,15 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluc
 // ----------------------------------------------------------
 // 関数：playPitch
 // 音を1つ、短く鳴らす（鍵盤を押したとき・高さを変えたときなど）
-//   pitch      … 音の高さ { step, alter, octave }
-//   instrument … 楽器（"violin"・"viola"・"cello"。省略したらバイオリン）
+//   written    … 楽譜に書いた音の高さ { step, alter, octave }（ステップ18-3：鳴る高さには、この中で直す）
+//   instrument … 楽器（"violin"・"viola"・"cello"・"contrabass"。省略したらバイオリン）
 //   duration   … 鳴らす長さ（秒）
 //   pizz       … true ならピチカートで鳴らす（ステップ6-3c）
 // 録音した音の読み込みが終わっていなければ、電子音で鳴らす
 // ----------------------------------------------------------
-export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = false) {
+export function playPitch(written, instrument = "violin", duration = 0.5, pizz = false) {
+  // 書いた高さを、鳴る高さに直す（コントラバスは1オクターブ下げる）（ステップ18-3）
+  const pitch = shiftOctave(written, soundOctavesOf(instrument));
   // 今選んでいる楽器の音（電子音のとき・読み込みが終わっていないときは null）（ステップ12-2）
   const instruments = currentInstruments();
   // 電子音を選んでいるとき・読み込みが終わっていないときは、電子音で鳴らす
@@ -339,8 +413,8 @@ export function playPitch(pitch, instrument = "violin", duration = 0.5, pizz = f
     return;
   }
   const ctx = resumeAudio();
-  // ピチカートなら、ピチカートの録音で鳴らす
-  const sampler = pizz ? instruments.pizz : instruments[instrument];
+  // ピチカートなら、ピチカートの録音で鳴らす（録音が無音の高さはチェロの録音で）（ステップ18-3）
+  const sampler = samplerFor(instruments, instrument, pizz, pitchToMidi(pitch));
   sampler.start({
     note: pitchToMidi(pitch),
     velocity: KEY_VELOCITY,
@@ -427,7 +501,9 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
   // グリッサンドの音（ステップ11-5b）
   // ・電子音：分けずに1つの音のまま鳴らし、playSynth の中で高さをなめらかに変える
   // ・楽器の音：録音の音は鳴らしたあとで高さを変えられないので、半音ずつのかけらに分ける
-  const list = soundType === "synth" ? events : events.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
+  // （ステップ18-3：先に、書いた高さを鳴る高さに直す。コントラバスは1オクターブ下げる）
+  const sounding = events.map(soundingEvent);
+  const list = soundType === "synth" ? sounding : sounding.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
 
   list.forEach((event) => {
     const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
@@ -455,7 +531,8 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
     }
 
     // ピチカートなら、ピチカートの録音で鳴らす（ステップ6-3c）
-    const sampler = event.pizz ? instruments.pizz : instruments[event.instrument];
+    // 録音が無音になっている高さは、チェロの録音で鳴らす（ステップ18-3）
+    const sampler = samplerFor(instruments, event.instrument, event.pizz, pitchToMidi(event.pitch));
     const stop = sampler.start({
       note: pitchToMidi(event.pitch),
       velocity: event.velocity,

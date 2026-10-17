@@ -122,6 +122,13 @@ export const INSTRUMENTS = {
   violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン", strings: ["G", "D", "A", "E"], openOctaves: [3, 4, 4, 5] }, // バイオリン（ド4〜ド7）
   viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ", strings: ["C", "G", "D", "A"], openOctaves: [3, 3, 4, 4] }, // ビオラ（ド3〜ド6）
   cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ", strings: ["C", "G", "D", "A"], openOctaves: [2, 2, 3, 3] }, // チェロ（ド2〜ド5）
+  // コントラバス（ステップ18-3a）
+  //   楽譜には、鳴る高さより1オクターブ上に書く（ふつうのコントラバスの楽譜と同じ）
+  //   データも「書いた高さ」で持つので、弦の開放弦（openOctaves）も書いた高さで入れる
+  //   例：いちばん低い E 線は、鳴る高さはミ1（E1）、楽譜に書く高さはミ2（E2）
+  //   soundOctaves … 鳴る高さが、書いた高さから何オクターブずれるか（−1 ＝ 1オクターブ下で鳴る）
+  //                  （再生（ステップ18-3b）と MusicXML（ステップ18-3c）で使う。ほかの楽器は書いていない ＝ 0）
+  contrabass: { clef: "bass", keyboardOctave: 2, name: "Contrabass", abbreviation: "Cb.", label: "コントラバス", strings: ["E", "A", "D", "G"], openOctaves: [2, 2, 3, 3], soundOctaves: -1 }, // コントラバス（書いた高さでド2〜ド5）
 };
 
 // ----------------------------------------------------------
