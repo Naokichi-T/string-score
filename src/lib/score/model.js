@@ -32,7 +32,10 @@
 //             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'quarter', dots: 0, tie: false },
 //             // ハーモニクスで軽く触れる玉（ひし形の玉）は、その高さに diamond: true を付ける（ステップ14-5a）
 //             // 例：人工ハーモニクス（ラ4を押さえて、4度上のレ5に軽く触れる）
-//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'D', alter: 0, octave: 5, diamond: true }], duration: 'quarter', dots: 0, tie: false }
+//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'D', alter: 0, octave: 5, diamond: true }], duration: 'quarter', dots: 0, tie: false },
+//             // 2つの音を行き来するトレモロ（2音トレモロ）は、2音の重音に alternate: true と tremolo（連桁の本数）を付ける（ステップ14-6a）
+//             // 例：2分音符の長さの間、ド5とミ5を32分音符の細かさで交互に弾く（下の音から）
+//             { pitch: { step: 'C', alter: 0, octave: 5 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'half', dots: 0, tie: false, tremolo: 3, alternate: true }
 //           ]
 //         }
 //       ]
@@ -175,6 +178,42 @@ export function notePitches(note) {
 // ----------------------------------------------------------
 export function hasDiamond(note) {
   return notePitches(note).some((pitch) => pitch.diamond);
+}
+
+// 2音トレモロにできる長さ（全・2分・4分音符。付点も可）（ステップ14-6a）
+// （8分音符より短いと、連桁の1本目を符尾につなぐ別の書き方になるので、このアプリでは使わない）
+export const ALTERNATE_DURATIONS = ["whole", "half", "quarter"];
+
+// ----------------------------------------------------------
+// 関数：canAlternate
+// 音符を、2つの音を行き来するトレモロ（2音トレモロ）にできるか調べる（ステップ14-6a）
+// できるのは、次のことが全部そろっているとき
+//   ・2音の重音（下の音と上の音を行き来する）
+//   ・長さが全・2分・4分音符（付点も可）
+//   ・連符の中の音ではない
+//   ・ひし形の玉（ハーモニクス）がない
+//   note … 音符のデータ
+// 戻り値：true / false
+// ----------------------------------------------------------
+export function canAlternate(note) {
+  if (!note || note.rest) return false;
+  if (!note.chord || note.chord.length !== 1) return false;
+  if (!ALTERNATE_DURATIONS.includes(note.duration)) return false;
+  if (note.tuplet) return false;
+  if (hasDiamond(note)) return false;
+  return true;
+}
+
+// ----------------------------------------------------------
+// 関数：isAlternate
+// 音符が、2つの音を行き来するトレモロ（2音トレモロ）として扱えるか調べる（ステップ14-6a）
+// 印 alternate と、連桁の本数 tremolo が付いていて、canAlternate の条件もそろっているとき true
+// （表示・再生・書き出しは、印ではなくこの関数で決める）
+//   note … 音符のデータ
+// 戻り値：true / false
+// ----------------------------------------------------------
+export function isAlternate(note) {
+  return !!note && !!note.alternate && !!note.tremolo && canAlternate(note);
 }
 
 // ----------------------------------------------------------

@@ -5,6 +5,7 @@
   // ボタンを押すと記号が付き、もう一度押すと外れる
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
+  // （ステップ14-6a：トレモロの斜線のボタンの右に、［2音トレモロ］のボタンを追加）
   // ==========================================================
   import {
     BOWINGS,
@@ -21,8 +22,9 @@
     ARPEGGIO,
     ARTIFICIAL_HARMONIC,
     DIAMOND_HEAD,
+    ALTERNATE_TREMOLO,
   } from "#lib/score/symbols.js";
-  import { notePitches, hasDiamond } from "#lib/score/model.js";
+  import { notePitches, hasDiamond, canAlternate, isAlternate } from "#lib/score/model.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -46,6 +48,10 @@
 
   // 選んでいる玉が、ひし形か（［ひし形］のボタンを青くする）（ステップ14-5a）
   let headIsDiamond = $derived(!!note && !!notePitches(note)[head]?.diamond);
+
+  // 選んでいる音符が2音トレモロか・2音トレモロにできるか（ステップ14-6a）
+  let alternateOn = $derived(!!note && isAlternate(note));
+  let alternateOk = $derived(!!note && canAlternate(note));
 </script>
 
 <div class="symbol-tools">
@@ -138,6 +144,26 @@
         <span class="icon tremolo">{tremolo.icon}</span>
       </button>
     {/each}
+    <!-- 2音トレモロ（2音の重音で、全・2分・4分音符のときに押せる。2音トレモロなら、ふつうの重音に戻すために押せる）（ステップ14-6a） -->
+    <button
+      class="tool"
+      class:on={alternateOn}
+      disabled={disabled || (!alternateOn && !alternateOk)}
+      onclick={() => onsymbol("alternate")}
+      title={alternateOn || alternateOk ? ALTERNATE_TREMOLO.label : `${ALTERNATE_TREMOLO.label}（2音の重音で、全・2分・4分音符のときだけ付けられます。連符・ひし形の玉のある音符には付けられません）`}
+      aria-label={ALTERNATE_TREMOLO.label}
+    >
+      <!-- 2つの白い玉と符尾のあいだに、離れた連桁を3本描く（SVG） -->
+      <svg class="alternate-icon" width="30" height="30" viewBox="0 0 30 30">
+        <ellipse cx="6" cy="24" rx="3.6" ry="2.6" transform="rotate(-20 6 24)" fill="none" stroke="currentColor" stroke-width="1.4" />
+        <line x1="9.3" y1="23" x2="9.3" y2="3" stroke="currentColor" stroke-width="1.2" />
+        <ellipse cx="21" cy="19" rx="3.6" ry="2.6" transform="rotate(-20 21 19)" fill="none" stroke="currentColor" stroke-width="1.4" />
+        <line x1="24.3" y1="18" x2="24.3" y2="1" stroke="currentColor" stroke-width="1.2" />
+        <path d="M11.5 5 L22 3 L22 5.2 L11.5 7.2 Z" fill="currentColor" />
+        <path d="M11.5 9 L22 7 L22 9.2 L11.5 11.2 Z" fill="currentColor" />
+        <path d="M11.5 13 L22 11 L22 13.2 L11.5 15.2 Z" fill="currentColor" />
+      </svg>
+    </button>
   </div>
 
   <!-- ブレス・カエスーラ（ステップ11-1c） -->
@@ -305,8 +331,10 @@
   }
   /* アルペジオの波線（SVG）。押したときの操作は、下のボタンに通す（ステップ14-4a） */
   /* 人工ハーモニクスの記号（SVG）も同じ（ステップ14-5a） */
+  /* 2音トレモロの記号（SVG）も同じ（ステップ14-6a） */
   .arpeggio-icon,
-  .harmonic-icon {
+  .harmonic-icon,
+  .alternate-icon {
     pointer-events: none;
   }
   .icon.grace {

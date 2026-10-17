@@ -6,6 +6,7 @@
 // （ステップ6-3b：フェルマータ。その音を2倍にのばし、ほかのパートもその間は待つ）
 // （ステップ6-3c：pizz.／arco。pizz. から arco までの音に印を付ける（ピチカートの音で鳴らすため））
 // （ステップ6-3d：松葉（＜ ＞）。始まりから終わりまで、だんだん強く・弱くする）
+// （ステップ14-6a：2音トレモロ。下の音と上の音を、連桁の本数の細かさで交互に鳴らす）
 //
 // 【鳴らす音の一覧の1つ分】
 // {
@@ -23,7 +24,7 @@
 // }
 // ==========================================================
 
-import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS } from "./model.js";
+import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS, isAlternate } from "./model.js";
 import { HARMONIC_SOUNDS } from "./symbols.js";
 import { keyAlters } from "./accidentals.js";
 import { mixerOf, isAudible } from "./mixer.js";
@@ -233,7 +234,16 @@ function ornamentPieces(event) {
 
   // かけらの音の高さと長さの並び { pitch, length } を作る
   const parts = [];
-  if (event.tremoloStep) {
+  if (event.tremoloStep && event.alternatePitch) {
+    // 2音トレモロ：下の音と上の音を、決まった細かさで交互に鳴らす（下の音から）（ステップ14-6a）
+    // かけらの数：楽譜の長さ（音を出す長さより少し長い）で数える（行き来するので、少なくとも2つ）
+    // （音を出す長さで数えると、スタッカートなどで短くなったぶん、数が1つ減って「上の音」で終わらなくなるため）
+    const count = Math.max(2, Math.round(Math.max(event.ticks, total) / event.tremoloStep));
+    const step = total / count; // 1つ分の長さ（音を出す長さを、ちょうど等分する）
+    for (let k = 0; k < count; k++) {
+      parts.push({ pitch: k % 2 === 0 ? event.pitch : event.alternatePitch, length: step });
+    }
+  } else if (event.tremoloStep) {
     // トレモロ：同じ音を、決まった細かさで刻む（ステップ11-4）
     const count = Math.max(1, Math.round(total / event.tremoloStep)); // 刻む回数
     for (let k = 0; k < count; k++) {
@@ -1000,7 +1010,11 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         const pitches = soundingPitches(note, part.instrument); // ハーモニクスなら、聞こえる音（ステップ14-5a）
         // 弦楽器の弾き方で鳴らすか：アルペジオがなく、3音以上の重音で、はじく音・トレモロでないとき（ステップ14-4a）
         const broken = !note.arpeggio && pitches.length >= 3 && !plucked && !note.tremolo;
+        // 2音トレモロ：下の音の鳴らす音1つだけを作り、上の音は alternatePitch に入れて交互に鳴らす（ステップ14-6a）
+        // （2音トレモロにはタイを付けない決まりなので、タイの続きにはならない）
+        const alternate = isAlternate(note);
         pitches.forEach((pitch, k) => {
+          if (alternate && k > 0) return; // 上の音は、下の音の鳴らす音の中で鳴らす
           const midi = pitchToMidi(pitch);
           const tiedEvent = tiedEvents.get(midi); // 前の音から、同じ高さでタイがつながっているか
           if (tiedEvent) {
@@ -1032,6 +1046,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
               upper: note.ornament ? neighborPitch(score, part, i, j, 1) : null, // 装飾で行き来する1つ上の音（ステップ11-3a）
               lower: note.ornament ? neighborPitch(score, part, i, j, -1) : null, // 装飾で行き来する1つ下の音（ステップ11-3b）
               tremoloStep: note.tremolo ? tremoloStep(note) : null, // トレモロで刻む1回分の長さ（ステップ11-4）
+              alternatePitch: alternate ? pitches[1] : null, // 2音トレモロで、交互に鳴らす上の音（ステップ14-6a）
               glissTo: glissTo, // グリッサンドですべって行く先の高さ（すべらないときは null）（ステップ11-5b）
               glissLastTicks: length, // グリッサンドの音の楽譜の長さ（この後半ですべる）（ステップ11-5b）
               rollIndex: note.arpeggio && note.chord ? k : 0, // アルペジオで、何音分ずらして鳴らし始めるか（あとで秒に合わせてずらす）（ステップ14-4a）
@@ -1067,6 +1082,7 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
                 upper: null,
                 lower: null,
                 tremoloStep: null,
+                alternatePitch: null,
                 glissTo: null,
               });
               // 主音は、借りたぶんだけ遅く始めて、短くする

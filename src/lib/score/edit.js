@@ -29,8 +29,10 @@ import {
   samePitch,
   MAX_CHORD_NOTES,
   hasDiamond,
+  canAlternate,
+  isAlternate,
 } from "./model.js";
-import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
+import { ARTICULATIONS, STRING_MARKS, TECHNIQUES, ALTERNATE_TREMOLO } from "./symbols.js";
 import { positionsInRange, selectedHead } from "./selection.js";
 import { keyAlters } from "./accidentals.js";
 
@@ -364,11 +366,14 @@ function findNext(score, selection) {
 // （ステップ14-1：重音のとき）
 //   ・次の音に、同じ高さの音が1つでもあればつなぐ（つながるのは、同じ高さの音どうしだけ）
 //   ・次が休符なら、重音のまま同じ高さにする
+// （ステップ14-6a：2音トレモロの音には、タイを付けない。前の音から2音トレモロへのタイも付けない）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
 // ----------------------------------------------------------
 export function toggleTie(score, selection) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest) return { score: score, error: "休符にはタイを付けられません" };
+  // 2音トレモロの音からは、つなげない（付いているタイを外すのは下でできる）（ステップ14-6a）
+  if (!note.tie && isAlternate(note)) return { score: score, error: "2音トレモロの音には、タイを付けられません" };
 
   // すでにタイが付いていれば外す
   if (note.tie) {
@@ -384,6 +389,9 @@ export function toggleTie(score, selection) {
   if (!next) return { score: score, error: "最後の音なので、つなぐ相手がありません" };
 
   const nextNote = score.parts[next.part].measures[next.measure].notes[next.note];
+
+  // 次が2音トレモロの音なら、つなげない（ステップ14-6a）
+  if (isAlternate(nextNote)) return { score: score, error: "2音トレモロの音には、タイでつなげません" };
 
   if (nextNote.rest) {
     // 次の休符を同じ高さの音にして、タイでつなぐ
@@ -606,6 +614,7 @@ export function canGlissando(score, selection) {
 //            'arpeggio'（アルペジオ。重音だけ。value は使わない）（ステップ14-4a）
 //            'artificialHarmonic'（人工ハーモニクス。1音の音符の4度上にひし形の玉を足す・ひし形を外す。value は使わない）（ステップ14-5a）
 //            'diamond'（選んでいる玉を、ひし形にする・戻す。value は使わない）（ステップ14-5a）
+//            'alternate'（2音トレモロ。2音の重音を、下の音と上の音で交互に弾く形にする・戻す。value は使わない）（ステップ14-6a）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
@@ -676,10 +685,39 @@ export function toggleNoteSymbol(score, selection, kind, value) {
     });
   }
 
+  // 2音トレモロ（kind が 'alternate'）（ステップ14-6a）
+  //   2音トレモロなら：ふつうの重音に戻す（印 alternate と、連桁の本数 tremolo を外す）
+  //   そうでなければ：canAlternate でできるときだけ、2音トレモロにする
+  //     ・連桁の本数（tremolo）がなければ、ALTERNATE_TREMOLO.defaultCount 本にする
+  //     ・いっしょに使えないもの（アルペジオ・この音のタイ・前の音からこの音へのタイ）は外す
+  if (kind === "alternate") {
+    if (isAlternate(note)) {
+      return updateNote(score, selection, (n) => {
+        delete n.alternate;
+        delete n.tremolo;
+      });
+    }
+    if (!canAlternate(note)) return score;
+    const newScore = updateNote(score, selection, (n) => {
+      n.alternate = true;
+      if (!n.tremolo) n.tremolo = ALTERNATE_TREMOLO.defaultCount;
+      delete n.ornament; // 念のため（重音には装飾は付かないが、トレモロとはどちらか1つの決まり）
+      delete n.arpeggio;
+      n.tie = false;
+    });
+    const prev = findPrevious(newScore, selection);
+    if (prev) {
+      const prevNote = newScore.parts[prev.part].measures[prev.measure].notes[prev.note];
+      if (prevNote.tie) prevNote.tie = false;
+    }
+    return newScore;
+  }
+
   // アルペジオ（kind が 'arpeggio'）：付いていれば外す。付けるのは重音のときだけ（ステップ14-4a）
   // （ひし形の玉がある音符には付けない（ステップ14-5a））
+  // （2音トレモロの音符には付けない（ステップ14-6a））
   if (kind === "arpeggio") {
-    if (!note.arpeggio && (!note.chord || hasDiamond(note))) return score;
+    if (!note.arpeggio && (!note.chord || hasDiamond(note) || isAlternate(note))) return score;
     return updateNote(score, selection, (n) => {
       if (n.arpeggio) {
         delete n.arpeggio;
@@ -1734,6 +1772,50 @@ export function cleanSpanners(part) {
     });
     if (open) delete open[field]; // 最後まで「ここまで」が来なかった「ここから」は外す
   });
+}
+
+// ----------------------------------------------------------
+// 関数：cleanAlternates
+// 2音トレモロの印（alternate）を、決まりどおりに直す（ステップ14-6a）
+// 楽譜を変えたあと（+page.svelte の commit・MusicXML の読み込み）に、毎回呼ぶ
+//   ・2音トレモロにできなくなった音符（3音になった・1音になった・8分音符にした・ひし形にした・
+//     連桁の本数を外した など）からは、印 alternate を外す（ふつうの重音・音符に戻る）
+//   ・2音トレモロの音符のタイと、前の音から2音トレモロへのタイを外す
+// 直すものがなければ、渡された楽譜データをそのまま返す（「元に戻す」の履歴を増やさないため）
+//   score … 楽譜データ
+// 戻り値：楽譜データ（直したときは、新しく作ったもの）
+// ----------------------------------------------------------
+export function cleanAlternates(score) {
+  // 直すものがあるか、先に調べる
+  const needsFix = score.parts.some((part) => {
+    let prev = null; // 1つ前の音符・休符（小節をまたいでもよい）
+    return part.measures.some((measure) =>
+      measure.notes.some((note) => {
+        const broken = note.alternate && !isAlternate(note); // 使えなくなった印
+        const tied = isAlternate(note) && (note.tie || (prev && !prev.rest && prev.tie)); // つながったタイ
+        prev = note;
+        return broken || tied;
+      }),
+    );
+  });
+  if (!needsFix) return score;
+
+  // 新しく作って直す
+  const newScore = cloneScore(score);
+  newScore.parts.forEach((part) => {
+    let prev = null;
+    part.measures.forEach((measure) => {
+      measure.notes.forEach((note) => {
+        if (note.alternate && !isAlternate(note)) delete note.alternate;
+        if (isAlternate(note)) {
+          if (note.tie) note.tie = false;
+          if (prev && !prev.rest && prev.tie) prev.tie = false;
+        }
+        prev = note;
+      });
+    });
+  });
+  return newScore;
 }
 
 // ----------------------------------------------------------

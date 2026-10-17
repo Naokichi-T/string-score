@@ -81,6 +81,7 @@
     transposeChordHead,
     setChordHeadAccidental,
     removeChordHead,
+    cleanAlternates,
   } from "#lib/score/edit.js";
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
@@ -620,10 +621,13 @@
   // 変える前の状態を履歴に残してから、新しい楽譜データと選択中の場所に入れ替える
   //   newScore     … 新しい楽譜データ
   //   newSelection … 新しい選択中の場所（省略したら今のまま）
+  // （ステップ14-6a：2音トレモロにできなくなった音符の印などを、ここでまとめて直す（cleanAlternates））
   // ----------------------------------------------------------
   function commit(newScore, newSelection = selection) {
     // 何も変わっていなければ、履歴に残さない
     if (newScore === score) return;
+    // 2音トレモロの印を、決まりどおりに直す（3音にした・8分音符にしたなど。直すものがなければそのまま）（ステップ14-6a）
+    newScore = cleanAlternates(newScore);
     // 再生中に楽譜を変えたら、再生を止める（鳴っている音と楽譜がずれないようにするため）
     handleStop();
     history = record(history, { score: score, selection: selection });

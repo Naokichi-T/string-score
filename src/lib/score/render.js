@@ -13,6 +13,7 @@
 //   render/spacing.js  … パートの間・段の間を中身に合わせて決める（パートの間の自動調整）
 //   render/beatLines.js … 拍の線を描く（ステップ12-7）
 //   render/widths.js   … 小節ごとの、音符を並べるのに要る幅を決める（ステップ13-2）
+//   render/alternate.js … 2音トレモロの2つ目の音符と連桁を描く（ステップ14-6a）
 // ==========================================================
 
 import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
@@ -28,6 +29,7 @@ import { isInRange } from "./selection.js";
 import { createTuplets, createBeams, placeTuplets } from "./render/tuplets.js";
 import { drawBeatLines } from "./render/beatLines.js";
 import { measureNoteWidths } from "./render/widths.js";
+import { setAlternateStyle, drawAlternate, partnerOf, restoreAlternateStem } from "./render/alternate.js";
 
 // ----------------------------------------------------------
 // 見た目の大きさの設定（単位はピクセル）
@@ -219,6 +221,13 @@ export function renderScore(VF, container, score, width, selection = null, range
   allNotes.forEach((notesOfPart) => {
     notesOfPart.forEach((entry) => {
       const box = entry.staveNote.getBoundingBox(); // 音符を囲む四角
+      let headYs = entry.staveNote.getYs(); // 玉ごとの高さ（ステップ14-2）
+      // 2音トレモロ：2つ目の音符（上の音）も囲む四角に入れて、玉の高さも足す（ステップ14-6a）
+      const partner = partnerOf(entry.staveNote);
+      if (partner && partner.isRendered()) {
+        box.mergeWith(partner.getBoundingBox());
+        headYs = [...headYs, ...partner.getYs()];
+      }
       hitBoxes.push({
         part: entry.part,
         measure: entry.measure,
@@ -230,7 +239,7 @@ export function renderScore(VF, container, score, width, selection = null, range
         // この音符がある段の上端と下端（はみ出した中身も含める。spacing.js で決めたもの）
         lineTop: positions.lineTops[entry.line],
         lineBottom: positions.lineBottoms[entry.line],
-        headYs: entry.staveNote.getYs(), // 玉ごとの高さ（ステップ14-2）
+        headYs: headYs,
       });
     });
   });
@@ -368,21 +377,29 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
           // 調号は前打音の臨時記号に使う（ステップ11-8a）。小節まるごとの休符なら全休符で描く（ステップ13-3）
           const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes));
           // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
+          // （2音トレモロは、2つ目の音符と連桁も同じ色にする（setAlternateStyle）（ステップ14-6a））
+          const playingStyle = { fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR };
+          const selectedStyle = { fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR };
+          const rangeStyle = { fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR };
           if (playingKeys.has(`${p}-${i}-${j}`)) {
-            staveNote.setStyle({ fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR });
+            setAlternateStyle(staveNote, playingStyle);
           } else if (selection && selection.part === p && selection.measure === i && selection.note === j) {
             const headCount = note.rest ? 1 : 1 + (note.chord?.length ?? 0);
-            if (headCount > 1) {
+            // 選んでいる玉の番号は selection.js の selectedHead と同じ決め方。合わない番号ならいちばん上
+            const head = Number.isInteger(selection.head) && selection.head >= 0 && selection.head < headCount ? selection.head : headCount - 1;
+            if (partnerOf(staveNote)) {
+              // 2音トレモロ：選んでいる玉の音符を濃い青、もう1つの音符と連桁を明るい青にする（ステップ14-6a）
+              if (head === 0) setAlternateStyle(staveNote, selectedStyle, rangeStyle, RANGE_COLOR);
+              else setAlternateStyle(staveNote, rangeStyle, selectedStyle, RANGE_COLOR);
+            } else if (headCount > 1) {
               // 重音：全体を明るい青にして、選んでいる玉だけ濃い青にする（ステップ14-2）
-              // （選んでいる玉の番号は selection.js の selectedHead と同じ決め方。合わない番号ならいちばん上）
-              const head = Number.isInteger(selection.head) && selection.head >= 0 && selection.head < headCount ? selection.head : headCount - 1;
-              staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
-              staveNote.setKeyStyle(head, { fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+              staveNote.setStyle(rangeStyle);
+              staveNote.setKeyStyle(head, selectedStyle);
             } else {
-              staveNote.setStyle({ fillStyle: SELECTED_COLOR, strokeStyle: SELECTED_COLOR });
+              staveNote.setStyle(selectedStyle);
             }
           } else if (isInRange(range, p, i, j)) {
-            staveNote.setStyle({ fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR });
+            setAlternateStyle(staveNote, rangeStyle);
           }
           // 何パート目・何小節目・何番目の音かも一緒に覚えておく（当たり判定に使う）
           allNotes[p].push({ staveNote: staveNote, data: note, line: l, part: p, measure: i, note: j });
@@ -401,6 +418,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて作る（連符の中は切らずにつなぐ）（ステップ10-2）
         const beams = createBeams(VF, measure.notes, notes, state.time);
         beamsList.push(beams);
+        // 2音トレモロの符尾の向きを、連桁を作る前の向きに戻す（連桁を作る処理が決め直してしまうため）（ステップ14-6a）
+        notes.forEach((staveNote) => restoreAlternateStem(staveNote));
 
         // 連符の数字を置く側と括弧を決める（連桁ができてから決める）（ステップ10-2）
         placeTuplets(VF, tuplets);
@@ -428,6 +447,16 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 
       // 音符と連桁と連符の数字を描く
       voices.forEach((voice, p) => voice.draw(context, staves[p]));
+      // 2音トレモロの2つ目の音符と、間の連桁を描く（1つ目の音符を描いたあとでないと、位置が決まらない）（ステップ14-6a）
+      voices.forEach((voice, p) => {
+        const tickables = voice.getTickables();
+        tickables.forEach((tickable, j) => {
+          if (!partnerOf(tickable)) return;
+          // 次の音符の位置（小節の最後の音符なら、音符を並べる所の右端）
+          const nextX = j + 1 < tickables.length ? tickables[j + 1].getAbsoluteX() : staves[p].getNoteEndX() - NOTE_END_PADDING;
+          drawAlternate(VF, context, tickable, staves[p], nextX);
+        });
+      });
       beamsList.forEach((beams) => beams.forEach((beam) => beam.setContext(context).draw()));
       tupletsList.forEach((tuplets) => tuplets.forEach((entry) => entry.tuplet.setContext(context).draw()));
 
