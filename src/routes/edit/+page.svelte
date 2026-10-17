@@ -30,7 +30,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches, hasDiamond } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches, hasDiamond, measureName, measureNumber, hasPickup } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
   import {
     canFit,
@@ -58,6 +58,7 @@
     insertMeasure,
     deleteMeasures,
     changeTime,
+    setPickup,
     changeKey,
     changeClef,
     clefAt,
@@ -316,9 +317,13 @@
 
   // 「再生」タブに出す、くり返す範囲の文字（例："3〜5小節目"）（ステップ12-5b）
   // 再生中はくり返している範囲、止まっているときは今選んでいる所から決めた範囲
+  // （ステップ15-1：アウフタクトがあるときは、アウフタクトを数えない番号にする。例："アウフタクト〜2小節目"）
   let repeatText = $derived.by(() => {
     const r = repeatRange ?? getRepeatRange();
-    return r.start === r.end ? `${r.start + 1}小節目` : `${r.start + 1}〜${r.end + 1}小節目`;
+    if (r.start === r.end) return measureName(score, r.start); // 1小節だけ（"3小節目"・"アウフタクト"）
+    // 始まりの小節：アウフタクトなら "アウフタクト"、それ以外は番号だけ
+    const startText = r.start === 0 && hasPickup(score) ? "アウフタクト" : String(measureNumber(score, r.start));
+    return `${startText}〜${measureNumber(score, r.end)}小節目`;
   });
 
   // ----------------------------------------------------------
@@ -1384,6 +1389,28 @@
     commit(result.score, newSelection);
   }
 
+  // 1小節目の拍子と、今のアウフタクトの拍の数（「小節」タブのアウフタクトの欄に出す）（ステップ15-1）
+  let pickup = $derived({ time: timeAt(score, 0), count: score.measures[0].pickup ?? 0 });
+
+  // ----------------------------------------------------------
+  // 関数：handlePickup
+  // 「小節」タブでアウフタクトの長さを選んだとき（ステップ15-1）
+  //   count … アウフタクトの拍の数（0 ならアウフタクトをやめる）
+  // どの小節を選んでいても、1小節目に効く
+  // 1小節目の前のほうに音があって短くできないときは、知らせて終わり（楽譜は変えない）
+  // 1小節目の中の音の数が変わるので、1小節目を選んでいたときは、その最初の音を選び直す
+  // ----------------------------------------------------------
+  function handlePickup(count) {
+    message = "";
+    const result = setPickup(score, count);
+    if (result.error) {
+      message = result.error;
+      return;
+    }
+    const newSelection = selection && selection.measure === 0 ? { part: selection.part, measure: 0, note: 0 } : selection;
+    commit(result.score, newSelection);
+  }
+
   // 選んでいる小節の調（「小節」タブの調の選ぶ欄に出す。何も選んでいないときは1小節目）
   let currentKey = $derived(keyAt(score, selection ? selection.measure : 0));
 
@@ -2057,6 +2084,8 @@
       onmeasure={handleMeasure}
       {currentTime}
       ontime={handleTime}
+      {pickup}
+      onpickup={handlePickup}
       {currentKey}
       {currentTempo}
       ontempo={handleTempoChange}

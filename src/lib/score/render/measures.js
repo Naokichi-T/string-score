@@ -4,7 +4,7 @@
 // 小節の頭に付ける記号（音部記号・調号・拍子記号）を扱う
 // ==========================================================
 
-import { CLEFS } from "../model.js";
+import { CLEFS, hasPickup, measureOffset } from "../model.js";
 import { timeToSignature, keyToVexKey } from "./helpers.js";
 
 // 2段目からの段の頭で、音部記号・調号と最初の音符の間に空けるすき間（ピクセル）
@@ -19,7 +19,13 @@ export const LINE_START_PADDING = 12;
 // こうしておくと、描くときに前の小節をさかのぼらなくてよい
 // 戻り値の例（小節ごと）：
 //   { time, key, prevKey, clefs: ['treble', ...],
-//     timeChanged, keyChanged, clefChanged: [false, ...] }
+//     timeChanged, keyChanged, clefChanged: [false, ...],
+//     voiceTime, offset }
+// （ステップ15-1：アウフタクトのために voiceTime と offset を足した）
+//   voiceTime … VexFlow の声部（Voice）に渡す長さ { beats, beatType }
+//               ふつうは拍子と同じ。アウフタクトの小節では、アウフタクトの拍の数（例：4/4 で1拍なら { beats: 1, beatType: 4 }）
+//   offset    … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（ティック。model.js の measureOffset）
+//               アウフタクトの小節だけ 0 より大きい（拍の線・連桁のつなぎ方を、拍子どおりの位置にそろえるのに使う）
 // ----------------------------------------------------------
 export function buildStates(score) {
   const states = [];
@@ -48,6 +54,10 @@ export function buildStates(score) {
       return changed;
     });
 
+    // 声部に渡す長さと、小節の頭の位置（ステップ15-1）
+    const isPickup = i === 0 && hasPickup(score);
+    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : time;
+
     states.push({
       time: time,
       key: key,
@@ -56,6 +66,8 @@ export function buildStates(score) {
       timeChanged: timeChanged,
       keyChanged: keyChanged,
       clefChanged: clefChanged,
+      voiceTime: voiceTime,
+      offset: isPickup ? measureOffset(score, i) : 0,
     });
   });
 

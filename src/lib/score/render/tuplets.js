@@ -54,6 +54,8 @@ export function createTuplets(VF, notes, staveNotes) {
 //   notes      … 小節の音のデータの並び
 //   staveNotes … その音から作った VexFlow の音符の並び（同じ順番）
 //   time       … その小節の拍子
+//   offset     … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（ティック。アウフタクトの小節だけ 0 より大きい）（ステップ15-1）
+//                 例：6/8 で8分音符4つ分のアウフタクト → 8分音符2つ分。連桁は「拍子どおりの小節の後ろの部分」として区切る
 // 【考え方】
 //   小節を「連符」と「連符でない所」に区切って、区切りごとに連桁を作る
 //     ・連符でない所 … 今までと同じように、拍子に合わせてつなぐ
@@ -61,7 +63,7 @@ export function createTuplets(VF, notes, staveNotes) {
 //                      4分音符以上の連符は、連桁がないので何もしない
 // 戻り値：VexFlow の連桁の配列
 // ----------------------------------------------------------
-export function createBeams(VF, notes, staveNotes, time) {
+export function createBeams(VF, notes, staveNotes, time, offset = 0) {
   // 音ごとの始まりの位置（小節の頭から何ティックか）と、小節の長さ
   const starts = [];
   let position = 0;
@@ -72,7 +74,10 @@ export function createBeams(VF, notes, staveNotes, time) {
   const measureLength = position;
 
   // 拍子に合わせた「区切りの位置」（例：4分の4拍子なら、4分音符ごと）
-  const gridPoints = beatGridPoints(VF, time, measureLength);
+  // アウフタクトの小節では、拍子どおりの1小節で区切りを作ってから、小節の頭の位置（offset）だけ前にずらす（ステップ15-1）
+  const gridPoints = beatGridPoints(VF, time, measureLength + offset)
+    .map((point) => point - offset)
+    .filter((point) => point > 0);
 
   // 小節を区切りに分ける（連符は1つずつ、連符でない所はひとまとまり）
   const groups = tupletGroups(notes);

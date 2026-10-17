@@ -16,7 +16,7 @@
 //   render/alternate.js … 2音トレモロの2つ目の音符と連桁を描く（ステップ14-6a）
 // ==========================================================
 
-import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
+import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, measureNumber, measureLength } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote } from "./render/notes.js";
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
@@ -149,7 +149,9 @@ export function renderScore(VF, container, score, width, selection = null, range
   // ----- 4. 改行の位置を決める -----
   const firstLeft = LEFT + NAME_WIDTH_FIRST; // 1段目の五線が始まる横の位置
   const otherLeft = LEFT + NAME_WIDTH_OTHER; // 2段目以降の五線が始まる横の位置
-  const lines = layoutLines(noteWidths, startWidths, middleWidths, totalWidth - firstLeft - LEFT, totalWidth - otherLeft - LEFT);
+  // （ステップ15-1：段を広げるときに使う、小節ごとの長さも渡す（アウフタクトの小節は短い長さ））
+  const lengths = score.measures.map((_, i) => measureLength(score, i));
+  const lines = layoutLines(noteWidths, startWidths, middleWidths, totalWidth - firstLeft - LEFT, totalWidth - otherLeft - LEFT, lengths);
 
   // タイトルか作曲者があるときだけ、上に場所を空ける（テンポの場所はいつも空ける）
   const hasHeader = !!(score.title || score.composer);
@@ -309,9 +311,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 
     // 2段目からは、段の頭の小節番号を書く（ステップ13-2）
     // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段と重ならないように間があく）
+    // （ステップ15-1：アウフタクトがあるときは、アウフタクトを数えない番号（measureNumber）にする）
     if (l > 0) {
       const topY = staveYs[l][0]; // いちばん上のパートの五線を置く高さ
-      drawMeasureNumber(VF, context, line.measures[0] + 1, otherLeft, topY);
+      drawMeasureNumber(VF, context, measureNumber(score, line.measures[0]), otherLeft, topY);
     }
 
     line.measures.forEach((i, m) => {
@@ -411,12 +414,14 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         tupletsList.push(tuplets);
 
         // 音符を1小節分まとめる「声部（Voice）」を作る
-        const voice = new VF.Voice({ numBeats: state.time.beats, beatValue: state.time.beatType });
+        // （ステップ15-1：アウフタクトの小節は、アウフタクトの長さ（state.voiceTime）で作る）
+        const voice = new VF.Voice({ numBeats: state.voiceTime.beats, beatValue: state.voiceTime.beatType });
         voice.addTickables(notes);
         voices.push(voice);
 
         // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて作る（連符の中は切らずにつなぐ）（ステップ10-2）
-        const beams = createBeams(VF, measure.notes, notes, state.time);
+        // （ステップ15-1：アウフタクトの小節は、拍子どおりの小節の後ろの部分として区切る（state.offset））
+        const beams = createBeams(VF, measure.notes, notes, state.time, state.offset);
         beamsList.push(beams);
         // 2音トレモロの符尾の向きを、連桁を作る前の向きに戻す（連桁を作る処理が決め直してしまうため）（ステップ14-6a）
         notes.forEach((staveNote) => restoreAlternateStem(staveNote));
@@ -475,6 +480,7 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
           voices,
           score.parts.map((part) => part.measures[i]),
           state.time,
+          state.offset, // アウフタクトの小節では、拍子どおりの拍の位置に線を引く（ステップ15-1）
         );
       }
 
@@ -596,7 +602,7 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 // ----------------------------------------------------------
 // 関数：drawMeasureNumber
 // 段の頭の小節番号を、いちばん上のパートの五線の左上に、小さな斜めの字で書く（ステップ13-2）
-//   number … 小節番号（1 から数えたもの）
+//   number … 小節番号（1 から数えたもの。アウフタクトがあるときは、アウフタクトを数えない番号）
 //   x      … 書き始める横の位置（段の五線の左端）
 //   staveY … いちばん上のパートの五線を置く高さ（Stave の y）
 // ----------------------------------------------------------

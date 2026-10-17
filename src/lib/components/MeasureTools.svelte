@@ -8,6 +8,7 @@
   // （ステップ5-5：音部記号の変更を追加）
   // （ステップ8-1b：拍子のボタンに、コモンタイム（C）・カットタイム（¢）を追加）
   // （ステップ11-6a：途中のテンポ変更を追加）
+  // （ステップ15-1：アウフタクトを追加）
   // ==========================================================
 
   // 親から受け取るもの
@@ -17,6 +18,8 @@
   //   currentTime … 選んでいる小節の拍子 { beats, beatType, symbol }（ボタンを青くするのに使う）
   //   ontime      … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子 { beats, beatType, symbol } を渡す）
   //                 symbol は C のとき "common"、¢ のとき "cut"。数字の拍子のときは付かない
+  //   pickup      … 1小節目の拍子と、今のアウフタクトの拍の数 { time, count }（count が 0 ならアウフタクトなし）（ステップ15-1）
+  //   onpickup    … アウフタクトの長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならアウフタクトをやめる）（ステップ15-1）
   //   currentKey  … 選んでいる小節の調（♯の数がプラス、♭の数がマイナス。選ぶ欄に出すのに使う）
   //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
   //   currentClef … 選んでいるパート・小節の音部記号（何も選んでいないときは null。ボタンを青くするのに使う）
@@ -35,6 +38,8 @@
     onmeasure = () => {},
     currentTime = { beats: 4, beatType: 4 },
     ontime = () => {},
+    pickup = { time: { beats: 4, beatType: 4 }, count: 0 },
+    onpickup = () => {},
     currentKey = 0,
     onkey = () => {},
     currentClef = null,
@@ -135,6 +140,26 @@
   let otherBeats = $state(5);
   let otherBeatType = $state(4);
 
+  // アウフタクトで選べる拍の数（1拍から「1小節の拍の数 − 1」拍まで）（ステップ15-1）
+  // 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]
+  let pickupCounts = $derived(Array.from({ length: Math.max(0, pickup.time.beats - 1) }, (_, k) => k + 1));
+
+  // 選ぶ欄に出す、拍の数の名前（例：4/4 で 1 → "4分音符1つ"、6/8 で 2 → "8分音符2つ"）（ステップ15-1）
+  function pickupLabel(count) {
+    return `${pickup.time.beatType}分音符${count}つ`;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：pickPickup
+  // アウフタクトの欄で長さを選んだとき：親に拍の数を渡す（ステップ15-1）
+  // 変えられなかったとき（前のほうに音があるときなど）は、欄の表示を今の長さに戻す
+  //   select … 選ぶ欄の要素
+  // ----------------------------------------------------------
+  function pickPickup(select) {
+    onpickup(Number(select.value));
+    select.value = String(pickup.count); // 変わったときは新しい長さ、変わらなかったときは前の長さになる
+  }
+
   // ----------------------------------------------------------
   // 関数：isCurrent
   // その拍子が、選んでいる小節の拍子と同じか調べる（同じならボタンを青くする）
@@ -209,6 +234,23 @@
       {/each}
     </select>
     <button onclick={() => ontime({ beats: otherBeats, beatType: otherBeatType })} title="選んだ数字の拍子に変える"> 変更 </button>
+  </div>
+
+  <!-- アウフタクト：選んだらすぐ変わる（どの小節を選んでいても、1小節目に効く）（ステップ15-1） -->
+  <div class="group">
+    <span class="label">アウフタクト</span>
+    <select
+      class="pickup"
+      value={pickup.count}
+      disabled={pickupCounts.length === 0}
+      onchange={(event) => pickPickup(event.currentTarget)}
+      title="1小節目を、拍子より短い小節（アウフタクト）にする。長さは、拍子の下の数字の音符がいくつ分かで選ぶ"
+    >
+      <option value={0}>なし</option>
+      {#each pickupCounts as count}
+        <option value={count}>{pickupLabel(count)}</option>
+      {/each}
+    </select>
   </div>
 
   <!-- 調：選んだらすぐ変わる（今の小節の調が選ばれた状態で出る） -->
@@ -392,6 +434,9 @@
     padding: 0 4px;
     border: 1px solid #ccc;
     border-radius: 4px;
+  }
+  select:disabled {
+    opacity: 0.35; /* 選べないときはうすく（ステップ15-1） */
   }
   /* テンポの入力欄（ステップ11-6a） */
   input {

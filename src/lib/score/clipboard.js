@@ -20,7 +20,7 @@
 //       貼り付ける連符が小節線をまたぐとき
 // ==========================================================
 
-import { noteTicks, durationToTicks, timeAt, measureTicks, restsForSpan, tupletGroups } from "./model.js";
+import { noteTicks, durationToTicks, timeAt, measureLength, restsForSpan, tupletGroups } from "./model.js";
 import { cloneScore, appendMeasure, cleanSpanners } from "./edit.js";
 import { positionsInRange } from "./selection.js";
 
@@ -102,11 +102,12 @@ export function copyNotes(score, range, selection) {
 // 関数：measureStartTicks
 // 各小節が、曲の頭から何ティック目に始まるかの配列を返す（最後に、曲全体の長さも付ける）
 // 例：4分の4拍子が3小節 → [0, 1小節分, 2小節分, 3小節分]（ティック）
+// （ステップ15-1：1小節目がアウフタクトなら、1小節目はアウフタクトの長さで数える）
 // ----------------------------------------------------------
 function measureStartTicks(score) {
   const starts = [0];
   for (let m = 0; m < score.measures.length; m++) {
-    starts.push(starts[m] + measureTicks(timeAt(score, m)));
+    starts.push(starts[m] + measureLength(score, m));
   }
   return starts;
 }

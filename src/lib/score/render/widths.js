@@ -48,8 +48,10 @@ export function measureNoteWidths(VF, score, states, accidentalsList) {
       const staveNotes = measure.notes.map((note, j) => createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, measureRest));
       createTuplets(VF, measure.notes, staveNotes); // 連符の音符は、連符にしてから声部に入れる（長さが正しくなる）
       // 連桁も作る（連桁でつながった8分音符は旗がなくなるので、そのぶん幅が狭くなる。描くときと同じ幅で計算するため）
-      createBeams(VF, measure.notes, staveNotes, state.time);
-      const voice = new VF.Voice({ numBeats: state.time.beats, beatValue: state.time.beatType });
+      // （ステップ15-1：アウフタクトの小節は、描くときと同じく、拍子どおりの小節の後ろの部分として区切る）
+      createBeams(VF, measure.notes, staveNotes, state.time, state.offset);
+      // 声部はアウフタクトの長さで作る（ステップ15-1）
+      const voice = new VF.Voice({ numBeats: state.voiceTime.beats, beatValue: state.voiceTime.beatType });
       voice.addTickables(staveNotes);
       return voice;
     });

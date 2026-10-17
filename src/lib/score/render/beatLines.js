@@ -27,8 +27,11 @@ const OVERHANG = 4;
 //   voices   … この小節の、パートごとの声部（音符の横の位置が決まったあとのもの）
 //   measures … この小節の、パートごとの楽譜データ（notes の入ったもの）
 //   time     … この小節の拍子 { beats, beatType }
+//   offset   … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（ティック）（ステップ15-1）
+//               アウフタクトの小節だけ 0 より大きい。線は拍子どおりの拍の位置に引く（アウフタクトには赤い1拍目の線はない）
+//               例：4/4 で1拍のアウフタクト → offset は3拍分。小節の頭が4拍目なので、青い線が1本
 // ----------------------------------------------------------
-export function drawBeatLines(context, staves, voices, measures, time) {
+export function drawBeatLines(context, staves, voices, measures, time, offset = 0) {
   // ----- 1. 音符が始まる時刻（小節の頭から何ティックか）と、その横の位置を集める -----
   // 同じ時刻に複数のパートの音符があるときは、上のパートのものを使う（全パートで横の位置はそろっている）
   const positions = new Map(); // 時刻 → 横の位置
@@ -46,7 +49,9 @@ export function drawBeatLines(context, staves, voices, measures, time) {
   });
 
   // 小節の終わり（音符を並べる所の右の端）も入れておく（最後の拍の位置を割り出すため）
-  const length = measureTicks(time);
+  // アウフタクトの小節は、拍子どおりの1小節より offset だけ短い（ステップ15-1）
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  const length = full - offset;
   if (!positions.has(length)) positions.set(length, staves[0].getNoteEndX());
 
   // 時刻の順に並べる [[時刻, 横の位置], ...]
@@ -56,11 +61,14 @@ export function drawBeatLines(context, staves, voices, measures, time) {
   // まとめるための箱（グループ）を開いて、その中に描く
   const group = context.openGroup("beat-lines");
   const beat = beatTicks(time);
-  for (let b = 0; b < length; b = b + beat) {
+  // 最初の拍の頭：小節の頭から、次の拍の頭までの長さ（小節の頭がちょうど拍の頭なら 0）（ステップ15-1）
+  const first = (beat - (offset % beat)) % beat;
+  for (let b = first; b < length; b = b + beat) {
     const x = xAtTick(points, b);
     if (x === null) continue;
     context.save();
-    context.setStrokeStyle(b === 0 ? STRONG_COLOR : BEAT_COLOR);
+    // 拍子どおりの小節の頭（1拍目）だけ赤（アウフタクトの小節には1拍目がないので、全部青になる）
+    context.setStrokeStyle((b + offset) % full === 0 ? STRONG_COLOR : BEAT_COLOR);
     context.setLineWidth(LINE_WIDTH);
     staves.forEach((stave) => {
       context.beginPath();

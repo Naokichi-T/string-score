@@ -17,6 +17,9 @@ import {
   keyAt,
   tempoAt,
   measureTicks,
+  measureLength,
+  measureName,
+  hasPickup,
   restsForSpan,
   INSTRUMENTS,
   renameParts,
@@ -73,7 +76,7 @@ export function canFit(score, selection, duration, dots) {
   // 連符の中の音は、長さを変えずに高さだけ入れ替えるので、いつでも置ける（ステップ10-2）
   if (notes[selection.note].tuplet) return true;
 
-  const total = measureTicks(timeAt(score, selection.measure)); // 1小節の長さ
+  const total = measureLength(score, selection.measure); // 1小節の長さ（アウフタクトなら短い長さ）（ステップ15-1）
   const start = noteStart(notes, selection.note); // 選んでいる音の始まり
   return start + durationToTicks(duration, dots) <= total;
 }
@@ -115,7 +118,7 @@ export function replaceWith(score, selection, newNotes) {
   const newScore = cloneScore(score);
   const measure = newScore.parts[selection.part].measures[selection.measure];
   const notes = measure.notes;
-  const total = measureTicks(timeAt(newScore, selection.measure));
+  const total = measureLength(newScore, selection.measure); // アウフタクトなら短い長さ（ステップ15-1）
 
   const start = noteStart(notes, selection.note); // 置く音の始まり
   const length = newNotes.reduce((sum, note) => sum + noteTicks(note), 0); // 置く音の長さの合計
@@ -454,11 +457,11 @@ function contentCount(notes) {
 // 関数：rebuildMeasure
 // 小節の中身を「並べたい音」で作り直し、残りを休符で埋める
 //   contents … 並べたい音の配列（頭から順に）
+//   total    … その小節の長さ（ティック。measureLength で調べたもの）（ステップ15-1：アウフタクトのために足した）
 //   time     … その小節の拍子
 // 戻り値：作り直した音の配列（小節に入りきらないときは null）
 // ----------------------------------------------------------
-function rebuildMeasure(contents, time) {
-  const total = measureTicks(time);
+function rebuildMeasure(contents, total, time) {
   const used = contents.reduce((sum, note) => sum + noteTicks(note), 0);
   if (used > total) return null; // 入りきらない
   return [...contents, ...restsForSpan(used, total - used, time)];
@@ -499,7 +502,7 @@ export function canInsert(score, selection, duration, dots) {
   if (notes[selection.note].tuplet) return false;
   const newNote = { rest: true, duration: duration, dots: dots }; // 長さを調べるだけなので休符で代用
   const contents = insertedContents(notes, selection.note, newNote);
-  return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;
+  return rebuildMeasure(contents, measureLength(score, selection.measure), timeAt(score, selection.measure)) !== null;
 }
 
 // ----------------------------------------------------------
@@ -514,7 +517,7 @@ export function canResize(score, selection, duration, dots) {
   if (notes[selection.note].tuplet) return false;
   const newNote = { ...notes[selection.note], duration: duration, dots: dots };
   const contents = resizedContents(notes, selection.note, newNote);
-  return rebuildMeasure(contents, timeAt(score, selection.measure)) !== null;
+  return rebuildMeasure(contents, measureLength(score, selection.measure), timeAt(score, selection.measure)) !== null;
 }
 
 // ----------------------------------------------------------
@@ -526,7 +529,7 @@ export function canResize(score, selection, duration, dots) {
 export function insertAt(score, selection, newNote) {
   const notes = score.parts[selection.part].measures[selection.measure].notes;
   const contents = insertedContents(notes, selection.note, newNote);
-  const rebuilt = rebuildMeasure(contents, timeAt(score, selection.measure));
+  const rebuilt = rebuildMeasure(contents, measureLength(score, selection.measure), timeAt(score, selection.measure));
   if (!rebuilt) {
     return { score: score, selection: selection, error: "この小節には空きがありません" };
   }
@@ -553,7 +556,7 @@ export function resizeAt(score, selection, duration, dots) {
   const notes = score.parts[selection.part].measures[selection.measure].notes;
   const newNote = { ...JSON.parse(JSON.stringify(notes[selection.note])), duration: duration, dots: dots };
   const contents = resizedContents(notes, selection.note, newNote);
-  const rebuilt = rebuildMeasure(contents, timeAt(score, selection.measure));
+  const rebuilt = rebuildMeasure(contents, measureLength(score, selection.measure), timeAt(score, selection.measure));
   if (!rebuilt) {
     return { score: score, error: "この小節には空きがありません" };
   }
@@ -1660,7 +1663,7 @@ export function toggleMeasureRest(score, part, from, to) {
 
   for (let i = from; i <= to; i++) {
     const time = timeAt(newScore, i);
-    const total = measureTicks(time);
+    const total = measureLength(newScore, i); // アウフタクトなら短い長さ（ステップ15-1）
     const shape = measureRestShape(total);
     if (allMeasureRest || !shape) {
       // 拍ごとの休符にする
@@ -1692,6 +1695,9 @@ export function toggleMeasureRest(score, part, from, to) {
 // 小節を1つ足す（全パートいっしょに。中身は拍子に合わせた休符）
 //   index … 足す位置（この番号の小節の前に入る。小節の数と同じなら最後に足す）
 // 1小節目の前に足すときは、拍子・調・音部記号を新しい1小節目に移す
+// （ステップ15-1：アウフタクトがあるときに1小節目の前に足したら）
+//   ・アウフタクトは、新しい1小節目（足した空の小節）に移す
+//   ・もとのアウフタクトの小節は、ふつうの長さの小節にする（前を休符で埋めて、音は小節の後ろに残す）
 // 戻り値：新しい楽譜データ
 // ----------------------------------------------------------
 export function insertMeasure(score, index) {
@@ -1699,9 +1705,15 @@ export function insertMeasure(score, index) {
 
   // 足す小節の拍子（前の小節と同じ。1小節目の前なら今の1小節目と同じ）
   const time = timeAt(newScore, Math.max(index - 1, 0));
-  const total = measureTicks(time);
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  // 足す小節の長さ（1小節目の前に足して、アウフタクトを移すときは、アウフタクトの長さ）（ステップ15-1）
+  const movePickup = index === 0 && hasPickup(newScore);
+  const total = movePickup ? measureLength(newScore, 0) : full;
 
   // 楽譜全体の小節の情報
+  // （ステップ15-1：あとから pickup も足すので、「どんな項目でも入る入れ物」だと VSCode に教えておく。
+  //   書かないと、最初に入れた { time, key } の形だと思われて、pickup を足す所がエラーになる）
+  /** @type {Record<string, any>} */
   let info = {};
   if (index === 0) {
     // 1小節目の前：拍子と調を新しい1小節目に移す
@@ -1709,6 +1721,11 @@ export function insertMeasure(score, index) {
     info = { time: first.time, key: first.key };
     delete first.time;
     delete first.key;
+    // アウフタクトも新しい1小節目に移す（ステップ15-1）
+    if (movePickup) {
+      info.pickup = first.pickup;
+      delete first.pickup;
+    }
   }
   newScore.measures.splice(index, 0, info);
 
@@ -1719,6 +1736,8 @@ export function insertMeasure(score, index) {
       // 1小節目の前：音部記号を新しい1小節目に移す
       measure.clef = part.measures[0].clef;
       delete part.measures[0].clef;
+      // もとのアウフタクトの小節を、ふつうの長さにする（前を休符で埋める）（ステップ15-1）
+      if (movePickup) part.measures[0].notes = resizeFromFront(part.measures[0].notes, total, full, time);
     }
     part.measures.splice(index, 0, measure);
   });
@@ -1918,6 +1937,10 @@ function sameTime(a, b) {
 // 入りきらない音がある小節が1つでもあるときは、何も変えない
 // 変えるときは、小節の中身（終わりの休符より前の音）はそのままにして、
 // 残りを新しい拍子の「1拍ずつの休符」で埋め直す
+// （ステップ15-1：アウフタクトがあって、1小節目の拍子を変えるとき）
+//   ・アウフタクトの長さ（ティック）はそのままにして、新しい拍子の拍の数に数え直す
+//   ・新しい拍子の拍の数で割り切れない・新しい1小節より短くならないときは、何も変えずに知らせる
+//     例：4/4 で4分音符1つ分 → 6/8 なら8分音符2つ分（OK）、2/2 なら半分の拍になる（変えられない）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文 }
 //   （何も変わらないとき・入りきらないときは、元の楽譜データのまま）
 // ----------------------------------------------------------
@@ -1933,15 +1956,28 @@ export function changeTime(score, from, to, time) {
     }
   }
 
+  // ①-2 アウフタクトの拍の数を、新しい拍子で数え直す（1小節目を変えるときだけ）（ステップ15-1）
+  const full = measureTicks(time); // 新しい拍子の1小節の長さ
+  let newPickup = null; // 新しい拍子でのアウフタクトの拍の数（変えないときは null）
+  if (from === 0 && hasPickup(score)) {
+    const unit = full / time.beats; // 新しい拍子の、下の数字の音符1つ分
+    const pickupCount = measureLength(score, 0) / unit;
+    if (!Number.isInteger(pickupCount) || pickupCount >= time.beats) {
+      return { score: score, error: "アウフタクトの長さが新しい拍子に合わないので、拍子を変えられません（先にアウフタクトの長さを変えてください）" };
+    }
+    newPickup = pickupCount;
+  }
+
   // ② 入りきらない音がないか、全パート・全小節を先に調べる
-  const total = measureTicks(time); // 新しい拍子の1小節の長さ
+  // （アウフタクトの小節は、アウフタクトの長さで調べる（ステップ15-1））
+  const totalAt = (m) => (m === 0 && newPickup !== null ? measureLength(score, 0) : full);
   for (const part of score.parts) {
     for (let m = from; m <= last; m++) {
       const notes = part.measures[m].notes;
       const contents = notes.slice(0, contentCount(notes)); // 終わりの休符をのぞいた中身
       const used = contents.reduce((sum, note) => sum + noteTicks(note), 0);
-      if (used > total) {
-        return { score: score, error: `${m + 1}小節目の ${part.name} に入りきらない音があります` };
+      if (used > totalAt(m)) {
+        return { score: score, error: `${measureName(score, m)}の ${part.name} に入りきらない音があります` };
       }
     }
   }
@@ -1956,7 +1992,7 @@ export function changeTime(score, from, to, time) {
     for (let m = from; m <= last; m++) {
       const notes = part.measures[m].notes;
       const contents = notes.slice(0, contentCount(notes));
-      const rebuilt = rebuildMeasure(contents, time);
+      const rebuilt = rebuildMeasure(contents, totalAt(m), time);
       // 中身の最後の音のうしろに休符が来たら、その音のタイは外す（休符とはつなげないため）
       if (contents.length > 0 && rebuilt.length > contents.length) {
         const lastNote = rebuilt[contents.length - 1];
@@ -1970,6 +2006,8 @@ export function changeTime(score, from, to, time) {
   newScore.measures[from].time = { beats: time.beats, beatType: time.beatType };
   // コモンタイム・カットタイムなら、その印も書く（ステップ8-1b）
   if (time.symbol) newScore.measures[from].time.symbol = time.symbol;
+  // アウフタクトの拍の数を、新しい拍子で数え直したものにする（ステップ15-1）
+  if (newPickup !== null) newScore.measures[0].pickup = newPickup;
   // 範囲の中にあった、ほかの拍子の変化は消す
   for (let m = from + 1; m <= last; m++) {
     delete newScore.measures[m].time;
@@ -1990,6 +2028,114 @@ export function changeTime(score, from, to, time) {
   // 何も変わっていなければ、元の楽譜データを返す（「元に戻す」の履歴に残さないため）
   if (JSON.stringify(newScore) === JSON.stringify(score)) {
     return { score: score, error: "" };
+  }
+  return { score: newScore, error: "" };
+}
+
+// ==========================================================
+// ここから下は、アウフタクト（短い1小節目）の関数（ステップ15-1）
+// アウフタクトは小節の「後ろの部分」なので、長さを変えるときは小節の前の側を詰めたり足したりする
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：resizeFromFront
+// 1つのパートの1小節分の音の並びを、前の側で長さを変える（ステップ15-1）
+//   notes     … 小節の音の並び
+//   oldLength … 今の小節の長さ（ティック）
+//   newLength … 新しい小節の長さ（ティック）
+//   time      … その小節の拍子（休符で埋めるのに使う）
+// 決まり
+//   ・長くするとき … 前に休符を足す（音は小節の後ろのまま）
+//   ・短くするとき … 前の側から、詰める長さぶんを取りのぞく
+//                    取りのぞく所に音符（休符ではない音）があるときは、短くできない（null を返す）
+//                    休符が取りのぞく所の境目をまたいでいたら、その休符は取りのぞいて、残りを休符で埋め直す
+//                    連符は途中で分けられないので、連符の一部でも取りのぞく所にかかったら、連符まるごと取りのぞく
+//                    （そのときも、連符の中に音符があれば短くできない）
+//   ・小節まるごとの休符（全休符）なら … 新しい長さの拍ごとの休符にする
+// 休符で埋める所は、どれも拍子の下の数字の音符1つ分ずつずれるだけなので、1拍ずつの休符の並びはくずれない
+// 戻り値：新しい音の並び（短くできないときは null）
+// ----------------------------------------------------------
+function resizeFromFront(notes, oldLength, newLength, time) {
+  // 小節まるごとの休符：新しい長さの拍ごとの休符にする
+  if (isMeasureRest(notes)) return restsForSpan(0, newLength, time);
+
+  // 長くする：前に休符を足す
+  if (newLength >= oldLength) {
+    return [...restsForSpan(0, newLength - oldLength, time), ...notes];
+  }
+
+  // 短くする：前の側の cut ティックぶんを取りのぞく
+  const cut = oldLength - newLength;
+  const groups = tupletGroups(notes);
+  const kept = []; // 残す音
+  let firstKeptStart = oldLength; // 残す音のうち、いちばん前の音の始まり（なければ小節の終わり）
+  let position = 0;
+  for (let j = 0; j < notes.length; j++) {
+    const note = notes[j];
+    const start = position;
+    position = position + noteTicks(note);
+    // この音が入っている連符が、取りのぞく所にかかっているか（連符の最初の音の始まりで調べる）
+    const group = groups.find((g) => g.start <= j && j <= g.end);
+    const cutTuplet = group && noteStart(notes, group.start) < cut;
+    if (start >= cut && !cutTuplet) {
+      // 残す音
+      if (kept.length === 0) firstKeptStart = start;
+      kept.push(note);
+    } else if (!note.rest) {
+      // 取りのぞく所に音符がある：短くできない
+      return null;
+    }
+  }
+  // 新しい小節の頭から、残す音の始まりまでを休符で埋める
+  const fill = restsForSpan(0, firstKeptStart - cut, time);
+  return [...fill, ...kept];
+}
+
+// ----------------------------------------------------------
+// 関数：pickupChoices
+// アウフタクトの長さとして選べる拍の数の一覧を返す（ステップ15-1）
+// 1拍から「1小節の拍の数 − 1」拍まで（1小節と同じ長さはアウフタクトではないので入れない）
+//   time … 1小節目の拍子
+// 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]、1/4 → []（選べない）
+// ----------------------------------------------------------
+export function pickupChoices(time) {
+  return Array.from({ length: Math.max(0, time.beats - 1) }, (_, k) => k + 1);
+}
+
+// ----------------------------------------------------------
+// 関数：setPickup
+// 1小節目をアウフタクトにする・アウフタクトの長さを変える・アウフタクトをやめる（ステップ15-1）
+//   count … アウフタクトの拍の数（拍子の下の数字の音符がいくつ分か）。0 ならアウフタクトをやめる
+// 全パートの1小節目を、resizeFromFront で新しい長さにする
+// 短くするときに、取りのぞく所に音符があるパートが1つでもあれば、何も変えずに知らせる
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+//   （長さが変わらないとき・変えられないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setPickup(score, count) {
+  const time = timeAt(score, 0);
+  // 選べない数（1小節より長い・小数など）なら何もしない（ボタンからは来ないはず）
+  if (count !== 0 && !pickupChoices(time).includes(count)) return { score: score, error: "" };
+
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  const oldLength = measureLength(score, 0); // 今の1小節目の長さ
+  const newLength = count === 0 ? full : (full / time.beats) * count; // 新しい1小節目の長さ
+  if (newLength === oldLength) return { score: score, error: "" };
+
+  const newScore = cloneScore(score);
+  // パートごとに、1小節目の長さを変える
+  for (const part of newScore.parts) {
+    const resized = resizeFromFront(part.measures[0].notes, oldLength, newLength, time);
+    if (!resized) {
+      return { score: score, error: `${part.name} の1小節目の前のほうに音があるので、アウフタクトをこの長さにできません` };
+    }
+    part.measures[0].notes = resized;
+  }
+
+  // 1小節目の情報に、拍の数を書く（やめるときは消す）
+  if (count === 0) {
+    delete newScore.measures[0].pickup;
+  } else {
+    newScore.measures[0].pickup = count;
   }
   return { score: newScore, error: "" };
 }
@@ -2126,7 +2272,7 @@ export function addPart(score, instrument) {
   // 小節ごとに、その小節の拍子に合わせた休符で埋める
   const measures = newScore.measures.map((_, m) => {
     const time = timeAt(newScore, m);
-    const measure = { notes: restsForSpan(0, measureTicks(time), time) };
+    const measure = { notes: restsForSpan(0, measureLength(newScore, m), time) }; // アウフタクトなら短い長さ（ステップ15-1）
     if (m === 0) measure.clef = INSTRUMENTS[instrument].clef;
     return measure;
   });

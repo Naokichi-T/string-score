@@ -14,7 +14,7 @@
 // edit.js と同じく、楽譜データを直接書き換えずに、新しい楽譜データを作って返す
 // ==========================================================
 
-import { durationToTicks, noteTicks, timeAt, measureTicks, tupletNormal, tupletGroups, restsForSpan } from "./model.js";
+import { durationToTicks, noteTicks, timeAt, measureLength, tupletNormal, tupletGroups, restsForSpan } from "./model.js";
 import { replaceWith, cloneScore, cleanSpanners } from "./edit.js";
 
 // ----------------------------------------------------------
@@ -41,7 +41,7 @@ export function tupletError(score, selection, actual) {
   for (let k = 0; k < selection.note; k++) {
     start = start + noteTicks(notes[k]);
   }
-  const total = measureTicks(timeAt(score, selection.measure));
+  const total = measureLength(score, selection.measure); // アウフタクトなら短い長さ（ステップ15-1）
   if (start + groupTicks > total) return "連符が小節に入りきりません。短い長さの音を選んでから押してください";
 
   return "";

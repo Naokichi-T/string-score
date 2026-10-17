@@ -8,7 +8,9 @@
 //   番号はどれも 0 から数える（1小節目は measure: 0）
 // ==========================================================
 
-import { notePitches } from "./model.js"; // 音符の高さを低い順の配列にする（重音なら全部）（ステップ14-1）
+// notePitches … 音符の高さを低い順の配列にする（重音なら全部）（ステップ14-1）
+// measureName … 小節を「3小節目」「アウフタクト」の文字にする（ステップ15-1）
+import { notePitches, measureName } from "./model.js";
 
 // ひし形の玉（ハーモニクスで軽く触れる音）の音名のうしろに付ける印（ステップ14-5a）
 const DIAMOND_MARK = "◇";
@@ -140,7 +142,8 @@ export function describeSelection(score, selection) {
   if (!note) return "";
 
   const partName = score.parts[selection.part].name;
-  const where = `${partName}　${selection.measure + 1}小節目　${selection.note + 1}つ目`;
+  // 小節は「3小節目」の形（アウフタクトなら「アウフタクト」）（ステップ15-1）
+  const where = `${partName}　${measureName(score, selection.measure)}　${selection.note + 1}つ目`;
   // 連符の中の音なら「3連符の」を前に付ける（ステップ10-2）
   const tupletText = note.tuplet ? `${note.tuplet.actual}連符の` : "";
   const length = tupletText + durationToJapanese(note.duration, note.dots ?? 0, note.rest);
@@ -228,7 +231,8 @@ export function describeRange(score, range) {
   if (!range) return "";
   const partName = score.parts[range.part].name;
   const count = positionsInRange(score, range).length;
-  const from = `${range.start.measure + 1}小節目 ${range.start.note + 1}つ目`;
-  const to = `${range.end.measure + 1}小節目 ${range.end.note + 1}つ目`;
+  // 小節は「3小節目」の形（アウフタクトなら「アウフタクト」）（ステップ15-1）
+  const from = `${measureName(score, range.start.measure)} ${range.start.note + 1}つ目`;
+  const to = `${measureName(score, range.end.measure)} ${range.end.note + 1}つ目`;
   return `${partName}　${from} 〜 ${to}（${count}つ）`;
 }
