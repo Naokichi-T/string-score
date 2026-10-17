@@ -7,6 +7,7 @@
 // （ステップ14-3：重音。1つ目の音の <note> のあとに、<chord/> を付けた <note> を低い順に並べる）
 // （ステップ14-4b：アルペジオ。重音の全部の音の <notations> に <arpeggiate/> を書く）
 // （ステップ14-5b：ハーモニクスのひし形の玉。その高さの <note> に <notehead>diamond</notehead> を書く）
+// （ステップ14-6b：2音トレモロ。2つの <note> の組にして、<tremolo type="start">・<tremolo type="stop"> を書く）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -33,7 +34,7 @@
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
 // ==========================================================
 
-import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch } from "./model.js";
+import { INSTRUMENTS, noteTicks, timeAt, keyAt, tempoAt, TICKS_PER_16TH, tupletGroups, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, isAlternate } from "./model.js";
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 
@@ -558,10 +559,13 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
   // 装飾（トリルなど）とトレモロ（ステップ11-3a・11-4）
   // トリルの波線は、タイから自動で描いているので書き出さない（読むアプリでは tr だけが出る）
   // トレモロは <tremolo type="single">斜線の本数</tremolo>（single：1つの音を刻むトレモロ）
-  if (note.ornament || note.tremolo) {
+  // 2音トレモロは、組の1つ目に type="start"、2つ目に type="stop"（中の数は連桁の本数）（ステップ14-6b）
+  //   alternateMark は alternateParts で付けた、書き出すときだけの印（楽譜データには入っていない）
+  if (note.ornament || note.tremolo || note.alternateMark) {
     inner.push("          <ornaments>");
     if (note.ornament) inner.push(`            <${ORNAMENTS[note.ornament].musicxml}/>`);
     if (note.tremolo) inner.push(`            <tremolo type="single">${note.tremolo}</tremolo>`);
+    if (note.alternateMark) inner.push(`            <tremolo type="${note.alternateMark.type}">${note.alternateMark.count}</tremolo>`);
     inner.push("          </ornaments>");
   }
 
@@ -741,6 +745,34 @@ function chordParts(note, tiedFrom, nextNote) {
   });
 }
 
+// 2音トレモロの組の音に書く、連符の印（「1個分の長さに2個」。<tuplet> の括弧・数字は書かない）（ステップ14-6b）
+const ALTERNATE_TIME = { actual: 2, normal: 1, start: false, stop: false, bracket: false };
+
+// ----------------------------------------------------------
+// 関数：alternateParts
+// 2音トレモロの音符を、MusicXML の「2つの音符の組」に分ける（ステップ14-6b）
+//   note … 2音トレモロの音符のデータ（isAlternate が true のもの）
+// 戻り値：[1つ目（下の音）, 2つ目（上の音）] の書き出し用の音
+// 決まり
+//   ・どちらも、形（<type>）と付点は2音トレモロ全体の長さのまま
+//   ・どちらも「1個分の長さに2個」の連符の印（tuplet: 2 と 1）を付けて、実際の長さを半分にする
+//     （noteXml は連符の印を見て <duration> を半分にし、<time-modification> を書く）
+//   ・1つ目に記号を全部付ける。2つ目は高さ・長さだけ
+//   ・1つ目に <tremolo type="start">、2つ目に <tremolo type="stop">（alternateMark の印で notationsXml に伝える）
+//   ・タイは付けない（2音トレモロにはタイを付けない決まり（ステップ14-6a））
+// ----------------------------------------------------------
+function alternateParts(note) {
+  const [low, high] = notePitches(note);
+  const time = { actual: 2, normal: 1 };
+  const first = { ...note, pitch: low, tie: false, tuplet: time, alternateMark: { type: "start", count: note.tremolo } };
+  delete first.chord;
+  delete first.alternate;
+  delete first.tremolo; // ふつうのトレモロ（type="single"）としては書かない
+  delete first.arpeggio;
+  const second = { pitch: high, duration: note.duration, dots: note.dots ?? 0, tie: false, tuplet: time, alternateMark: { type: "stop", count: note.tremolo } };
+  return [first, second];
+}
+
 // ----------------------------------------------------------
 // 関数：partXml
 // 1つのパートの <part> を作る
@@ -843,6 +875,12 @@ function partXml(score, p, divisions) {
       if (note.rest) {
         // 休符：今までどおり（小節まるごとの休符なら、その印も渡す（ステップ13-3））
         lines.push(...noteXml(xmlNote, null, false, divisions, tupletMark, isMeasureRest(measure.notes)));
+      } else if (isAlternate(note)) {
+        // 2音トレモロ：2つの音符の組にして書く（下の音 → 上の音）（ステップ14-6b）
+        // 臨時記号は、高さごと（低い順）に決めたものを、それぞれに付ける
+        alternateParts(xmlNote).forEach((piece, h) => {
+          lines.push(...noteXml(piece, accidentals[k][h] ?? null, false, divisions, ALTERNATE_TIME));
+        });
       } else {
         // 音符：高さごとに <note> を書く（重音でなければ1つだけ）（ステップ14-3）
         const nextNote = partNotes[noteIndex + 1] ?? null;

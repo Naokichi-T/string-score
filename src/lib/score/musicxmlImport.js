@@ -10,6 +10,9 @@
 //   ・<notehead>diamond</notehead> の音、<harmonic> の中に <touching-pitch/>（触れる音）がある音 → ひし形の玉
 //   ・<harmonic> は、中身が空か <natural/> だけのとき（ひし形の玉でもないとき）だけ、今までどおり「○」にする
 //     （<artificial/>（人工）・<touching-pitch/>・<base-pitch/>（押さえる音）がある、またはひし形の玉 → 「○」は付けない）
+// （ステップ14-6b：2音トレモロ（<tremolo type="start">・<tremolo type="stop"> の組）を読むようにした）
+//   ・組の2つの音を、1つの2音トレモロの音符（2音の重音＋alternate）にまとめる（下の音から並べ直す）
+//   ・このアプリで扱えない形（8分音符の組・重音の組など）は、2つのふつうの音符（半分の長さ）にして知らせる
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -60,9 +63,10 @@ import {
   pitchNumber,
   MAX_CHORD_NOTES,
   hasDiamond,
+  ALTERNATE_DURATIONS,
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
-import { cleanSpanners } from "./edit.js";
+import { cleanSpanners, cleanAlternates } from "./edit.js";
 
 // ----------------------------------------------------------
 // 16分音符いくつ分か → 音の長さの名前と付点の数の表
@@ -454,6 +458,26 @@ function isCircleHarmonic(harmonic, noteElement) {
 }
 
 // ----------------------------------------------------------
+// 関数：pairTremolo
+// <note> に、2音トレモロの組の印（<tremolo type="start"> か "stop"）があれば、その中身を返す（ステップ14-6b）
+//   noteElement … <note>
+// 戻り値：{ type: "start" か "stop", count: 連桁の本数（1〜3。4本以上は3、書いていなければ3） }（印がなければ null）
+// ----------------------------------------------------------
+function pairTremolo(noteElement) {
+  for (const notations of childElements(noteElement, "notations")) {
+    for (const ornaments of childElements(notations, "ornaments")) {
+      for (const tremolo of childElements(ornaments, "tremolo")) {
+        const type = tremolo.getAttribute("type");
+        if (type !== "start" && type !== "stop") continue;
+        const count = Number(tremolo.textContent.trim() || "3");
+        return { type: type, count: Number.isInteger(count) && count >= 1 ? Math.min(count, 3) : 3 };
+      }
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------
 // 関数：readNote
 // <note> 1つを、このアプリの音符・休符のデータにする
 //   noteElement … <note>
@@ -471,6 +495,33 @@ function readNote(noteElement, divisions) {
   // 長さは、音符の形（<type>）と「normal 個分の長さに actual 個」から決める
   let tuplet = null;
   const modification = childElement(noteElement, "time-modification");
+  // 2音トレモロの組の音（ステップ14-6b）
+  //   <tremolo type="start"> か "stop" があって、「1個分の長さに2個」（actual が normal の2倍）の音
+  //   形（<type>）と付点は、2音トレモロ全体の長さを表している（実際の長さはその半分）
+  //   → 形と付点はそのままにして、あとで組をまとめる（finishAlternates）ための印 pairMark を付ける
+  const pair = pairTremolo(noteElement);
+  if (pair && modification) {
+    const actual = Number(childText(modification, "actual-notes"));
+    const normal = Number(childText(modification, "normal-notes"));
+    const type = childText(noteElement, "type");
+    const dots = childElements(noteElement, "dot").length;
+    if (actual === normal * 2 && DURATION_ORDER.includes(type) && dots <= 1) {
+      const pairTicks = durationToTicks(type, dots) / 2; // 実際の長さ（全体の半分）
+      const restElement = childElement(noteElement, "rest");
+      const pitchElement = childElement(noteElement, "pitch");
+      if (!restElement && pitchElement && Number.isInteger(pairTicks)) {
+        const note = {
+          pitch: { step: childText(pitchElement, "step"), alter: Math.round(Number(childText(pitchElement, "alter") ?? 0)), octave: Number(childText(pitchElement, "octave")) },
+          duration: type,
+          dots: dots,
+          tie: childElements(noteElement, "tie").some((t) => t.getAttribute("type") === "start"),
+          pairMark: pair, // { type: "start" か "stop", count: 連桁の本数 }
+        };
+        if (isDiamondNote(noteElement)) note.pitch.diamond = true;
+        return { note: note, ticks: pairTicks };
+      }
+    }
+  }
   if (modification) {
     const actual = Number(childText(modification, "actual-notes"));
     const normal = Number(childText(modification, "normal-notes"));
@@ -627,6 +678,8 @@ function readNotations(noteElement, note, state, counter) {
           const type = child.getAttribute("type") ?? "single";
           const count = Number(child.textContent.trim() || "3");
           if (type === "single" && Number.isInteger(count) && count >= 1) note.tremolo = Math.min(count, 3);
+          else if (note.pairMark)
+            continue; // 2音トレモロの組の印は readNote で読んである（ステップ14-6b）
           else report(counter, "2つの音を行き来するトレモロ");
         } else if (!IGNORED_NOTATIONS.includes(child.nodeName)) {
           report(counter, unsupportedLabel(child.nodeName));
@@ -1263,6 +1316,14 @@ function readPart(partElement, counter, skipped) {
   // 重音を、決まりどおりの形にする（ステップ14-3）
   chords.forEach((chord) => finishChord(chord, skipped, counter));
 
+  // 2音トレモロの組を、1つの音符にまとめる（重音をまとめたあとに行う。組の音が重音かを見るため）（ステップ14-6b）
+  // （まとめられずに、書ける形がなかった小節は休符にするので、読めなかった小節の一覧にも入れる）
+  measures.forEach((measure, index) => {
+    const wasReadable = measure.readable;
+    finishAlternates(measure, counter);
+    if (wasReadable && !measure.readable) problems.push(index + 1);
+  });
+
   // 1音だけの音符に付いたアルペジオは使わない（アルペジオは重音だけの決まり）（ステップ14-4b）
   // ひし形の玉のある音符に付いたアルペジオも使わない（ステップ14-5b）
   measures.forEach((measure) => {
@@ -1279,6 +1340,100 @@ function readPart(partElement, counter, skipped) {
   });
 
   return { measures: measures, firstClef: firstClef, problems: problems };
+}
+
+// 2音トレモロにまとめられなかったとき、組の音を「半分の長さの形」にする表（ステップ14-6b）
+// （32分音符はこのアプリにないので、16分音符の組はまとめられないと、小節ごと休符になる）
+const HALF_SHAPE = { whole: "half", half: "quarter", quarter: "eighth", eighth: "16th" };
+
+// ----------------------------------------------------------
+// 関数：finishAlternates
+// 1小節の中の、2音トレモロの組の音（pairMark の付いた音）を決まりどおりの形にする（ステップ14-6b）
+//   measure … readPart で読んだ小節（notes の中身を入れ替える）
+//   counter … 使えなかった記号を数える表
+// ・「start の音」のすぐあとに「stop の音」が来ていて、次がそろっていれば、1つの2音トレモロの音符にまとめる
+//     2つとも同じ形・同じ付点、形が全・2分・4分音符、どちらも重音ではない、ひし形の玉がない、高さが違う
+//   まとめ方：1つ目の音符に、2つの高さ（下の音から）・連桁の本数・alternate を入れて、2つ目の記号も足す
+// ・そろっていない組（8分音符の組・重音の組など）と、相手のいない音は、ふつうの音符（半分の長さの形）にして数える
+//   （決めたことの A：長さと、鳴る音の順はくずれない）
+// ----------------------------------------------------------
+function finishAlternates(measure, counter) {
+  if (!measure.notes.some((note) => note.pairMark)) return;
+  const result = [];
+  for (let j = 0; j < measure.notes.length; j++) {
+    const note = measure.notes[j];
+    if (!note.pairMark) {
+      result.push(note);
+      continue;
+    }
+    const next = measure.notes[j + 1];
+    const isPair = note.pairMark.type === "start" && next && next.pairMark && next.pairMark.type === "stop";
+    const usable =
+      isPair &&
+      note.duration === next.duration &&
+      note.dots === next.dots &&
+      ALTERNATE_DURATIONS.includes(note.duration) &&
+      !note.chord &&
+      !next.chord &&
+      !hasDiamond(note) &&
+      !hasDiamond(next) &&
+      !samePitch(note.pitch, next.pitch);
+    if (usable) {
+      // 1つの2音トレモロの音符にまとめる
+      const count = note.pairMark.count;
+      const merged = mergeSymbols(note, next);
+      setNotePitches(merged, [note.pitch, next.pitch]); // 下の音から並べ直す（上の音から始まる組も、下の音から）
+      merged.tremolo = count;
+      merged.alternate = true;
+      merged.tie = false; // 2音トレモロにはタイを付けない決まり
+      delete merged.pairMark;
+      result.push(merged);
+      j = j + 1; // 2つ目の音は使ったので飛ばす
+      continue;
+    }
+    // まとめられない：組の音を（相手がいれば2つとも）ふつうの音符にする
+    const pieces = isPair ? [note, next] : [note];
+    pieces.forEach((piece) => {
+      delete piece.pairMark;
+      const shape = HALF_SHAPE[piece.duration];
+      if (shape) {
+        piece.duration = shape; // 付点はそのまま（半分の長さになる）
+      } else {
+        measure.readable = false; // 16分音符の組など：このアプリで書ける形がない
+      }
+      result.push(piece);
+    });
+    report(counter, "2つの音を行き来するトレモロ（8分音符など）");
+    if (isPair) j = j + 1;
+  }
+  measure.notes = result;
+}
+
+// ----------------------------------------------------------
+// 関数：mergeSymbols
+// 2音トレモロの組の、2つ目の音の記号を1つ目の音に足した音符を作る（ステップ14-6b）
+//   ・記号の一覧（スタッカートなど・指番号・奏法など）は、合わせる（同じものは1つ）
+//   ・1つだけの記号（弓・強弱・スラーなど）は、1つ目になければ2つ目のものを使う
+//   ・高さ・長さ・タイ・組の印は、ここでは足さない
+// 戻り値：新しい音符のデータ
+// ----------------------------------------------------------
+function mergeSymbols(first, second) {
+  const merged = { ...first };
+  const SKIP = ["pitch", "chord", "duration", "dots", "tie", "pairMark", "tuplet"];
+  Object.keys(second).forEach((key) => {
+    if (SKIP.includes(key)) return;
+    const value = second[key];
+    if (Array.isArray(value)) {
+      const list = [...(merged[key] ?? [])];
+      value.forEach((item) => {
+        if (!list.includes(item)) list.push(item);
+      });
+      merged[key] = list;
+    } else if (merged[key] === undefined) {
+      merged[key] = value;
+    }
+  });
+  return merged;
 }
 
 // ----------------------------------------------------------
@@ -1565,5 +1720,6 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     warnings.push(`𝄋・𝄌 が2つ以上あったので、最初のものだけを使いました（使わなかったもの：${extraJumpMarks}個）`);
   }
 
-  return { score: score, warnings: warnings };
+  // ⑪ 2音トレモロの音符にかかるタイなどを、決まりどおりに直す（直すものがなければそのまま）（ステップ14-6b）
+  return { score: cleanAlternates(score), warnings: warnings };
 }
