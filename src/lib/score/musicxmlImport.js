@@ -1388,6 +1388,20 @@ function finishAlternates(measure, counter) {
       merged.alternate = true;
       merged.tie = false; // 2音トレモロにはタイを付けない決まり
       delete merged.pairMark;
+      // 2音トレモロは重音なので、重音に付けられない記号（前打音・トリルなどの装飾・グリッサンド）は外して数える
+      // （外さないと、このアプリの決まりに合わないデータになり、書き出すと前打音が消える）（ステップ15-4）
+      if (merged.grace) {
+        delete merged.grace;
+        report(counter, "2音トレモロに付いた前打音");
+      }
+      if (merged.ornament) {
+        delete merged.ornament;
+        report(counter, "重音に付いたトリルなどの装飾");
+      }
+      if (merged.glissando) {
+        delete merged.glissando;
+        report(counter, "重音のグリッサンド");
+      }
       result.push(merged);
       j = j + 1; // 2つ目の音は使ったので飛ばす
       continue;
