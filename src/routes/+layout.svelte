@@ -4,6 +4,16 @@
   import LongPressTip from "#lib/components/LongPressTip.svelte";
 
   let { children } = $props();
+
+  // ----------------------------------------------------------
+  // LINE・X などにリンクを貼ったときに出るカード（OGP）の中身（ステップ17-2）
+  //   SITE_URL    … 公開しているアドレス（画像のアドレスは、http から始まる形で書く決まりのため）
+  //   OGP_TITLE   … カードの見出し
+  //   DESCRIPTION … カードの説明文（Google の検索結果の説明文にも使う）
+  // ----------------------------------------------------------
+  const SITE_URL = "https://string-score.vercel.app";
+  const OGP_TITLE = "string-score｜弦楽器の楽譜作成";
+  const DESCRIPTION = "バイオリン・ビオラ・チェロの楽譜を、ブラウザで作って再生・PDF出力・MusicXML の書き出しができる無料のアプリです。";
 </script>
 
 <svelte:head>
@@ -12,6 +22,23 @@
   <!-- iPhone・iPad でホーム画面に追加したときの絵（static/apple-touch-icon.png、180×180）（ステップ17-1） -->
   <!-- 角は iPhone が自分で丸めるので、画像は四角いっぱいに青を塗ってある -->
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <!-- ページの説明文（Google の検索結果などで、タイトルの下に出る）（ステップ17-2） -->
+  <meta name="description" content={DESCRIPTION} />
+
+  <!-- OGP：リンクを貼ったときのカード（ステップ17-2） -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="string-score" />
+  <meta property="og:locale" content="ja_JP" />
+  <meta property="og:url" content={SITE_URL + "/"} />
+  <meta property="og:title" content={OGP_TITLE} />
+  <meta property="og:description" content={DESCRIPTION} />
+  <!-- カードの画像（static/ogp.png、1200×630） -->
+  <meta property="og:image" content={SITE_URL + "/ogp.png"} />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <!-- X（旧 Twitter）で、画像を大きく出すカードにする -->
+  <meta name="twitter:card" content="summary_large_image" />
 </svelte:head>
 
 {@render children()}
