@@ -279,6 +279,20 @@
     saveSetting("keyboardCollapsed", keyboardCollapsed);
   }
 
+  // タブの中身をたたんでいるか（ステップ18-1）
+  // 鍵盤と同じく、アプリ全体で1つ（設定として保存する）。ページを開いたときに読み込む
+  let tabsCollapsed = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleToggleTabs
+  // タブの［▲］［▼］が押されたとき・たたんでいる間にタブの名前が押されたとき：
+  // たたむ・出すを変えて保存する（ステップ18-1）
+  // ----------------------------------------------------------
+  function handleToggleTabs() {
+    tabsCollapsed = !tabsCollapsed;
+    saveSetting("tabsCollapsed", tabsCollapsed);
+  }
+
   // メトロノームの設定 { on: 鳴らすか, volume: 音量 0〜100, countIn: カウントインを入れるか }（ステップ12-4a・12-4b）
   // アプリ全体で1つ（音の種類と同じく、設定として保存する）。ページを開いたときに読み込む
   let metronome = $state({ on: false, volume: 70, countIn: false });
@@ -555,6 +569,10 @@
 
     // 前に決めた鍵盤のたたみ方を読み込む（保存していなければ出したまま）（ステップ12-9）
     keyboardCollapsed = loadSettings().keyboardCollapsed === true;
+
+    // 前に決めたタブのたたみ方を読み込む（保存していなければ出したまま）（ステップ18-1）
+    // ただし新しく作った楽譜のときは、タイトルの入力欄を見せたいので、いつも出す（保存はしない）
+    tabsCollapsed = page.state.isNew === true ? false : loadSettings().tabsCollapsed === true;
 
     // 前に（ほかのタブ・ほかの楽譜で）コピーした音を読み込む（なければ null のまま）（ステップ13-1）
     clipboard = loadClipboard();
@@ -2117,7 +2135,10 @@
       onexport={handleExport}
       onprint={handlePrint}
     />
+    <!-- collapsed・ontoggle：タブの中身をたたむ（ステップ18-1） -->
     <ToolTabs
+      collapsed={tabsCollapsed}
+      ontoggle={handleToggleTabs}
       isNew={page.state.isNew === true}
       {duration}
       {dotted}

@@ -18,6 +18,7 @@
   // （ステップ12-3：「再生」タブを追加。中身は PlaybackTools）
   // （ステップ14-1：「音符」タブに［重音］のボタンを追加）
   // （ステップ17-1：「楽譜の設定」タブに移調の欄を追加。ontranspose を ScoreSettings へ渡す）
+  // （ステップ18-1：タブの名前の列の右端に［▲］を置いて、タブの中身をたたんで五線譜を広く見られるようにした）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -111,7 +112,11 @@
   //   chordSelected … 選んでいる音符が重音か（ステップ14-1）
   //                   （ステップ14-2：重音でも ♯♭♮ を押せるようにした。説明の文だけ変える）
   //   selectedHead … 重音の中で選んでいる玉の番号（「記号」タブの［ひし形］で使う）（ステップ14-5a）
+  //   collapsed    … true ならタブの中身（ボタンの部分）をたたむ。名前の列は残す（ステップ18-1）
+  //   ontoggle     … ［▲］［▼］が押されたとき・たたんでいる間にタブの名前が押されたときに呼ぶ関数（ステップ18-1）
   let {
+    collapsed = false,
+    ontoggle = () => {},
     selectedHead = 0,
     chordMode = false,
     onchordmode = () => {},
@@ -237,27 +242,43 @@
   // 「楽譜の設定」タブを出したときに、タイトルの入力欄にカーソルを入れるか
   // （最初の1回だけ。タブを押したら false にして、あとで「楽譜の設定」に戻ってきても入れない）
   let focusTitle = $state(untrack(() => isNew));
+
+  // ----------------------------------------------------------
+  // 関数：handleTabClick
+  // タブの名前が押されたとき：そのタブに切り替える（ステップ18-1）
+  // たたんでいる間に押されたら、中身も出す（どのタブを押しても、すぐ開けるように）
+  //   id … 押されたタブの id（"note" など）
+  // ----------------------------------------------------------
+  function handleTabClick(id) {
+    activeTab = id;
+    focusTitle = false;
+    // たたんでいたら、親に知らせて出してもらう
+    if (collapsed) {
+      ontoggle();
+    }
+  }
 </script>
 
 <div class="tool-tabs">
   <!-- タブのボタンの並び -->
   <div class="tab-list">
     {#each TABS as tab (tab.id)}
-      <button
-        class="tab"
-        class:active={activeTab === tab.id}
-        onclick={() => {
-          activeTab = tab.id;
-          focusTitle = false;
-        }}
-      >
+      <button class="tab" class:active={activeTab === tab.id} onclick={() => handleTabClick(tab.id)}>
         {tab.label}
       </button>
     {/each}
+
+    <!-- タブの中身をたたむ・出すボタン（名前の列の右端）（ステップ18-1） -->
+    <!-- 開いているときは［▲］（上へたたむ）、たたんでいるときは［▼］（下へ出す） -->
+    <button class="collapse-toggle" onclick={() => ontoggle()} title={collapsed ? "タブの中身を出す" : "タブの中身をたたんで、五線譜を広く見る"}>
+      {collapsed ? "▼" : "▲"}
+    </button>
   </div>
 
   <!-- 選んでいるタブの中身 -->
-  <div class="tab-content">
+  <!-- たたんでいるときは、消さずに見えなくするだけ（class:collapsed） -->
+  <!-- （消してしまうと、入力の途中の文字などが、出し直したときに消えてしまうため）（ステップ18-1） -->
+  <div class="tab-content" class:collapsed>
     {#if activeTab === "note"}
       <!-- 入力のしかたの切り替え（上書き・挿入） -->
       <div class="mode-switch">
@@ -449,6 +470,21 @@
     background: #fff; /* 選んでいるタブは白くして、中身とつながって見えるようにする */
     font-weight: bold;
   }
+  /* タブの中身をたたむ・出すボタン（ステップ18-1） */
+  .collapse-toggle {
+    margin-left: auto; /* 残りの幅を左側に取って、名前の列の右端に寄せる */
+    align-self: center; /* タブの下にくっつけず、列の高さのまん中に置く */
+    width: 44px; /* 指で押しやすい大きさ（ほかのボタンと同じ） */
+    height: 34px;
+    padding: 0;
+    margin-bottom: 4px; /* 下の線から少し離す */
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    flex-shrink: 0; /* 画面が狭くても縮めない */
+  }
   .tab-content {
     min-height: 44px; /* ボタンが並ぶ高さを先に確保しておく */
     display: flex;
@@ -457,6 +493,10 @@
     gap: 8px 12px; /* 縦の間 8px・横の間 12px（ステップ12-8c：横の間を 16px から少しつめた） */
     padding: 6px 16px;
     border-top: 1px solid #ddd;
+  }
+  /* たたんでいるときは中身を見えなくする（場所も取らない）（ステップ18-1） */
+  .tab-content.collapsed {
+    display: none;
   }
   .group {
     display: flex;
