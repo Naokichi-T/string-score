@@ -1991,12 +1991,21 @@
     // 楽譜を読み込む前は何もしない（ステップ7-1）
     if (loadState !== "ready") return;
 
+    // Ctrl キー（Mac は ⌘ キー）を押しているか
+    const command = event.ctrlKey || event.metaKey;
+
+    // ⌘P（Ctrl＋P）：ブラウザのふつうの印刷のかわりに、［PDF 出力］と同じ印刷用のページを出す（ステップ18-2）
+    // 文字を入力する欄の中で押されたときも同じにするので、下の「入力欄なら何もしない」より前で調べる
+    if (command && (event.key === "p" || event.key === "P")) {
+      event.preventDefault(); // ブラウザの印刷の画面を開かせない
+      // 印刷用のページを作っている途中なら、二重に作らない
+      if (!printing) handlePrint();
+      return;
+    }
+
     // 文字を入力する欄で押されたときは何もしない（後のステップで入力欄を作るため）
     const tag = event.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-    // Ctrl キー（Mac は ⌘ キー）を押しているか
-    const command = event.ctrlKey || event.metaKey;
 
     if (command && (event.key === "z" || event.key === "Z")) {
       // Ctrl＋Z：元に戻す、Ctrl＋Shift＋Z：やり直し
@@ -2116,7 +2125,9 @@
 
 {#if loadState === "ready"}
   <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
-  <div class="editor">
+  <!-- no-print-view：印刷用のページを作っていない間だけ付ける（ステップ18-2） -->
+  <!--   ブラウザのメニューから印刷したときに、編集の画面を紙に出さないようにするため -->
+  <div class="editor" class:no-print-view={!printing}>
     <TopBar
       {saveState}
       tempo={score.tempo}
@@ -2242,6 +2253,16 @@
     <PianoKeyboard startOctave={keyboardOctave} onpress={handleKey} onshift={handleShift} collapsed={keyboardCollapsed} ontoggle={handleToggleKeyboard} />
   </div>
 
+  <!-- メニューから印刷したときに紙に出す案内（ステップ18-2） -->
+  <!-- 画面では見えず、印刷のときだけ出る。印刷用のページを作っている間は出さない -->
+  <!-- （ブラウザのメニュー「ファイル → プリント」から開くと、印刷用のページを作る時間がないため） -->
+  {#if !printing}
+    <div class="print-fallback">
+      <p>楽譜を印刷するときは、画面の右上の［PDF 出力］ボタンか、⌘P（Windows は Ctrl＋P）を使ってください。</p>
+      <p>A4 の大きさに合わせた印刷用のページを作ってから、印刷の画面を開きます。</p>
+    </div>
+  {/if}
+
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
   {#if printing}
     <!-- visibleParts：表示しているパートだけを印刷する（ステップ12-6b） -->
@@ -2283,5 +2304,22 @@
   }
   .load-status {
     padding: 16px; /* 読み込み中・見つからないときの文字のまわりの余白 */
+  }
+  /* メニューから印刷したときの案内（ステップ18-2）：画面では出さない */
+  .print-fallback {
+    display: none;
+  }
+  /* 印刷のとき（ステップ18-2） */
+  @media print {
+    /* 印刷用のページを作っていないときは、編集の画面を隠して、案内だけを出す */
+    .editor.no-print-view {
+      display: none;
+    }
+    .print-fallback {
+      display: block;
+      padding: 20mm 15mm;
+      font-size: 12pt;
+      line-height: 1.8;
+    }
   }
 </style>
