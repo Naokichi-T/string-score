@@ -658,7 +658,8 @@ function directionsBeforeXml(note) {
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // ----------------------------------------------------------
 function directionsAfterXml(note) {
-  if (note.wedge !== "stop") return [];
+  // （ステップ16-1：松葉の終わりは wedgeEnd に分けた。同じ音符での終わりと始まり・音符の下だけの松葉の書き出しは、ステップ16-2 で入れる）
+  if (!note.wedgeEnd) return [];
   return [`      <direction placement="below">`, "        <direction-type>", `          <wedge type="stop"/>`, "        </direction-type>", "      </direction>"];
 }
 

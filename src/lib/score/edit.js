@@ -937,6 +937,7 @@ export function canSpan(score, range) {
 // ----------------------------------------------------------
 // 関数：getSpanState
 // 範囲の最初と最後の音符に、どのスラー・松葉が付いているかを調べる（ボタンを青くするため）
+// （ステップ16-1：松葉の終わりは wedgeEnd で調べる）
 // 戻り値：{ slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
 // ----------------------------------------------------------
 export function getSpanState(score, range) {
@@ -947,7 +948,7 @@ export function getSpanState(score, range) {
   const last = noteAt(ends.last);
   return {
     slur: first.slur === "start" && last.slur === "stop",
-    wedge: last.wedge === "stop" ? (first.wedge ?? null) : null,
+    wedge: last.wedgeEnd ? (first.wedge ?? null) : null,
   };
 }
 
@@ -957,34 +958,89 @@ export function getSpanState(score, range) {
 //   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）
 // 範囲の最初の音符に「ここから」、最後の音符に「ここまで」の印を付ける
 // 間の音符に付いていた同じ種類の印は消す（重なってわかりにくくならないように）
+// （ステップ16-1：松葉は wedge（始まり）と wedgeEnd（終わり）を別々に持つようにした）
+//   ・最初の音符で前の松葉が終わっていても（wedgeEnd）、そのまま残す → ＜ の終わりの音符から ＞ を始められる
+//   ・最後の音符から次の松葉が始まっていても（wedge）、そのまま残す
+//   ・範囲の中の音符の下だけの松葉（wedgeInside）は、重ならないように外す
+//   ・相手がいなくなった松葉は、最後に cleanSpanners で外す
 // 戻り値：新しい楽譜データ（付けられないときは元の楽譜データのまま）
 // ----------------------------------------------------------
 export function toggleSpanner(score, range, kind) {
   const ends = spanEnds(score, range);
   if (!ends) return score;
 
-  const field = kind === "slur" ? "slur" : "wedge"; // データのどの項目を使うか
-  const startValue = kind === "slur" ? "start" : kind; // 「ここから」の印
-
   const newScore = cloneScore(score);
   const noteAt = (pos) => newScore.parts[pos.part].measures[pos.measure].notes[pos.note];
   const first = noteAt(ends.first);
   const last = noteAt(ends.last);
 
-  // すでに同じものが付いていれば外す
-  if (first[field] === startValue && last[field] === "stop") {
-    delete first[field];
-    delete last[field];
+  // スラー（今までどおり "start" と "stop"）
+  if (kind === "slur") {
+    // すでに付いていれば外す
+    if (first.slur === "start" && last.slur === "stop") {
+      delete first.slur;
+      delete last.slur;
+      return newScore;
+    }
+    // 付ける（間の音符のスラーの印は消す）
+    ends.inner.forEach((pos) => {
+      delete noteAt(pos).slur;
+    });
+    first.slur = "start";
+    last.slur = "stop";
     return newScore;
   }
 
-  // 付ける（間の音符の同じ種類の印は消す）
+  // 松葉：すでに同じものが付いていれば外す
+  if (first.wedge === kind && last.wedgeEnd) {
+    delete first.wedge;
+    delete last.wedgeEnd;
+    cleanSpanners(newScore.parts[range.part]);
+    return newScore;
+  }
+
+  // 松葉を付ける：間の音符の松葉の印と、範囲の中の音符の下だけの松葉は消す
   ends.inner.forEach((pos) => {
-    delete noteAt(pos)[field];
+    const note = noteAt(pos);
+    delete note.wedge;
+    delete note.wedgeEnd;
+    delete note.wedgeInside;
   });
-  first[field] = startValue;
-  last[field] = "stop";
+  delete first.wedgeInside;
+  delete last.wedgeInside;
+  first.wedge = kind; // 最初の音符の wedgeEnd（前の松葉の終わり）は残す
+  last.wedgeEnd = true; // 最後の音符の wedge（次の松葉の始まり）は残す
+  cleanSpanners(newScore.parts[range.part]); // 入れ替えで相手がいなくなった松葉を外す
   return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：canWedgeInside
+// 選んでいる音符の下だけに、松葉を付けられるか調べる（ステップ16-1）
+// 音符（休符ではない）を1つ選んでいるときだけ付けられる
+// ----------------------------------------------------------
+export function canWedgeInside(score, selection) {
+  if (!selection) return false;
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  return !!note && !note.rest;
+}
+
+// ----------------------------------------------------------
+// 関数：toggleWedgeInside
+// 選んでいる音符の下だけに、松葉を付ける・外す（ステップ16-1）
+//   kind … 'crescendo'（＜）か 'diminuendo'（＞）
+// 1つの音符に1つだけ：同じものなら外す、違うものなら入れ替える
+// 戻り値：新しい楽譜データ（付けられないときは元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleWedgeInside(score, selection, kind) {
+  if (!canWedgeInside(score, selection)) return score;
+  return updateNote(score, selection, (n) => {
+    if (n.wedgeInside === kind) {
+      delete n.wedgeInside;
+    } else {
+      n.wedgeInside = kind;
+    }
+  });
 }
 
 // ==========================================================
@@ -1773,25 +1829,45 @@ export function cleanSpanners(part) {
     });
   });
 
-  // スラー（"start" と "stop"）と松葉（"crescendo"・"diminuendo" と "stop"）を、同じやり方で調べる
-  ["slur", "wedge"].forEach((field) => {
-    let open = null; // 「ここから」の印が付いていて、まだ「ここまで」が来ていない音符
-    notes.forEach((note) => {
-      const value = note[field];
-      if (value === undefined) return;
-      if (value === "stop") {
-        if (open) {
-          open = null; // 正しい組になった
-        } else {
-          delete note[field]; // 「ここから」がない「ここまで」は外す
-        }
+  // スラー（"start" と "stop"）を調べる
+  // （「どんな音符でも入る」と VSCode に教えておく。書かないと、null しか入らないと思われてエラーになる）
+  /** @type {any} */
+  let open = null; // 「ここから」の印が付いていて、まだ「ここまで」が来ていない音符
+  notes.forEach((note) => {
+    const value = note.slur;
+    if (value === undefined) return;
+    if (value === "stop") {
+      if (open) {
+        open = null; // 正しい組になった
       } else {
-        if (open) delete open[field]; // 前の「ここから」に「ここまで」がなかったので外す
-        open = note;
+        delete note.slur; // 「ここから」がない「ここまで」は外す
       }
-    });
-    if (open) delete open[field]; // 最後まで「ここまで」が来なかった「ここから」は外す
+    } else {
+      if (open) delete open.slur; // 前の「ここから」に「ここまで」がなかったので外す
+      open = note;
+    }
   });
+  if (open) delete open.slur; // 最後まで「ここまで」が来なかった「ここから」は外す
+
+  // 松葉（始まり wedge と終わり wedgeEnd）を調べる（ステップ16-1：終わりを wedgeEnd に分けた）
+  // 1つの音符では「前の松葉の終わり → 次の松葉の始まり」の順に見る（＜ の終わりの音符から ＞ が始まる形のため）
+  // （音符の下だけの松葉 wedgeInside は、1つの音符で完結しているので調べない）
+  /** @type {any} */
+  let openWedge = null; // 始まりが付いていて、まだ終わりが来ていない音符
+  notes.forEach((note) => {
+    if (note.wedgeEnd) {
+      if (openWedge) {
+        openWedge = null; // 正しい組になった
+      } else {
+        delete note.wedgeEnd; // 始まりのない終わりは外す
+      }
+    }
+    if (note.wedge) {
+      if (openWedge) delete openWedge.wedge; // 前の始まりに終わりがなかったので外す
+      openWedge = note;
+    }
+  });
+  if (openWedge) delete openWedge.wedge; // 最後まで終わりが来なかった始まりは外す
 }
 
 // ----------------------------------------------------------

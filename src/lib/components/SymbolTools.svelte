@@ -32,10 +32,12 @@
   //              例：onsymbol('bowing', 'down')、onsymbol('fingering', 2)
   //   spanState    … 選んだ範囲に付いているスラー・松葉 { slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
+  //   canWedgeNote … 選んでいる1つの音符の下だけに松葉を付けられるか（ステップ16-1）
+  //                  （このときの spanState.wedge は、その音符の下だけの松葉）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（次の音が音符で、タイが付いていないか）（ステップ11-5a）
   //   head         … 重音の中で選んでいる玉の番号（低い順。0 から。［ひし形］のボタンを青くするのに使う）（ステップ14-5a）
-  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {}, canGlissando = false, head = 0 } = $props();
+  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, canWedgeNote = false, onspanner = () => {}, canGlissando = false, head = 0 } = $props();
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!note);
@@ -234,15 +236,15 @@
     {/each}
   </div>
 
-  <!-- スラー・松葉（範囲を選んだときだけ押せる） -->
+  <!-- スラー・松葉（スラーは範囲を選んだときだけ押せる。松葉は、音符を1つだけ選んだときも押せて、その音符の下だけに付く（ステップ16-1）） -->
   <div class="group">
     <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（S）（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
     <button
       class="tool text"
       class:on={spanState.wedge === "crescendo"}
-      disabled={!canSpanRange}
+      disabled={!canSpanRange && !canWedgeNote}
       onclick={() => onspanner("crescendo")}
-      title="クレッシェンド（Shift＋クリックで範囲を選んでから押す）"
+      title="クレッシェンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
       aria-label="クレッシェンド"
     >
       ＜
@@ -250,9 +252,9 @@
     <button
       class="tool text"
       class:on={spanState.wedge === "diminuendo"}
-      disabled={!canSpanRange}
+      disabled={!canSpanRange && !canWedgeNote}
       onclick={() => onspanner("diminuendo")}
-      title="ディミヌエンド（Shift＋クリックで範囲を選んでから押す）"
+      title="ディミヌエンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
       aria-label="ディミヌエンド"
     >
       ＞

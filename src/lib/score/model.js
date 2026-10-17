@@ -37,7 +37,13 @@
 //             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'D', alter: 0, octave: 5, diamond: true }], duration: 'quarter', dots: 0, tie: false },
 //             // 2つの音を行き来するトレモロ（2音トレモロ）は、2音の重音に alternate: true と tremolo（連桁の本数）を付ける（ステップ14-6a）
 //             // 例：2分音符の長さの間、ド5とミ5を32分音符の細かさで交互に弾く（下の音から）
-//             { pitch: { step: 'C', alter: 0, octave: 5 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'half', dots: 0, tie: false, tremolo: 3, alternate: true }
+//             { pitch: { step: 'C', alter: 0, octave: 5 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'half', dots: 0, tie: false, tremolo: 3, alternate: true },
+//             // 松葉（＜ ＞）は3つの項目で書く（ステップ16-1。前は wedge に "stop"（終わり）も入れていた）
+//             //   wedge       … ここから松葉が始まる（"crescendo"（＜）か "diminuendo"（＞））
+//             //   wedgeEnd    … 前から続いてきた松葉が、ここで終わる（true）
+//             //   wedgeInside … この音符の下だけの松葉（"crescendo" か "diminuendo"。1つの音符に1つだけ）
+//             // 例：ファで ＜ が終わって、ファから ＞ が始まる → ファに wedgeEnd: true と wedge: "diminuendo"
+//             { pitch: { step: 'F', alter: 0, octave: 4 }, duration: 'quarter', dots: 0, tie: false, wedgeEnd: true, wedge: 'diminuendo' }
 //           ]
 //         }
 //       ]
@@ -562,6 +568,40 @@ export function restsForSpan(start, length, time) {
 // ----------------------------------------------------------
 export function createPartId() {
   return "p" + Math.random().toString(36).slice(2, 10);
+}
+
+// ----------------------------------------------------------
+// 関数：upgradeWedgeNotes
+// 音の並びの中の、古い形の松葉の終わり（wedge: "stop"）を、新しい形（wedgeEnd: true）に直す（ステップ16-1）
+// （ステップ16-1 より前に保存した楽譜・コピーした音には、古い形が入っているため）
+//   notes … 音の並び
+// 戻り値：直すものがなければ、渡された並びそのまま。あれば、直した新しい並び
+// ----------------------------------------------------------
+export function upgradeWedgeNotes(notes) {
+  if (!notes.some((note) => note.wedge === "stop")) return notes;
+  return notes.map((note) => {
+    if (note.wedge !== "stop") return note;
+    const { wedge, ...rest } = note; // wedge を取りのぞいた形
+    return { ...rest, wedgeEnd: true };
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：upgradeWedges
+// 楽譜の中の、古い形の松葉の終わり（wedge: "stop"）を、新しい形（wedgeEnd: true）に直す（ステップ16-1）
+// 開いたとき（ensurePartIds といっしょに）と、MusicXML を読み込んだときに使う
+// 戻り値：直すものがなければ、渡された楽譜データそのまま。あれば、直した新しい楽譜データ
+// ----------------------------------------------------------
+export function upgradeWedges(score) {
+  const needs = score.parts.some((part) => part.measures.some((measure) => measure.notes.some((note) => note.wedge === "stop")));
+  if (!needs) return score;
+  return {
+    ...score,
+    parts: score.parts.map((part) => ({
+      ...part,
+      measures: part.measures.map((measure) => ({ ...measure, notes: upgradeWedgeNotes(measure.notes) })),
+    })),
+  };
 }
 
 // ----------------------------------------------------------

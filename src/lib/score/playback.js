@@ -464,10 +464,11 @@ function computeWedges(part) {
     const kind = item.note.wedge;
     if (kind !== "crescendo" && kind !== "diminuendo") continue;
 
-    // 終わりの音（"stop" の印のある音符）を先まで探す
+    // 終わりの音（wedgeEnd の印のある音符）を先まで探す（ステップ16-1：終わりは wedgeEnd に分けた）
+    // （音符の下だけの松葉 wedgeInside は、1つの音の途中ではふくらまない決まりなので、音を変えない（ステップ16-1））
     let endK = -1;
     for (let m = k + 1; m < list.length; m++) {
-      if (!list[m].note.rest && list[m].note.wedge === "stop") {
+      if (!list[m].note.rest && list[m].note.wedgeEnd) {
         endK = m;
         break;
       }

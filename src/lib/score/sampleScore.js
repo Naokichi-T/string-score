@@ -115,7 +115,7 @@ export const sampleScore = {
         { notes: [n("A", 4, "half"), r("quarter")] },
         // 10小節目：小節の中のデクレッシェンド（＞）
         {
-          notes: [sym(n("C", 5, "quarter"), { wedge: "diminuendo" }), n("D", 5, "quarter"), sym(n("E", 5, "quarter"), { wedge: "stop" })],
+          notes: [sym(n("C", 5, "quarter"), { wedge: "diminuendo" }), n("D", 5, "quarter"), sym(n("E", 5, "quarter"), { wedgeEnd: true })],
         },
         {
           notes: [n("F", 5, "16th"), n("G", 5, "16th"), n("A", 5, "16th"), n("G", 5, "16th"), n("F", 5, "half")],
@@ -128,7 +128,7 @@ export const sampleScore = {
         },
         { notes: [n("D", 5, "quarter", 1), n("E", 5, "eighth"), n("C", 5, "quarter")] },
         // 最後の小節：フェルマータ・強弱 pp（デクレッシェンドはこの手前で終わる）
-        { notes: [sym(n("F", 5, "half", 1), { fermata: true, dynamic: "pp", wedge: "stop" })] },
+        { notes: [sym(n("F", 5, "half", 1), { fermata: true, dynamic: "pp", wedgeEnd: true })] },
       ],
     },
     {
@@ -198,7 +198,7 @@ export const sampleScore = {
         // 2小節目：五線より低い音の強弱 fp（音符にぶつからないよう下にずれる）、アクセント
         // クレッシェンドは fp の手前で終わる
         {
-          notes: [sym(n("A", 2, "half"), { dynamic: "fp", articulations: ["accent"], wedge: "stop" }), n("A", 3, "half")],
+          notes: [sym(n("A", 2, "half"), { dynamic: "fp", articulations: ["accent"], wedgeEnd: true }), n("A", 3, "half")],
         },
         { notes: [n("D", 3, "half"), r("quarter")] },
         { notes: [n("F", 2, "half", 1)] },

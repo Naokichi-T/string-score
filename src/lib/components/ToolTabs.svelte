@@ -52,6 +52,7 @@
   //   onsymbol     … 「記号」タブのボタンが押されたときに呼ぶ関数（記号の種類と名前を渡す）
   //   spanState    … 選んだ範囲に付いているスラー・松葉（「記号」タブで使う）
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（「記号」タブで使う）
+  //   canWedgeNote … 選んでいる1つの音符の下だけに松葉を付けられるか（「記号」タブで使う）（ステップ16-1）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（「記号」タブで使う）
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（「記号」タブで使う）（ステップ11-5a）
   //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
@@ -166,6 +167,7 @@
     onsymbol = () => {},
     spanState = { slur: false, wedge: null },
     canSpanRange = false,
+    canWedgeNote = false,
     onspanner = () => {},
     canGlissando = false,
     mode = "overwrite",
@@ -385,7 +387,7 @@
       </div>
     {:else if activeTab === "symbol"}
       <!-- head：［ひし形］のボタンを青くするための、選んでいる玉の番号（ステップ14-5a） -->
-      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} {canGlissando} head={selectedHead} />
+      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {canWedgeNote} {onspanner} {canGlissando} head={selectedHead} />
     {:else if activeTab === "technique"}
       <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
       <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />

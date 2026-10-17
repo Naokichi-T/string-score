@@ -21,6 +21,8 @@
 // 入れるときは JSON.stringify で文字に、出すときは JSON.parse で元に戻す
 // ==========================================================
 
+import { upgradeWedgeNotes } from "./model.js"; // コピーした音の、古い形の松葉を直す（ステップ16-1）
+
 // 一覧の表を入れる場所の名前
 const LIST_KEY = "string-score:list";
 
@@ -322,7 +324,9 @@ export function loadClipboard() {
     if (!text) return null;
     const notes = JSON.parse(text);
     // 音が1つ以上入った配列でなければ（壊れていたら）、コピーしていないことにする
-    return Array.isArray(notes) && notes.length > 0 ? notes : null;
+    if (!Array.isArray(notes) || notes.length === 0) return null;
+    // 古い形の松葉の終わり（wedge: "stop"）は、新しい形（wedgeEnd）に直す（ステップ16-1）
+    return upgradeWedgeNotes(notes);
   } catch (error) {
     console.error("コピーした音を読み込めませんでした", error);
     return null;

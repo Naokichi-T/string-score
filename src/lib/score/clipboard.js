@@ -321,12 +321,16 @@ export function pasteNotes(score, selection, clip) {
       if (i < pieces.length - 1) piece.tie = true; // 次の音符とタイでつなぐ
     });
     last.tie = event.note.tie ?? false; // 最後は、元の音のタイのまま
-    ["slur", "wedge"].forEach((field) => {
-      if (first[field] === "stop") {
-        delete first[field];
-        last[field] = "stop";
-      }
-    });
+    if (first.slur === "stop") {
+      delete first.slur;
+      last.slur = "stop";
+    }
+    // 松葉の終わり（wedgeEnd）も、分けた音の最後の部分に移す（ステップ16-1：終わりを wedgeEnd に分けた）
+    // （始まり wedge と、音符の下だけの松葉 wedgeInside は、最初の部分に残す）
+    if (first.wedgeEnd) {
+      delete first.wedgeEnd;
+      last.wedgeEnd = true;
+    }
     // グリッサンドは、分けた音の最後の部分から次の音へすべらせる（ステップ11-5a）
     // （最初の部分のままだと、タイでつながった同じ高さの音へ線を引いてしまう）
     if (first.glissando) {

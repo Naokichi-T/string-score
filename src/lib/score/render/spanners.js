@@ -17,6 +17,8 @@ const SLUR_THICKNESS = 2; // スラーのまん中の太さ
 const HAIRPIN_HALF = 5; // 松葉の開いた側の、まん中からの幅（上下それぞれ）
 const HAIRPIN_GAP = 6; // 松葉と強弱記号のすき間
 const HAIRPIN_SLUR_GAP = 4; // 松葉と、下側に描いたスラーのすき間
+const INSIDE_WEDGE_GAP = 8; // 音符の下だけの松葉の右の端と、次の音符のすき間（ステップ16-1）
+const INSIDE_WEDGE_MIN = 16; // 音符の下だけの松葉の、いちばん短い長さ（ステップ16-1）
 const GLISS_GAP = 3; // グリッサンドの線と、音符の玉（臨時記号・付点）とのすき間（ステップ11-5a）
 const GLISS_TEXT_SIZE = 11; // 「gliss.」の文字の大きさ
 const GLISS_TEXT_RAISE = 3; // 「gliss.」の文字を、線からどれだけ上に離すか
@@ -38,6 +40,7 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
     // ① このパートのスラーと松葉を探す（どの音からどの音までか）
     const slurs = []; // スラーの音符の一覧の並び
     const wedges = []; // { entries: 松葉の音符の一覧, type: 種類 } の並び
+    const insides = []; // 音符の下だけの松葉 { entry: その音符, next: 次の音符（なければ null）, type: 種類 } の並び（ステップ16-1）
 
     // 今開いている（start を見つけて、まだ stop が来ていない）スラーと松葉の始まり
     let slurStart = -1; // スラーが始まった音の番号（-1 は開いていない）
@@ -58,13 +61,18 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
       }
 
       // ----- 松葉 -----
-      if (data.wedge === "stop" && wedgeStart >= 0) {
+      // （ステップ16-1：終わりは wedgeEnd に分けた。1つの音符では「前の松葉の終わり → 次の松葉の始まり」の順に見る）
+      if (data.wedgeEnd && wedgeStart >= 0) {
         wedges.push({ entries: notesOfPart.slice(wedgeStart, k + 1), type: wedgeType });
         wedgeStart = -1;
       }
       if (data.wedge === "crescendo" || data.wedge === "diminuendo") {
         wedgeStart = k;
         wedgeType = data.wedge;
+      }
+      // 音符の下だけの松葉（ステップ16-1）
+      if (data.wedgeInside === "crescendo" || data.wedgeInside === "diminuendo") {
+        insides.push({ entry: entry, next: notesOfPart[k + 1] ?? null, type: data.wedgeInside });
       }
     });
 
@@ -87,6 +95,10 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
     // ③ 松葉を描く（下側のスラーにぶつからないようにする）
     wedges.forEach((wedge) => {
       drawWedgeSpan(VF, context, wedge.entries, wedge.type, lineBounds, slurBelows);
+    });
+    // ③-2 音符の下だけの松葉を描く（ステップ16-1）
+    insides.forEach((inside) => {
+      drawInsideWedge(VF, context, inside.entry, inside.next, inside.type, lineBounds, slurBelows);
     });
   });
 }
@@ -325,6 +337,59 @@ function drawWedgeSpan(VF, context, entries, type, lineBounds, slurBelows) {
     context.stroke();
     context.restore();
   });
+}
+
+// ----------------------------------------------------------
+// 関数：drawInsideWedge
+// 1つの音符の下だけの松葉を描く（ステップ16-1）
+// 音符の左から、次の音符の少し手前まで（次の音符が別の段・ないときは、段の終わりの少し手前まで）
+// 高さ・強弱記号のよけ方・スラーのよけ方は、ふつうの松葉（drawWedgeSpan）と同じ
+//   entry … その音符（render.js の allNotes の1つ）
+//   next  … 次の音符・休符（なければ null）
+//   type  … 'crescendo' か 'diminuendo'
+// ----------------------------------------------------------
+function drawInsideWedge(VF, context, entry, next, type, lineBounds, slurBelows) {
+  const staveNote = entry.staveNote;
+  const bounds = lineBounds[entry.line];
+
+  // 高さ：強弱記号と同じ高さ
+  let y = dynamicBaselineY(VF, staveNote, staveNote.getStave()) - 6;
+
+  // 左の端：音符の左（強弱があれば、その右から）
+  let x1 = staveNote.getAbsoluteX();
+  if (entry.data.dynamic && DYNAMICS[entry.data.dynamic]) {
+    x1 = x1 + dynamicWidth(context, entry.data.dynamic) + HAIRPIN_GAP;
+  }
+  // この音符で前の松葉が終わっているときは、その終わり（玉の右の端）と重ならないように、玉の右から始める
+  if (entry.data.wedgeEnd) {
+    x1 = Math.max(x1, staveNote.getNoteHeadEndX() + HAIRPIN_GAP);
+  }
+  // 右の端：次の音符の少し手前（同じ段にないときは、段の終わりの少し手前）
+  const sameLine = next && next.line === entry.line;
+  let x2 = sameLine ? next.staveNote.getAbsoluteX() - INSIDE_WEDGE_GAP : bounds.endX - INSIDE_WEDGE_GAP;
+  // 短すぎるときは、音符の玉の右までは描く
+  x2 = Math.max(x2, staveNote.getNoteHeadEndX() + 4, x1 + INSIDE_WEDGE_MIN);
+
+  // 下側のスラーと横の位置が重なるなら、そのスラーより下にずらす
+  slurBelows.forEach((slur) => {
+    if (slur.line !== entry.line) return;
+    if (slur.x2 < x1 || slur.x1 > x2) return;
+    const needed = slur.bottom + HAIRPIN_HALF + HAIRPIN_SLUR_GAP;
+    if (y < needed) y = needed;
+  });
+
+  // ＜ は右に開く、＞ は左が開く
+  const h1 = type === "crescendo" ? 0 : HAIRPIN_HALF;
+  const h2 = type === "crescendo" ? HAIRPIN_HALF : 0;
+  context.save();
+  context.setLineWidth(1);
+  context.beginPath();
+  context.moveTo(x1, y - h1);
+  context.lineTo(x2, y - h2);
+  context.moveTo(x1, y + h1);
+  context.lineTo(x2, y + h2);
+  context.stroke();
+  context.restore();
 }
 
 // ----------------------------------------------------------

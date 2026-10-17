@@ -67,6 +67,7 @@ import {
   MAX_CHORD_NOTES,
   hasDiamond,
   ALTERNATE_DURATIONS,
+  upgradeWedgeNotes,
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners, cleanAlternates } from "./edit.js";
@@ -1743,6 +1744,12 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   });
 
   // 相手のいないスラー・松葉を外す（読めなかった小節で片方が消えたときなど）（ステップ8-4a）
+  // （ステップ16-1：松葉の終わりを新しい形（wedgeEnd）に直してから、相手のいない印を外す。読み方そのものはステップ16-2 で直す）
+  parts.forEach((part) => {
+    part.measures.forEach((measure) => {
+      measure.notes = upgradeWedgeNotes(measure.notes);
+    });
+  });
   parts.forEach((part) => cleanSpanners(part));
 
   // パート名は、このアプリの決まりで付け直す（Violin I・Violin II…）

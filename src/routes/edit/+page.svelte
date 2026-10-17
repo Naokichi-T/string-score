@@ -44,6 +44,7 @@
     measureNumber,
     hasPickup,
     NO_DOT_DURATIONS,
+    upgradeWedges,
   } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
   import {
@@ -64,6 +65,8 @@
     canSpan,
     getSpanState,
     toggleSpanner,
+    canWedgeInside,
+    toggleWedgeInside,
     rangeHasNotes,
     deleteRange,
     transposeRange,
@@ -138,8 +141,17 @@
   // 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
   let canSpanRange = $derived(canSpan(score, range));
 
+  // 音符を1つだけ選んでいて、その音符の下だけに松葉を付けられるか（ステップ16-1）
+  // （範囲にスラー・松葉を付けられるときは、範囲のほうを使う）
+  let canWedgeNote = $derived(!canSpanRange && canWedgeInside(score, selection));
+
   // 範囲に付いているスラー・松葉（ボタンを青くするため）
-  let spanState = $derived(getSpanState(score, range));
+  // （ステップ16-1：音符を1つだけ選んでいるときは、その音符の下だけの松葉）
+  let spanState = $derived.by(() => {
+    if (canSpanRange) return getSpanState(score, range);
+    if (canWedgeNote) return { slur: false, wedge: getSelectedNote(score, selection)?.wedgeInside ?? null };
+    return { slur: false, wedge: null };
+  });
 
   // 選んでいる音にグリッサンドを付けられるか（「記号」タブのボタンを押せるようにするため）（ステップ11-5a）
   let glissandoAllowed = $derived(canGlissando(score, selection));
@@ -575,7 +587,8 @@
     mixer = loadMixer(id); // この楽譜の音量の設定（ステップ12-3）
     hiddenParts = loadHiddenParts(id); // この楽譜の、隠すパートの設定（ステップ12-6a）
     // パートに id（名札）がなければ付ける（ステップ12-3 より前に作った楽譜）（ステップ12-3）
-    const withIds = ensurePartIds(loaded);
+    // （ステップ16-1：古い形の松葉の終わり（wedge: "stop"）も、新しい形（wedgeEnd）に直す）
+    const withIds = upgradeWedges(ensurePartIds(loaded));
     score = withIds;
     if (withIds === loaded) {
       savedScore = score; // 開いただけでは保存しない（更新日時を変えないため）
@@ -1281,9 +1294,16 @@
   // 関数：handleSpanner
   // スラー・＜・＞ のボタンが押されたとき：選んだ範囲に付ける・外す
   //   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）
+  // （ステップ16-1：音符を1つだけ選んでいるときの ＜・＞ は、その音符の下だけの松葉を付ける・外す）
   // ----------------------------------------------------------
   function handleSpanner(kind) {
-    if (!canSpanRange) return;
+    if (!canSpanRange) {
+      if (kind !== "slur" && canWedgeNote) {
+        message = "";
+        commit(toggleWedgeInside(score, selection, kind));
+      }
+      return;
+    }
     message = "";
     // commit で範囲選択が消えるので、覚えておいて元に戻す
     // （スラーや松葉を付けても音の並びは変わらないので、範囲はずれない）
@@ -2092,6 +2112,7 @@
       onsymbol={handleSymbol}
       {spanState}
       {canSpanRange}
+      {canWedgeNote}
       onspanner={handleSpanner}
       canGlissando={glissandoAllowed}
       {score}
