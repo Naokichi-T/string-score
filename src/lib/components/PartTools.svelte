@@ -45,7 +45,9 @@
   </div>
 
   <!-- 拍の線（押すたびに入・切）（ステップ12-7） -->
+  <!-- 見え方の設定だと分かるように、「表示」の見出しを付ける（「小節」タブには移さない。ステップ16-3） -->
   <div class="group">
+    <span class="label">表示</span>
     <button class:on={beatLines} onclick={() => ontogglebeats()} title="拍の頭ごとに、五線に色の線を引く（1拍目は赤、ほかは青。PDF には出ない）"> 拍の線 </button>
   </div>
 
