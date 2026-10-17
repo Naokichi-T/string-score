@@ -13,6 +13,10 @@
 // （ステップ14-6b：2音トレモロ（<tremolo type="start">・<tremolo type="stop"> の組）を読むようにした）
 //   ・組の2つの音を、1つの2音トレモロの音符（2音の重音＋alternate）にまとめる（下の音から並べ直す）
 //   ・このアプリで扱えない形（8分音符の組・重音の組など）は、2つのふつうの音符（半分の長さ）にして知らせる
+// （ステップ16-2：松葉を番号（number）ごとに組にして読むようにした）
+//   ・終わり（stop）は、同じ番号で開いている松葉のうち、いちばん古いものを閉じる（番号を書かないファイルも組になる）
+//   ・始まりと同じ音符で終わる松葉 → その音符の下だけの松葉（wedgeInside）
+//   ・始まりと違う音符で終わる松葉 → 終わりの音符に wedgeEnd（その音符から次の松葉が始まっていてもよい）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -1061,9 +1065,13 @@ function keyAtMeasures(measures, i) {
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
 //   direction … <direction>
 //   state     … パートごとの読みかけの情報
-//                pending … 次の音符に付ける記号 { dynamic, techniques, wedge }（techniques は奏法の名前の並び。ステップ11-2）
+//                pending … 次の音符に付ける記号 { dynamic, techniques }（techniques は奏法の名前の並び。ステップ11-2）
+//                          （ステップ16-2：松葉の始まりは pending ではなく openWedges で覚える）
 //                lastNote … ここまでに読んだ最後の音符（松葉の終わりを付ける）
-//                wedgeStopNext … 松葉の終わりを、次の音符に付けるか（1つの音符の中で始まって終わる松葉のとき）（ステップ15-6）
+//                wedgeStopNext … 松葉の終わりを、次の音符に付けるか（ステップ15-6。ステップ16-2 からは、
+//                                1つの音符の中で始まって終わる松葉を、その音符の下だけの松葉にできないときだけ使う）
+//                openWedges … 開いている（まだ終わりの来ていない）松葉の一覧（ステップ16-2）
+//                             { number: 番号, kind: 種類, note: 始まりの音符（まだ音符が来ていなければ null）} を、始まった順に並べる
 //   counter   … 使えなかった記号を数える表
 // ----------------------------------------------------------
 function readDirection(direction, state, counter) {
@@ -1089,23 +1097,84 @@ function readDirection(direction, state, counter) {
       else report(counter, "文字の指示（dolce・cresc. など）");
     });
 
-    // 松葉
+    // 松葉（ステップ16-2：番号ごとに組にして読む）
     childElements(type, "wedge").forEach((wedge) => {
       const kind = wedge.getAttribute("type");
+      const number = wedge.getAttribute("number") || "1"; // 書いていなければ 1（MusicXML の決まり）
       if (kind === "crescendo" || kind === "diminuendo") {
-        // 始まり：次の音符に付ける
-        state.pending.wedge = kind;
+        startWedge(kind, number, state);
       } else if (kind === "stop") {
-        // 終わり：ここまでに読んだ最後の音符に付ける（その音符に別の印があれば使えない）
-        // （ステップ15-6：最後の音符が同じ松葉の始まりの音符なら（1つの音符の中で始まって終わる松葉）、
-        //   このアプリでは1つの音符に始まりと終わりを両方付けられないので、終わりを次の音符に付ける（＝次の音符まで延ばす））
-        const startsHere = state.lastNote && (state.lastNote.wedge === "crescendo" || state.lastNote.wedge === "diminuendo");
-        if (state.lastNote && state.lastNote.wedge === undefined) state.lastNote.wedge = "stop";
-        else if (startsHere) state.wedgeStopNext = true;
-        else report(counter, "つなげられなかった松葉");
+        stopWedge(number, state, counter);
       }
     });
   });
+}
+
+// ----------------------------------------------------------
+// 関数：startWedge
+// 松葉の始まり（<wedge type="crescendo"> など）を読んだときの処理（ステップ16-2）
+// 開いている松葉の一覧に足すだけ（始まりの音符は、次の音符を読んだときに applyPending で覚える）
+// 音符に印を付けるのは、終わりが来て「つながる松葉」か「音符の下だけの松葉」かが決まったとき（stopWedge）
+// （1つの音符の前に、「つながる松葉の始まり」と「下だけの松葉の始まり」が両方来ることがあるため）
+//   kind   … "crescendo"（＜）か "diminuendo"（＞）
+//   number … 松葉の番号（文字）
+//   state  … パートごとの読みかけの情報（readDirection の説明を参照）
+// ----------------------------------------------------------
+function startWedge(kind, number, state) {
+  state.openWedges.push({ number: number, kind: kind, note: null });
+}
+
+// ----------------------------------------------------------
+// 関数：stopWedge
+// 松葉の終わり（<wedge type="stop">）を読んだときの処理（ステップ16-2）
+// 同じ番号で開いている松葉のうち、いちばん古いものを閉じて、音符に印を付ける
+//   ・始まりと同じ音符で終わる → その音符の下だけの松葉（wedgeInside）にする
+//       ただし、その音符にもう下だけの松葉があるときは、今までどおり
+//       終わりを次の音符に付ける（＝次の音符まで延ばす）（ステップ15-6）
+//   ・始まりと違う音符で終わる → 始まりの音符に wedge、ここまでに読んだ最後の音符に wedgeEnd を付ける
+//       （終わりの音符から次の松葉が始まっていてもよい。ステップ16-1 のデータの形でできるようになった）
+//   number  … 松葉の番号（文字）
+//   state   … パートごとの読みかけの情報（readDirection の説明を参照）
+//   counter … 使えなかった記号を数える表
+// ----------------------------------------------------------
+function stopWedge(number, state, counter) {
+  const index = state.openWedges.findIndex((open) => open.number === number);
+  if (index < 0) {
+    report(counter, "つなげられなかった松葉"); // 始まりのない終わり
+    return;
+  }
+  const open = state.openWedges[index];
+  state.openWedges.splice(index, 1); // 一覧から外す
+
+  // 始まりのあと、音符が来ないうちに終わった松葉（長さのない松葉）・前に音符のない終わりは使わない
+  const last = state.lastNote;
+  if (open.note === null || !last) {
+    report(counter, "つなげられなかった松葉");
+    return;
+  }
+
+  // 始まりと同じ音符で終わった：その音符の下だけの松葉にする
+  if (open.note === last) {
+    if (last.wedgeInside === undefined) {
+      last.wedgeInside = open.kind;
+    } else if (last.wedge === undefined) {
+      // 下だけの松葉がもうある：始まりをこの音符に付けて、終わりを次の音符に付ける（次の音符まで延ばす）（ステップ15-6）
+      last.wedge = open.kind;
+      state.wedgeStopNext = true;
+    } else {
+      report(counter, "つなげられなかった松葉");
+    }
+    return;
+  }
+
+  // 始まりと違う音符で終わった：始まりと終わりの印を付ける
+  // （始まりの音符から、もう別の松葉が始まっている・最後の音符でもう別の松葉が終わっている ときは使えない）
+  if (open.note.wedge === undefined && !last.wedgeEnd) {
+    open.note.wedge = open.kind;
+    last.wedgeEnd = true;
+  } else {
+    report(counter, "つなげられなかった松葉");
+  }
 }
 
 // ----------------------------------------------------------
@@ -1116,18 +1185,19 @@ function readDirection(direction, state, counter) {
 function applyPending(note, state, counter) {
   if (note.rest) return;
   // 1つの音符の中で始まって終わった松葉の終わりを、この音符に付ける（次の音符まで延ばす）（ステップ15-6）
+  // （ステップ16-2：終わりは wedgeEnd で付ける。この音符から次の松葉が始まっていてもよい）
   if (state.wedgeStopNext) {
-    note.wedge = "stop";
+    note.wedgeEnd = true;
     state.wedgeStopNext = false;
   }
   const pending = state.pending;
   if (pending.dynamic) note.dynamic = pending.dynamic;
   if (pending.techniques) note.techniques = pending.techniques;
-  if (pending.wedge) {
-    // 同じ音符で前の松葉が終わっていたら、このアプリでは付けられない
-    if (note.wedge === undefined) note.wedge = pending.wedge;
-    else report(counter, "つなげられなかった松葉");
-  }
+  // 松葉の始まり：この音符の前で始まった松葉に、始まりの音符を覚える（ステップ16-2）
+  // （音符に印を付けるのは、終わりが来たとき（stopWedge））
+  state.openWedges.forEach((open) => {
+    if (open.note === null) open.note = note;
+  });
   state.pending = {};
 }
 
@@ -1150,7 +1220,9 @@ function readPart(partElement, counter, skipped) {
   //   pending    … <direction> で読んで、次の音符に付ける記号
   //   lastNote   … ここまでに読んだ最後の音符（松葉の終わりを付ける）
   //   pendingGrace … 読んだ前打音で、次の主音に付けるもの { type, pitch }（なければ null）（ステップ11-8b）
-  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false }; // wedgeStopNext はステップ15-6
+  //   wedgeStopNext … 松葉の終わりを次の音符に付けるか（ステップ15-6）
+  //   openWedges    … 開いている松葉の一覧（ステップ16-2）
+  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false, openWedges: [] };
 
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
@@ -1408,6 +1480,13 @@ function finishAlternates(measure, counter) {
       merged.alternate = true;
       merged.tie = false; // 2音トレモロにはタイを付けない決まり
       delete merged.pairMark;
+      // 1つ目の音から始まって、2つ目の音で終わる松葉は、まとめた音符の下だけの松葉にする（ステップ16-2）
+      // （そのままだと、まとめた音符に「前の松葉の終わり」と「次の松葉の始まり」が付いたことになってしまう）
+      if (note.wedge && !note.wedgeEnd && next.wedgeEnd && merged.wedgeInside === undefined) {
+        merged.wedgeInside = note.wedge;
+        delete merged.wedge;
+        delete merged.wedgeEnd;
+      }
       // 2音トレモロは重音なので、重音に付けられない記号（前打音・トリルなどの装飾・グリッサンド）は外して数える
       // （外さないと、このアプリの決まりに合わないデータになり、書き出すと前打音が消える）（ステップ15-4）
       if (merged.grace) {
@@ -1744,7 +1823,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   });
 
   // 相手のいないスラー・松葉を外す（読めなかった小節で片方が消えたときなど）（ステップ8-4a）
-  // （ステップ16-1：松葉の終わりを新しい形（wedgeEnd）に直してから、相手のいない印を外す。読み方そのものはステップ16-2 で直す）
+  // （ステップ16-1：松葉の終わりを新しい形（wedgeEnd）に直してから、相手のいない印を外す）
+  // （ステップ16-2：読み方を直したので、読み込みでは古い形（wedge: "stop"）はもう作らない。念のため直す処理は残しておく）
   parts.forEach((part) => {
     part.measures.forEach((measure) => {
       measure.notes = upgradeWedgeNotes(measure.notes);

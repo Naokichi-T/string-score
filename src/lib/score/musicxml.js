@@ -10,6 +10,8 @@
 // （ステップ14-6b：2音トレモロ。2つの <note> の組にして、<tremolo type="start">・<tremolo type="stop"> を書く）
 // （ステップ15-3：アウフタクト。1小節目を <measure number="0" implicit="yes"> にして、次の小節から 1, 2, 3… と数える）
 //   implicit="yes" … 「小節番号として数えない小節」という MusicXML の決まり
+// （ステップ16-2：松葉に番号（number）を付けて、同じ音符での「＜の終わり → ＞の始まり」と、1つの音符の下だけの松葉を書く）
+//   番号が 1 のときは書かない（書かなければ 1 という決まり。今までの楽譜の書き出しは変わらない）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -606,13 +608,86 @@ function notationsXml(note, tieStop, tieStart, tupletMark) {
 }
 
 // ----------------------------------------------------------
+// 関数：wedgeNumberAttr
+// 松葉の <wedge> に付ける番号の文字（number="2" など）を作る（ステップ16-2）
+// 番号が 1 のときは空の文字（書かなければ 1 という MusicXML の決まり）
+//   number … 松葉の番号（1, 2, 3…）
+// ----------------------------------------------------------
+function wedgeNumberAttr(number) {
+  return number && number !== 1 ? ` number="${number}"` : "";
+}
+
+// ----------------------------------------------------------
+// 関数：wedgeXml
+// 松葉の <direction> 1つ分を作る（ステップ16-2）
+//   type   … "crescendo"（＜の始まり）・"diminuendo"（＞の始まり）・"stop"（終わり）
+//   number … 松葉の番号（1 なら書かない）
+// 戻り値：XML の行の配列
+// ----------------------------------------------------------
+function wedgeXml(type, number) {
+  return [`      <direction placement="below">`, "        <direction-type>", `          <wedge type="${type}"${wedgeNumberAttr(number)}/>`, "        </direction-type>", "      </direction>"];
+}
+
+// ----------------------------------------------------------
+// 関数：wedgeNumbers
+// パートの音を前から見て、松葉ごとに番号を決める（ステップ16-2）
+// 同じ音符で「前の松葉の終わり」と「次の松葉の始まり」が重なるとき、どの始まりとどの終わりが組なのかを
+// 番号で区別するため。番号は、そのとき使っていない、いちばん小さい数（1, 2, 3…）にする
+//   partNotes … パートの音を、小節をまたいで1列に並べたもの
+// 戻り値：Map（音符のデータ → { start, end, inside }）
+//   start  … この音符から始まる松葉（wedge）の番号
+//   end    … この音符で終わる松葉（wedgeEnd）の番号
+//   inside … この音符の下だけの松葉（wedgeInside）の番号
+// （松葉の付いていない音符は Map に入らない）
+// ----------------------------------------------------------
+function wedgeNumbers(partNotes) {
+  const numbers = new Map();
+  let openNumber = null; // 開いている（まだ終わっていない）松葉の番号（なければ null）
+
+  // 使っている番号の一覧から、使っていない、いちばん小さい番号を探す
+  const freeNumber = (used) => {
+    let n = 1;
+    while (used.includes(n)) n = n + 1;
+    return n;
+  };
+
+  partNotes.forEach((note) => {
+    const hasStart = note.wedge === "crescendo" || note.wedge === "diminuendo";
+    const hasInside = note.wedgeInside === "crescendo" || note.wedgeInside === "diminuendo";
+    if (!hasStart && !hasInside && !note.wedgeEnd) return;
+
+    const used = openNumber === null ? [] : [openNumber]; // この音符の間、使っている番号
+    const entry = {};
+    // この音符から始まる松葉：前の松葉がこの音符で終わっていても、まだ使っている番号とは別にする
+    if (hasStart) {
+      entry.start = freeNumber(used);
+      used.push(entry.start);
+    }
+    // この音符の下だけの松葉：開いている松葉・この音符から始まる松葉とも別にする
+    if (hasInside) entry.inside = freeNumber(used);
+    // この音符で終わる松葉：開いている松葉の番号（始まりがなければ 1。前と同じ書き出しになる）
+    if (note.wedgeEnd) {
+      entry.end = openNumber ?? 1;
+      openNumber = null;
+    }
+    // この音符から始まった松葉は、次の音符からも開いたまま
+    if (hasStart) openNumber = entry.start;
+
+    numbers.set(note, entry);
+  });
+
+  return numbers;
+}
+
+// ----------------------------------------------------------
 // 関数：directionsBeforeXml
 // 音符の前に置く <direction>（強弱・pizz./arco・松葉の始まり）を作る（ステップ8-2）
 // MusicXML では、強弱などは音符の中ではなく、音符の直前に「指示」として書く
-//   note … 音符・休符のデータ
+//   note    … 音符・休符のデータ
+//   numbers … この音符の松葉の番号 { start, end, inside }（wedgeNumbers で決めたもの。なければ空）（ステップ16-2）
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // ----------------------------------------------------------
-function directionsBeforeXml(note) {
+function directionsBeforeXml(note, numbers = {}) {
   const lines = [];
 
   // 強弱（pp〜ff・sf・fp）：五線の下に書く
@@ -639,12 +714,14 @@ function directionsBeforeXml(note) {
   });
 
   // 松葉の始まり（＜ は crescendo、＞ は diminuendo）：五線の下に書く
+  // （ステップ16-2：番号を付ける。前の松葉がこの音符で終わっていても、ここで次の松葉を始められる）
   if (note.wedge === "crescendo" || note.wedge === "diminuendo") {
-    lines.push(`      <direction placement="below">`);
-    lines.push("        <direction-type>");
-    lines.push(`          <wedge type="${note.wedge}"/>`);
-    lines.push("        </direction-type>");
-    lines.push("      </direction>");
+    lines.push(...wedgeXml(note.wedge, numbers.start));
+  }
+
+  // この音符の下だけの松葉の始まり（ステップ16-2）：音符のあとに同じ番号の終わりを書く（directionsAfterXml）
+  if (note.wedgeInside === "crescendo" || note.wedgeInside === "diminuendo") {
+    lines.push(...wedgeXml(note.wedgeInside, numbers.inside));
   }
 
   return lines;
@@ -654,13 +731,26 @@ function directionsBeforeXml(note) {
 // 関数：directionsAfterXml
 // 音符のあとに置く <direction>（松葉の終わり）を作る（ステップ8-2）
 // 終わりの音の「あと」に置くと、松葉がその音の終わりまでのびる（このアプリの表示と同じ）
-//   note … 音符・休符のデータ
+//   note    … 音符・休符のデータ
+//   numbers … この音符の松葉の番号 { start, end, inside }（wedgeNumbers で決めたもの。なければ空）（ステップ16-2）
 // 戻り値：XML の行の配列（何もなければ空の配列）
+// （ステップ16-1：松葉の終わりは wedgeEnd に分けた）
 // ----------------------------------------------------------
-function directionsAfterXml(note) {
-  // （ステップ16-1：松葉の終わりは wedgeEnd に分けた。同じ音符での終わりと始まり・音符の下だけの松葉の書き出しは、ステップ16-2 で入れる）
-  if (!note.wedgeEnd) return [];
-  return [`      <direction placement="below">`, "        <direction-type>", `          <wedge type="stop"/>`, "        </direction-type>", "      </direction>"];
+function directionsAfterXml(note, numbers = {}) {
+  const lines = [];
+
+  // この音符の下だけの松葉の終わり（ステップ16-2）
+  // 前から続いてきた松葉の終わりより先に書く（読み込みで、先に「この音符の中の松葉」と分かるようにするため）
+  if (note.wedgeInside === "crescendo" || note.wedgeInside === "diminuendo") {
+    lines.push(...wedgeXml("stop", numbers.inside));
+  }
+
+  // 前から続いてきた松葉の終わり
+  if (note.wedgeEnd) {
+    lines.push(...wedgeXml("stop", numbers.end));
+  }
+
+  return lines;
 }
 
 // ----------------------------------------------------------
@@ -822,6 +912,8 @@ function partXml(score, p, divisions) {
       glissStops.add(next);
     }
   });
+  // 松葉の番号を、先に全部決めておく（ステップ16-2）
+  const wedgeNumberMap = wedgeNumbers(partNotes);
   const lastIndex = part.measures.length - 1;
   let noteIndex = -1; // パート全体で、今書いている音の番号（partNotes の中の番号）（ステップ14-3）
 
@@ -887,7 +979,8 @@ function partXml(score, p, divisions) {
         };
       }
 
-      lines.push(...directionsBeforeXml(note)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
+      const wedgeNumber = wedgeNumberMap.get(note) ?? {}; // この音符の松葉の番号（ステップ16-2）
+      lines.push(...directionsBeforeXml(note, wedgeNumber)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
       // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
       // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）（重音には前打音を付けない決まり（ステップ14-1））
@@ -911,7 +1004,7 @@ function partXml(score, p, divisions) {
           lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0));
         });
       }
-      lines.push(...directionsAfterXml(note)); // 松葉の終わり（ステップ8-2）
+      lines.push(...directionsAfterXml(note, wedgeNumber)); // 松葉の終わり（ステップ8-2。ステップ16-2：音符の下だけの松葉の終わりも）
       prevTie = !note.rest && !!note.tie;
       prevTiedNote = prevTie ? note : null;
     });
