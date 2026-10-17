@@ -17,6 +17,7 @@
   // （ステップ11-2：「奏法」タブを追加。中身は TechniqueTools）
   // （ステップ12-3：「再生」タブを追加。中身は PlaybackTools）
   // （ステップ14-1：「音符」タブに［重音］のボタンを追加）
+  // （ステップ17-1：「楽譜の設定」タブに移調の欄を追加。ontranspose を ScoreSettings へ渡す）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -57,6 +58,7 @@
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（「記号」タブで使う）（ステップ11-5a）
   //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
   //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
+  //   ontranspose  … 「楽譜の設定」タブの［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
   //   canDeleteMeasure … 小節を消せるか（「小節」タブで使う）
   //   onmeasure    … 「小節」タブのボタンが押されたときに呼ぶ関数（"before"・"after"・"delete" を渡す）
   //   currentTime  … 選んでいる小節の拍子 { beats, beatType }（「小節」タブで使う）
@@ -140,6 +142,7 @@
     isNew = false,
     score,
     onsettings = () => {},
+    ontranspose = () => {},
     canDeleteMeasure = false,
     onmeasure = () => {},
     currentTime = { beats: 4, beatType: 4 },
@@ -417,7 +420,7 @@
     {:else if activeTab === "playback"}
       <PlaybackTools parts={score.parts} {mixer} {onmixer} {metronome} {onmetronome} {repeatOn} {repeatText} {onrepeat} />
     {:else if activeTab === "settings"}
-      <ScoreSettings {score} {onsettings} {focusTitle} />
+      <ScoreSettings {score} {onsettings} {focusTitle} {ontranspose} />
     {/if}
   </div>
 </div>

@@ -6,15 +6,54 @@
   // （ステップ5-1で追加）
   // 速度記号の候補は、打った文字で「始まる」ものだけを出す（大文字・小文字は区別しない）
   // （ブラウザの datalist は「含む」ものを出すので、候補の一覧は自分で作っている）
+  // （ステップ17-1：楽譜全体の移調の欄を追加）
   // ==========================================================
   import { tick, onMount } from "svelte";
+  import { keyAt, KEY_CHOICES } from "#lib/score/model.js"; // 1小節目の調・調の一覧（ステップ17-1）
+  import { transposeInterval, intervalName } from "#lib/score/transpose.js"; // 動かす量と音程の名前（ステップ17-1）
 
   // 親から受け取るもの
   //   score      … 楽譜データ（入力欄に今の値を出すのに使う）
   //   onsettings … 確定したときに呼ぶ関数（項目の名前と、入力された文字を渡す）
   //                例：onsettings("title", "春の歌")、onsettings("tempo", "120")
   //   focusTitle … true なら、出てきたときにタイトルの入力欄にカーソルを入れて、文字を全部選ぶ（ステップ7-3）
-  let { score, onsettings = () => {}, focusTitle = false } = $props();
+  //   ontranspose … ［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
+  //                 例：ontranspose(4, "nearest")
+  let { score, onsettings = () => {}, focusTitle = false, ontranspose = () => {} } = $props();
+
+  // ----------------------------------------------------------
+  // ここから下は、移調の欄（ステップ17-1）
+  // ----------------------------------------------------------
+
+  // 向きの選びかた
+  //   value … ontranspose に渡す名前
+  //   name  … 選ぶ欄に出す名前
+  const DIRECTIONS = [
+    { value: "nearest", name: "近いほう" },
+    { value: "up", name: "上へ" },
+    { value: "down", name: "下へ" },
+  ];
+
+  // 今の調（1小節目の調）
+  let currentKey = $derived(keyAt(score, 0));
+
+  // 今の調の名前（例："♯2つ（ニ長調・ロ短調）"）
+  let currentKeyName = $derived(KEY_CHOICES.find((item) => item.key === currentKey)?.name ?? "");
+
+  // 行き先に選んでいる調（最初は今の調）
+  let targetKey = $state(0);
+
+  // 選んでいる向き（最初は「近いほう」）
+  let direction = $state("nearest");
+
+  // 今の調が変わったら（移調した・元に戻したなど）、行き先の欄も今の調に合わせる
+  // （移調したあとに、同じボタンをもう一度押して2回動かしてしまわないように）
+  $effect(() => {
+    targetKey = currentKey;
+  });
+
+  // 動かす量と、その音程の名前（例："長2度上（半音2個上）"。同じ調なら空の文字）
+  let intervalText = $derived(intervalName(transposeInterval(currentKey, targetKey, direction)));
 
   // タイトルの入力欄（bind:this で入力欄そのものが入る）
   let titleInput;
@@ -193,6 +232,31 @@
     ♩ =
     <input class="number" type="number" min="20" max="300" step="1" value={score.tempo} onchange={(event) => handleChange("tempo", event)} onkeydown={handleKeydown} />
   </label>
+
+  <!-- 移調（楽譜全体。全パート・全小節を動かして、調号も変える）（ステップ17-1） -->
+  <div class="transpose">
+    <span class="heading">移調</span>
+    <span class="current">今の調：{currentKeyName}</span>
+    <span class="arrow">→</span>
+    <!-- 行き先の調 -->
+    <select class="key" bind:value={targetKey} title="行き先の調">
+      {#each KEY_CHOICES as item}
+        <option value={item.key}>{item.name}</option>
+      {/each}
+    </select>
+    <!-- 向き -->
+    <select class="direction" bind:value={direction} title="上へ動かすか、下へ動かすか">
+      {#each DIRECTIONS as item}
+        <option value={item.value}>{item.name}</option>
+      {/each}
+    </select>
+    <!-- 同じ調を選んでいるときは押せない -->
+    <button class="run" disabled={intervalText === ""} onclick={() => ontranspose(targetKey, direction)}>移調する</button>
+    <!-- 動かす音程（例：長2度上（半音2個上）） -->
+    {#if intervalText !== ""}
+      <span class="interval">{intervalText}</span>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -224,6 +288,51 @@
   }
   .number {
     width: 70px;
+  }
+  /* 移調の欄（ステップ17-1） */
+  .transpose {
+    display: flex;
+    flex-wrap: wrap; /* 画面が狭いときは折り返す */
+    align-items: center;
+    gap: 8px;
+    padding-left: 16px;
+    border-left: 1px solid #ddd; /* タイトルなどの欄と分ける線 */
+  }
+  .heading {
+    font-weight: bold;
+  }
+  .current {
+    color: #555;
+  }
+  .arrow {
+    color: #888;
+  }
+  select {
+    height: 32px;
+    padding: 0 6px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+  }
+  .run {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 14px;
+    border: 1px solid #2563eb;
+    border-radius: 4px;
+    background: #2563eb; /* 青 */
+    color: #fff;
+    cursor: pointer;
+  }
+  .run:disabled {
+    border-color: #ccc;
+    background: #e5e7eb; /* 押せないときは灰色 */
+    color: #999;
+    cursor: default;
+  }
+  .interval {
+    color: #2563eb;
   }
   .combo {
     position: relative; /* 候補の一覧を、この枠を基準に置く */

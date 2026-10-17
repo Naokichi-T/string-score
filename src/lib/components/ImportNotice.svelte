@@ -4,19 +4,26 @@
   // MusicXML を読み込んだときに「知らせること」を、黄色い枠で出す（ステップ8-4c）
   // トップページから goto の state（importWarnings）で渡された一覧を読む
   // ［×］で閉じる。ページを再読み込みすると、state が消えるので出なくなる
+  // （ステップ17-1：移調で知らせることにも使えるように、見出しと一覧を親から渡せるようにした）
   // ==========================================================
   import { untrack } from "svelte";
   import { page } from "$app/state";
 
-  // 知らせることの一覧（最初に開いたときの state を写しておく。閉じたら空にする）
-  // untrack：「最初の値だけを使う」ことをはっきりさせる（あとで state が変わっても追いかけない）
-  let warnings = $state(untrack(() => page.state.importWarnings ?? []));
+  // 親から受け取るもの（どちらも省略したら、MusicXML の読み込みの知らせになる）（ステップ17-1）
+  //   title … 枠の見出しの文
+  //   items … 知らせることの一覧（省略したら、goto の state の importWarnings を読む）
+  let { title = "MusicXML の読み込みで、次のことがありました", items = undefined } = $props();
+
+  // 知らせることの一覧（最初に出したときの一覧を写しておく。閉じたら空にする）
+  // untrack：「最初の値だけを使う」ことをはっきりさせる（あとで変わっても追いかけない）
+  // （出し直すときは、親が {#key} で作り直す）
+  let warnings = $state(untrack(() => items ?? page.state.importWarnings ?? []));
 </script>
 
 {#if warnings.length > 0}
   <div class="notice">
     <div class="text">
-      <p class="title">MusicXML の読み込みで、次のことがありました</p>
+      <p class="title">{title}</p>
       <ul>
         {#each warnings as warning}
           <li>{warning}</li>

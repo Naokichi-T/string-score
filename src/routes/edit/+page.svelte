@@ -19,6 +19,7 @@
   // （ステップ14-1：［重音］が入のとき、鍵盤・音名キーで選んでいる音に音を足す）
   // （ステップ14-2：重音の中の1つの玉を選んで、▲▼・♯♭♮・削除をその玉だけに効かせる）
   // （ステップ14-5a：ハーモニクス（ひし形の玉のある音符）の音を確かめるときは、聞こえる音を鳴らす）
+  // （ステップ17-1：「楽譜の設定」タブの［移調する］で、楽譜全体を移調する）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -101,6 +102,7 @@
     removeChordHead,
     cleanAlternates,
   } from "#lib/score/edit.js";
+  import { transposeScore } from "#lib/score/transpose.js"; // 楽譜全体の移調（ステップ17-1）
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
@@ -175,6 +177,10 @@
 
   // 知らせたいこと（画面の「選択中」の右に赤く出す）
   let message = $state("");
+
+  // 移調で知らせること（黄色い枠で出す。なければ null）（ステップ17-1）
+  //   { items: 知らせることの一覧 }（移調するたびに新しく作るので、{#key} で枠が作り直される）
+  let transposeNotice = $state(null);
 
   // 鍵盤の一番左のドのオクターブ
   let keyboardOctave = $state(4);
@@ -682,6 +688,7 @@
     selection = result.entry.selection;
     rangeEnd = null; // 範囲選択はやめる
     message = "";
+    transposeNotice = null; // 移調の知らせも消す（元に戻したら、もう当てはまらないため）（ステップ17-1）
   }
 
   // ----------------------------------------------------------
@@ -697,6 +704,7 @@
     selection = result.entry.selection;
     rangeEnd = null; // 範囲選択はやめる
     message = "";
+    transposeNotice = null; // 移調の知らせも消す（元に戻したら、もう当てはまらないため）（ステップ17-1）
   }
 
   // ----------------------------------------------------------
@@ -1310,6 +1318,29 @@
     const end = rangeEnd;
     commit(toggleSpanner(score, range, kind));
     rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleTransposeScore
+  // 「楽譜の設定」タブの［移調する］が押されたとき：楽譜全体を移調する（ステップ17-1）
+  //   toKey     … 行き先の調（♯の数がプラス、♭の数がマイナス）
+  //   direction … "nearest"（近いほう）・"up"（上へ）・"down"（下へ）
+  // （▲▼ で高さを変える handleTranspose とは別の関数）
+  // 移調できないとき（ド1〜ド8 の外に出る音がある）は、赤い字で知らせて何もしない
+  // いちばん低い開放弦より低い音ができたときは、移調して黄色い枠で知らせる
+  // ----------------------------------------------------------
+  function handleTransposeScore(toKey, direction) {
+    message = "";
+    transposeNotice = null;
+    const result = transposeScore(score, toKey, direction);
+    if (result.error) {
+      message = result.error;
+      return;
+    }
+    commit(result.score); // 選択中の場所はそのまま（音の数や並びは変わらないため）
+    if (result.warnings.length > 0) {
+      transposeNotice = { items: result.warnings };
+    }
   }
 
   // ----------------------------------------------------------
@@ -2119,6 +2150,7 @@
       canGlissando={glissandoAllowed}
       {score}
       onsettings={handleSettings}
+      ontranspose={handleTransposeScore}
       {canDeleteMeasure}
       onmeasure={handleMeasure}
       {currentTime}
@@ -2170,6 +2202,12 @@
     <SelectionInfo {score} {selection} {range} {message} onmove={handleMoveButton} />
     <!-- MusicXML を読み込んだときに知らせること（なければ何も出ない）（ステップ8-4c） -->
     <ImportNotice />
+    <!-- 移調で知らせること（なければ何も出ない）（ステップ17-1） -->
+    {#key transposeNotice}
+      {#if transposeNotice}
+        <ImportNotice title="移調で、次のことがありました" items={transposeNotice.items} />
+      {/if}
+    {/key}
 
     <!-- 五線譜の部分だけスクロールする -->
     <main class="score-area">
