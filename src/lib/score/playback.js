@@ -24,7 +24,7 @@
 // }
 // ==========================================================
 
-import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS, isAlternate } from "./model.js";
+import { measureTicks, measureLength, measureOffset, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS, isAlternate } from "./model.js";
 import { HARMONIC_SOUNDS } from "./symbols.js";
 import { keyAlters } from "./accidentals.js";
 import { mixerOf, isAudible } from "./mixer.js";
@@ -769,7 +769,7 @@ function makeTempoWarp(score, startMeasure, order) {
 
   sequence.forEach((i, s) => {
     const info = score.measures[i];
-    const length = measureTicks(timeAt(score, i));
+    const length = measureLength(score, i); // アウフタクトなら短い長さ（ステップ15-2）
 
     // くり返しで戻ったとき（前の小節のすぐ次ではないとき）：1回目にこの小節に来たときの速さに戻す（ステップ11-7a）
     if (s > 0 && i !== sequence[s - 1] + 1 && firstVisit.has(i)) {
@@ -791,7 +791,7 @@ function makeTempoWarp(score, startMeasure, order) {
       let to = i;
       while (to < score.measures.length - 1 && !score.measures[to].gradualEnd) to = to + 1;
       let rangeLength = 0;
-      for (let k = i; k <= to; k++) rangeLength = rangeLength + measureTicks(timeAt(score, k));
+      for (let k = i; k <= to; k++) rangeLength = rangeLength + measureLength(score, k); // アウフタクトなら短い長さ（ステップ15-2）
       const toRate = rate * (info.gradual === "rit" ? RIT_RATE : ACCEL_RATE);
       gradual = { startTick: tick, length: rangeLength, fromRate: rate, toRate: toRate, to: to };
     }
@@ -882,9 +882,10 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   const fermatas = []; // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
+  // （ステップ15-2：アウフタクトの小節は、アウフタクトの長さで数える）
   let totalTicks = 0;
   order.forEach((i) => {
-    totalTicks = totalTicks + measureTicks(timeAt(score, i));
+    totalTicks = totalTicks + measureLength(score, i);
   });
 
   // 小節をたどる並び：始める小節より前（強弱などの状態を数えるだけ）＋ 鳴らす小節の順番（ステップ11-7a）
@@ -1191,13 +1192,20 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     const measureStart = warp.at(measureTick);
     measureStarts.push({ measure: i, startTick: measureStart + shiftBefore(points, measureStart, true) });
     // この小節の拍の頭ごとにクリックを1つ（1拍目は strong）
+    // （ステップ15-2：アウフタクトの小節では、拍子どおりの拍の位置で鳴らす（拍の線と同じ考え方））
+    //   offset … 小節の頭が、拍子どおりの1小節の中のどこにあたるか（アウフタクトでなければ 0）
+    //   例：4/4・1拍のアウフタクト → offset は3拍分。小節の頭（4拍目）に弱いクリックが1つ。1拍目の強いクリックはない
     const time = timeAt(score, i);
     const beat = beatTicks(time); // 1拍の長さ
-    for (let b = 0; b < measureTicks(time); b = b + beat) {
+    const full = measureTicks(time); // 拍子どおりの1小節の長さ
+    const length = measureLength(score, i); // この小節の長さ（アウフタクトなら短い）
+    const offset = measureOffset(score, i);
+    const first = (beat - (offset % beat)) % beat; // 小節の頭から、最初の拍の頭までの長さ
+    for (let b = first; b < length; b = b + beat) {
       const t = warp.at(measureTick + b);
-      clicks.push({ startTick: t + shiftBefore(points, t, true), strong: b === 0 });
+      clicks.push({ startTick: t + shiftBefore(points, t, true), strong: (b + offset) % full === 0 });
     }
-    measureTick = measureTick + measureTicks(time);
+    measureTick = measureTick + length;
   });
 
   // 装飾・トレモロの付いた音を、短い音に分ける（フェルマータでのびたあとの長さで分ける）（ステップ11-3a・11-3b・11-4）
@@ -1239,9 +1247,12 @@ export function beatTicks(time) {
 //   result       … buildEvents の結果
 //   score        … 楽譜データ
 //   startMeasure … 再生を始める小節（この小節の拍子で1小節ぶん数える）
+// （ステップ15-2：アウフタクトから再生するとき）
+//   1小節ぶん数えてから、アウフタクトが始まる拍まで続けて数える（＝ 1小節 ＋ offset の長さ）
+//   例：4/4・1拍のアウフタクト → 「1 2 3 4 | 1 2 3」と数えて、4拍目からアウフタクトが鳴る
 // 戻り値：result と同じ形で、次のように変えたもの
-//   ・楽器の音・緑の音符・小節の始まり・メトロノームのクリックの時刻を、1小節ぶん後ろにずらす
-//   ・最後までの長さ（totalTicks）も、1小節ぶん長くする
+//   ・楽器の音・緑の音符・小節の始まり・メトロノームのクリックの時刻を、カウントインの長さだけ後ろにずらす
+//   ・最後までの長さ（totalTicks）も、カウントインの長さだけ長くする
 //   ・countInClicks（カウントインのクリックの一覧）を足す
 //     （メトロノームが切でもカウントインは鳴らすので、clicks とは分けておく）
 // ----------------------------------------------------------
@@ -1250,13 +1261,16 @@ export function addCountIn(result, score, startMeasure) {
   // 始める小節のテンポに合わせて、伸び縮みさせる（ステップ11-6a）
   // （拍を数えるのは伸び縮みさせる前の数で行い、クリックの時刻だけ倍にする。小数の足し算の誤差で、拍が1つ増えないようにするため）
   const factor = makeTempoWarp(score, startMeasure, [startMeasure]).factorAt(0);
-  const length = measureTicks(time) * factor; // カウントインの長さ（1小節ぶん）
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  // 数える長さ（伸び縮みさせる前）：1小節 ＋ アウフタクトが始まる位置まで（アウフタクトでなければ 1小節だけ）（ステップ15-2）
+  const countTicks = full + measureOffset(score, startMeasure);
+  const length = countTicks * factor; // カウントインの長さ
   const beat = beatTicks(time); // 1拍の長さ（伸び縮みさせる前）
 
-  // カウントインのクリック（1拍目は strong）
+  // カウントインのクリック（小節の頭の拍は strong）
   const countInClicks = [];
-  for (let b = 0; b < measureTicks(time); b = b + beat) {
-    countInClicks.push({ startTick: b * factor, strong: b === 0 });
+  for (let b = 0; b < countTicks; b = b + beat) {
+    countInClicks.push({ startTick: b * factor, strong: b % full === 0 });
   }
 
   // 時刻を1小節ぶん後ろにずらした、新しいものを作る（もとの result は変えない）
