@@ -7,7 +7,11 @@
 </script>
 
 <svelte:head>
+  <!-- ブラウザのタブに出る小さな絵（ファビコン）：青い四角に、弦（縦線4本）と8分音符（ステップ17-1） -->
   <link rel="icon" href={favicon} />
+  <!-- iPhone・iPad でホーム画面に追加したときの絵（static/apple-touch-icon.png、180×180）（ステップ17-1） -->
+  <!-- 角は iPhone が自分で丸めるので、画像は四角いっぱいに青を塗ってある -->
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 </svelte:head>
 
 {@render children()}
