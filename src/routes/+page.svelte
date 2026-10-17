@@ -220,6 +220,40 @@
       {/each}
     </ul>
   {/if}
+
+  <!-- 簡単な使い方（初めての人と、Google の検索で来た人のため。たたまずに文章で出す）（ステップ17-4） -->
+  <!-- ボタンやタブの名前は、画面の文字と同じにしておく（画面の名前を変えたら、ここも直す） -->
+  <section class="howto">
+    <h2>使い方</h2>
+    <ol class="steps">
+      <li>
+        <span class="step-title">楽譜を作る</span>
+        <span class="step-text">［＋ 新しい楽譜］で楽器の数を選びます。「楽譜の設定」タブで、タイトル・作曲者・テンポを入れます。</span>
+      </li>
+      <li>
+        <span class="step-title">音を入れる</span>
+        <span class="step-text">「音符」タブで長さを選んで、画面の下の鍵盤を押します。▲▼ で高さを直し、← → で前後の音へ移ります。</span>
+      </li>
+      <li>
+        <span class="step-title">記号を付ける</span>
+        <span class="step-text">「記号」「奏法」「小節線」タブで、弓・強弱・pizz.・くり返しなどを付けます。</span>
+      </li>
+      <li>
+        <span class="step-title">聞いてみる</span>
+        <span class="step-text">上のバーの［▶ 再生］で鳴らします。パートごとの音量は「再生」タブで変えられます。</span>
+      </li>
+      <li>
+        <span class="step-title">書き出す</span>
+        <span class="step-text">［PDF 出力］で印刷用の楽譜に、［MusicXML 書き出し］でほかの楽譜アプリで開けるファイルにします。</span>
+      </li>
+    </ol>
+
+    <!-- 保存についての注意（楽譜をなくさないように） -->
+    <div class="notice">
+      <p class="notice-title">⚠ 楽譜はこのブラウザの中に自動で保存されます</p>
+      <p>ほかの端末・ほかのブラウザでは見られません。ブラウザのデータを消すと楽譜も消えるので、大事な楽譜は［MusicXML 書き出し］でファイルにしておいてください。</p>
+    </div>
+  </section>
 </main>
 
 <!-- 新しい楽譜を作る窓（showNewDialog が true のときだけ出す） -->
@@ -329,5 +363,77 @@
   button {
     padding: 4px 10px;
     font-size: 13px;
+  }
+
+  /* ---------- 使い方（ステップ17-4） ---------- */
+  .howto {
+    margin-top: 48px; /* 楽譜の一覧と間を空ける */
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+  }
+  /* 番号付きの手順（番号は自分で描くので、ブラウザの番号は出さない） */
+  .steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: step; /* 番号を数える準備（0 から） */
+  }
+  .steps li {
+    counter-increment: step; /* 行ごとに番号を1つ進める */
+    display: flex; /* 番号・見出し・説明を横に並べる */
+    align-items: baseline; /* 文字の下の線をそろえる */
+    gap: 12px;
+    padding: 10px 0;
+    line-height: 1.6;
+  }
+  /* 青い丸の中に番号（1〜5）を出す */
+  .steps li::before {
+    content: counter(step);
+    flex: none; /* 丸が縮まないようにする */
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #2563eb;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 24px; /* 丸の中で番号を縦のまん中に */
+    text-align: center;
+  }
+  .step-title {
+    flex: none;
+    width: 7.5em; /* 見出しの幅をそろえて、説明の始まりを縦にそろえる */
+    font-weight: bold;
+  }
+  .step-text {
+    color: #333;
+  }
+  /* 保存についての注意（うすい黄色の枠） */
+  .notice {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: #fffbeb;
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .notice p {
+    margin: 0;
+  }
+  /* 「.notice p」の margin: 0 より強くするため、.notice を前に付ける */
+  .notice .notice-title {
+    font-weight: bold;
+    margin-bottom: 4px; /* 見出しと説明の間を少し空ける */
+  }
+  /* 幅の狭い画面では、見出しを説明の上に出す（見出しの幅で説明が細くならないように） */
+  @media (max-width: 600px) {
+    .steps li {
+      flex-wrap: wrap;
+    }
+    .step-text {
+      flex-basis: 100%;
+      padding-left: 36px; /* 番号の丸の分だけ右へ */
+    }
   }
 </style>
