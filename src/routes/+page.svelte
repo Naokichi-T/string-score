@@ -162,7 +162,8 @@
 </script>
 
 <svelte:head>
-  <title>string-score</title>
+  <!-- タブと Google の検索結果の見出しに出る（何のアプリか分かるようにする）（ステップ17-3） -->
+  <title>string-score｜弦楽器の楽譜作成アプリ</title>
 </svelte:head>
 
 <main>

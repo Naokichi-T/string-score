@@ -2061,6 +2061,8 @@
 <svelte:head>
   <!-- ブラウザのタブに楽譜のタイトルを出す（読み込む前は「編集」）（ステップ7-4） -->
   <title>{loadState === "ready" ? score.title : "編集"} - string-score</title>
+  <!-- 編集ページは Google の検索結果に出さない（楽譜はブラウザの中にあるので、ほかの人が開いても中身がない）（ステップ17-3） -->
+  <meta name="robots" content="noindex" />
 </svelte:head>
 
 {#if loadState === "ready"}

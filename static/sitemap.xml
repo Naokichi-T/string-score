@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- サイトマップ：Google に「検索に出したいページ」を伝える一覧（ステップ17-3） -->
+<!-- 載せるのはトップページだけ（編集ページは、楽譜がブラウザの中にあるので、ほかの人が開いても中身がない） -->
+<!-- 使い方・Q&A のページを作ったら、ここに足す -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://string-score.vercel.app/</loc>
+  </url>
+</urlset>

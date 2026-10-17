@@ -1,3 +1,7 @@
-# allow crawling everything by default
+# 検索エンジン（Google など）への案内（ステップ17-3）
+# すべてのページを見てよい（編集ページは、ページの中の noindex の印で、検索結果に出さないようにしている）
 User-agent: *
 Disallow:
+
+# サイトマップ（検索に出したいページの一覧）の場所
+Sitemap: https://string-score.vercel.app/sitemap.xml
