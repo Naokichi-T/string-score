@@ -39,6 +39,10 @@
   <meta property="og:image:height" content="630" />
   <!-- X（旧 Twitter）で、画像を大きく出すカードにする -->
   <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Google Search Console の持ち主の確認（「HTML タグ」の方法）（ステップ17-3） -->
+  <!-- 消すと確認が外れるので、残しておく -->
+  <meta name="google-site-verification" content="QvJLZFa2vKxdL1xZaXeegqlpfeifot30Qql3zlCayJc" />
 </svelte:head>
 
 {@render children()}
