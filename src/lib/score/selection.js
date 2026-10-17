@@ -10,6 +10,9 @@
 
 import { notePitches } from "./model.js"; // 音符の高さを低い順の配列にする（重音なら全部）（ステップ14-1）
 
+// ひし形の玉（ハーモニクスで軽く触れる音）の音名のうしろに付ける印（ステップ14-5a）
+const DIAMOND_MARK = "◇";
+
 // 音名を日本語（ドレミ）で表すための表
 const STEP_NAMES = { C: "ド", D: "レ", E: "ミ", F: "ファ", G: "ソ", A: "ラ", B: "シ" };
 
@@ -92,9 +95,10 @@ export function getSelectedNote(score, selection) {
 // 関数：pitchToJapanese
 // 音の高さを日本語の音名にする
 // 例：{ step: 'F', alter: 1, octave: 4 } → 'ファ♯4'
+// ひし形の玉（diamond）なら、うしろに「◇」を付ける（ステップ14-5a）
 // ----------------------------------------------------------
 export function pitchToJapanese(pitch) {
-  return `${STEP_NAMES[pitch.step]}${ALTER_NAMES[String(pitch.alter ?? 0)]}${pitch.octave}`;
+  return `${STEP_NAMES[pitch.step]}${ALTER_NAMES[String(pitch.alter ?? 0)]}${pitch.octave}${pitch.diamond ? DIAMOND_MARK : ""}`;
 }
 
 // ----------------------------------------------------------
@@ -104,7 +108,7 @@ export function pitchToJapanese(pitch) {
 // （step にはもともと英語の音名 "C" "D" などが入っているので、そのまま使う）
 // ----------------------------------------------------------
 export function pitchToEnglish(pitch) {
-  return `${pitch.step}${ALTER_NAMES[String(pitch.alter ?? 0)]}${pitch.octave}`;
+  return `${pitch.step}${ALTER_NAMES[String(pitch.alter ?? 0)]}${pitch.octave}${pitch.diamond ? DIAMOND_MARK : ""}`;
 }
 
 // ----------------------------------------------------------
@@ -127,6 +131,9 @@ export function durationToJapanese(duration, dots, isRest) {
 // 例：'Violin I　1小節目　1つ目　ラ4＋ミ5（A4＋E5）・4分音符'
 // 重音の中で選んでいる音は［ ］で囲む（ステップ14-2）
 // 例：'Violin I　1小節目　1つ目　ラ4＋［ミ5］（A4＋E5）・4分音符'
+// ひし形の玉（ハーモニクスで軽く触れる音）は、音名のうしろに「◇」を付ける（ステップ14-5a）
+// 例：'Violin I　1小節目　1つ目　ラ4＋［レ5◇］（A4＋D5◇）・4分音符'
+
 // ----------------------------------------------------------
 export function describeSelection(score, selection) {
   const note = getSelectedNote(score, selection);

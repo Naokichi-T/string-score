@@ -18,6 +18,7 @@
   // （ステップ8-1：MusicXML の書き出し）
   // （ステップ14-1：［重音］が入のとき、鍵盤・音名キーで選んでいる音に音を足す）
   // （ステップ14-2：重音の中の1つの玉を選んで、▲▼・♯♭♮・削除をその玉だけに効かせる）
+  // （ステップ14-5a：ハーモニクス（ひし形の玉のある音符）の音を確かめるときは、聞こえる音を鳴らす）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -29,7 +30,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
-  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches } from "#lib/score/model.js";
+  import { createEmptyScore, keyAt, timeAt, tempoAt, INSTRUMENTS, ensurePartIds, isMeasureRest, notePitches, hasDiamond } from "#lib/score/model.js";
   import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
   import {
     canFit,
@@ -85,7 +86,7 @@
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
-  import { buildEvents, secondsPerTick, isPizzAt, addCountIn } from "#lib/score/playback.js";
+  import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts, loadClipboard, saveClipboard, CLIPBOARD_KEY } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
@@ -1090,12 +1091,17 @@
   // 選んでいる音を鳴らす（高さを変えたあとなどに、耳で確かめるため）
   // 重音なら、全部の音をいっしょに鳴らす（ステップ14-1）
   //   onlyHead … true なら、重音の中で選んでいる玉の音だけを鳴らす（1つの玉を変えたとき）（ステップ14-2）
+  // ハーモニクス（ひし形の玉のある音符）なら、どの玉を選んでいても、聞こえる音を鳴らす（ステップ14-5a）
   // ----------------------------------------------------------
   function playSelected(onlyHead = false) {
     const note = getSelectedNote(score, selection);
     if (!note || note.rest) return;
     // ピチカートの範囲なら、ピチカートで鳴らす
     const pizz = isPizzAt(score, selection);
+    if (hasDiamond(note)) {
+      soundingPitches(note, currentInstrument).forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
+      return;
+    }
     const pitches = notePitches(note);
     const targets = onlyHead ? [pitches[selectedHead(score, selection)]] : pitches;
     targets.forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
@@ -1221,6 +1227,9 @@
     if (!noteSelected) return;
     message = "";
     commit(toggleNoteSymbol(score, selection, kind, value));
+
+    // ハーモニクスのボタンのときは、聞こえる音を鳴らして確かめられるようにする（ステップ14-5a）
+    if (kind === "artificialHarmonic" || kind === "diamond") playSelected();
 
     // 前打音を付けた（種類を変えた）ときは、「前打音の高さを入れる」状態にする（ステップ11-8a）
     // 外したときは、その状態をやめる
@@ -2083,6 +2092,7 @@
       {chordMode}
       onchordmode={handleChordMode}
       {chordSelected}
+      selectedHead={selection ? selectedHead(score, selection) : 0}
     />
     <!-- onmove：前後の音へ移るボタン（ステップ12-10a） -->
     <SelectionInfo {score} {selection} {range} {message} onmove={handleMoveButton} />

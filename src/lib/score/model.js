@@ -29,7 +29,10 @@
 //             // 重音（1つの音符に高さが2つ以上）には chord を付ける（ステップ14-1）
 //             //   pitch … いちばん低い音
 //             //   chord … その上に重ねる音（低い順）
-//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'quarter', dots: 0, tie: false }
+//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'E', alter: 0, octave: 5 }], duration: 'quarter', dots: 0, tie: false },
+//             // ハーモニクスで軽く触れる玉（ひし形の玉）は、その高さに diamond: true を付ける（ステップ14-5a）
+//             // 例：人工ハーモニクス（ラ4を押さえて、4度上のレ5に軽く触れる）
+//             { pitch: { step: 'A', alter: 0, octave: 4 }, chord: [{ step: 'D', alter: 0, octave: 5, diamond: true }], duration: 'quarter', dots: 0, tie: false }
 //           ]
 //         }
 //       ]
@@ -78,9 +81,11 @@ export const CLEFS = {
 // （ステップ5-6：name・abbreviation・label を追加）
 export const INSTRUMENTS = {
   // strings … 弦の名前（低い弦から順に）（「奏法」タブの弦の指定で使う）（ステップ11-2）
-  violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン", strings: ["G", "D", "A", "E"] }, // バイオリン（ド4〜ド7）
-  viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ", strings: ["C", "G", "D", "A"] }, // ビオラ（ド3〜ド6）
-  cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ", strings: ["C", "G", "D", "A"] }, // チェロ（ド2〜ド5）
+  // openOctaves … 弦の開放弦のオクターブ（strings と同じ順番）（ハーモニクスで聞こえる音を計算するのに使う）（ステップ14-5a）
+  //               例：バイオリンの G 線の開放弦はソ3（G3）
+  violin: { clef: "treble", keyboardOctave: 4, name: "Violin", abbreviation: "Vln.", label: "バイオリン", strings: ["G", "D", "A", "E"], openOctaves: [3, 4, 4, 5] }, // バイオリン（ド4〜ド7）
+  viola: { clef: "alto", keyboardOctave: 3, name: "Viola", abbreviation: "Vla.", label: "ビオラ", strings: ["C", "G", "D", "A"], openOctaves: [3, 3, 4, 4] }, // ビオラ（ド3〜ド6）
+  cello: { clef: "bass", keyboardOctave: 2, name: "Cello", abbreviation: "Vc.", label: "チェロ", strings: ["C", "G", "D", "A"], openOctaves: [2, 2, 3, 3] }, // チェロ（ド2〜ド5）
 };
 
 // ----------------------------------------------------------
@@ -123,6 +128,7 @@ export function pitchToVexKey(pitch) {
 //   ・chord は、重ねる音がないときは付けない（ふつうの音符と同じ形）
 //   ・同じ高さ（鍵盤で同じ所）の音は2つ入れない
 //   ・1つの重音は MAX_CHORD_NOTES 音まで
+//   ・ひし形の玉（ハーモニクスで軽く触れる音）の高さには diamond: true を付ける（ステップ14-5a）
 // ==========================================================
 
 // 1つの重音に入れられる音の数（弦楽器の弦は4本なので、同時に弾けるのは4音まで）
@@ -164,6 +170,14 @@ export function notePitches(note) {
 }
 
 // ----------------------------------------------------------
+// 関数：hasDiamond
+// 音符に、ひし形の玉（ハーモニクスで軽く触れる音）があるか調べる（ステップ14-5a）
+// ----------------------------------------------------------
+export function hasDiamond(note) {
+  return notePitches(note).some((pitch) => pitch.diamond);
+}
+
+// ----------------------------------------------------------
 // 関数：setNotePitches
 // 音符の高さを、決まりどおりに入れ直す（渡された音符のデータを直接書き換える）
 //   ・低い順に並べて、いちばん低い音を pitch、残りを chord にする
@@ -171,11 +185,12 @@ export function notePitches(note) {
 // コピーした楽譜データの中でだけ使う
 //   note    … 音符のデータ
 //   pitches … 高さの配列（順番はばらばらでもよい。同じ高さが入っていないこと）
+//   ひし形の印（diamond）は、その高さに付けたまま並べ直す（ステップ14-5a）
 // ----------------------------------------------------------
 export function setNotePitches(note, pitches) {
   // 低い順に並べる（同じ高さなら、音名の順）
   const sorted = pitches
-    .map((pitch) => ({ step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave }))
+    .map((pitch) => ({ step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave, ...(pitch.diamond ? { diamond: true } : {}) }))
     .sort((a, b) => pitchNumber(a) - pitchNumber(b) || STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
   note.pitch = sorted[0];
   if (sorted.length > 1) {

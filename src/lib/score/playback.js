@@ -23,7 +23,8 @@
 // }
 // ==========================================================
 
-import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches } from "./model.js";
+import { measureTicks, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS } from "./model.js";
+import { HARMONIC_SOUNDS } from "./symbols.js";
 import { keyAlters } from "./accidentals.js";
 import { mixerOf, isAudible } from "./mixer.js";
 
@@ -493,6 +494,74 @@ function computeWedges(part) {
   return wedges;
 }
 
+// ハーモニクス（ひし形の玉のある音符）を鳴らす強さの割合（ハーモニクスはやわらかく小さめの音なので）（ステップ14-5a）
+const HARMONIC_RATE = 0.75;
+
+// ----------------------------------------------------------
+// 関数：soundingPitches
+// 音符を鳴らすときに、実際に鳴らす高さの並び（低い順）を返す（ステップ14-5a）
+//   ・ひし形の玉がない音符 … 楽譜どおりの高さ（notePitches と同じ）
+//   ・ひし形の玉がある音符 … ハーモニクスで聞こえる音
+//       ひし形のすぐ下にふつうの玉がある → その2つの間の音程から、聞こえる音を決める（HARMONIC_SOUNDS）
+//                                         （人工ハーモニクスも、開放弦＋ひし形の自然ハーモニクスも同じ）
+//       ひし形の下にふつうの玉がない     → その音符に「sul G」などの弦の指定があれば、その弦の開放弦から決める
+//                                         なければ、ひし形の高さをそのまま鳴らす（正しい音でないこともある）
+//       表にない音程                      → ひし形の高さをそのまま鳴らす
+//     ひし形の下で使ったふつうの玉は鳴らさない（押さえる・開放弦の音で、ハーモニクスのもとになる音なので）
+//     使わなかったふつうの玉は、そのまま鳴らす
+//   note       … 音符のデータ
+//   instrument … 楽器（"violin" など。弦の指定から開放弦を決めるのに使う。省略したら弦の指定は見ない）
+// （鍵盤や ▲▼ で音を確かめるときにも使うので、ほかのファイルから使えるようにした（export））
+// ----------------------------------------------------------
+export function soundingPitches(note, instrument = null) {
+  const pitches = notePitches(note);
+  if (!hasDiamond(note)) return pitches;
+
+  const used = new Set(); // ハーモニクスのもとに使ったふつうの玉の番号
+  const sounds = [];
+  pitches.forEach((pitch, k) => {
+    if (!pitch.diamond) return;
+    // もとになる音：すぐ下のふつうの玉（なければ、弦の指定の開放弦）
+    let base = null;
+    for (let m = k - 1; m >= 0; m--) {
+      if (!pitches[m].diamond) {
+        base = pitches[m];
+        used.add(m);
+        break;
+      }
+    }
+    if (!base) base = openStringOf(note, instrument);
+    const interval = base ? pitchToMidi(pitch) - pitchToMidi(base) : null;
+    const sound = interval !== null ? HARMONIC_SOUNDS[interval] : undefined;
+    // 表にない・もとの音がないときは、書いた高さをそのまま（ひし形の印は外す）
+    sounds.push(sound !== undefined ? midiToPitch(pitchToMidi(base) + sound) : { step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave });
+  });
+  // 使わなかったふつうの玉は、そのまま鳴らす
+  pitches.forEach((pitch, k) => {
+    if (!pitch.diamond && !used.has(k)) sounds.push(pitch);
+  });
+  return sounds.sort((a, b) => pitchToMidi(a) - pitchToMidi(b));
+}
+
+// ----------------------------------------------------------
+// 関数：openStringOf
+// 音符に付いている弦の指定（「sul G」など）から、その弦の開放弦の高さを返す（ステップ14-5a）
+//   note       … 音符のデータ
+//   instrument … 楽器（"violin" など）
+// 戻り値：音の高さ { step, alter, octave }（弦の指定がない・楽器にない弦なら null）
+// ----------------------------------------------------------
+function openStringOf(note, instrument) {
+  const info = INSTRUMENTS[instrument];
+  if (!info) return null;
+  for (const name of note.techniques ?? []) {
+    const match = /^sul ([A-G])$/.exec(name); // 「sul G」の G の部分
+    if (!match) continue;
+    const index = info.strings.indexOf(match[1]);
+    if (index >= 0) return { step: match[1], alter: 0, octave: info.openOctaves[index] };
+  }
+  return null;
+}
+
 // アルペジオで、1音ごとにずらす時間（秒）（ステップ14-4a）
 // テンポに関係なく、弓でさっと弾いたくらいの速さにする
 const ARPEGGIO_SECONDS = 0.06;
@@ -922,11 +991,13 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         if (muted) velocity = Math.round(velocity * MUTE_RATE);
         // 「再生」タブの音量をかける（ステップ12-3b）
         velocity = Math.round(velocity * volumeRate);
+        // ハーモニクス（ひし形の玉のある音符）は、少し小さく鳴らす（ステップ14-5a）
+        if (hasDiamond(note)) velocity = Math.round(velocity * HARMONIC_RATE);
 
         // 高さごとに、鳴らす音を作る（重音でなければ1つだけ）（ステップ14-1）
         // nowEvents … この音符の高さごとの鳴らす音（次の音がタイでつながってきたときに、まとめる先になる）
         const nowEvents = new Map();
-        const pitches = notePitches(note);
+        const pitches = soundingPitches(note, part.instrument); // ハーモニクスなら、聞こえる音（ステップ14-5a）
         // 弦楽器の弾き方で鳴らすか：アルペジオがなく、3音以上の重音で、はじく音・トレモロでないとき（ステップ14-4a）
         const broken = !note.arpeggio && pitches.length >= 3 && !plucked && !note.tremolo;
         pitches.forEach((pitch, k) => {

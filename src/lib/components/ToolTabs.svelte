@@ -105,7 +105,9 @@
   //   onchordmode  … ［重音］が押されたときに呼ぶ関数（「音符」タブで使う）（ステップ14-1）
   //   chordSelected … 選んでいる音符が重音か（ステップ14-1）
   //                   （ステップ14-2：重音でも ♯♭♮ を押せるようにした。説明の文だけ変える）
+  //   selectedHead … 重音の中で選んでいる玉の番号（「記号」タブの［ひし形］で使う）（ステップ14-5a）
   let {
+    selectedHead = 0,
     chordMode = false,
     onchordmode = () => {},
     chordSelected = false,
@@ -378,7 +380,8 @@
         <button class="tool text clip" disabled={!canPaste} onclick={() => onclipboard("paste")} title="選んでいる音の頭から、コピーした音を上書きで貼り付ける（⌘ / Ctrl＋V）"> 貼り付け </button>
       </div>
     {:else if activeTab === "symbol"}
-      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} {canGlissando} />
+      <!-- head：［ひし形］のボタンを青くするための、選んでいる玉の番号（ステップ14-5a） -->
+      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {onspanner} {canGlissando} head={selectedHead} />
     {:else if activeTab === "technique"}
       <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
       <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />

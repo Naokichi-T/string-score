@@ -6,7 +6,23 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // ==========================================================
-  import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TREMOLOS, FERMATA, GLISSANDO, GRACES, FINGERINGS, DYNAMICS, ARPEGGIO } from "#lib/score/symbols.js";
+  import {
+    BOWINGS,
+    ARTICULATIONS,
+    STRING_MARKS,
+    BREATHS,
+    ORNAMENTS,
+    TREMOLOS,
+    FERMATA,
+    GLISSANDO,
+    GRACES,
+    FINGERINGS,
+    DYNAMICS,
+    ARPEGGIO,
+    ARTIFICIAL_HARMONIC,
+    DIAMOND_HEAD,
+  } from "#lib/score/symbols.js";
+  import { notePitches, hasDiamond } from "#lib/score/model.js";
 
   // 親から受け取るもの
   //   note     … 選んでいる音符のデータ（音符を選んでいないときは null）
@@ -16,13 +32,20 @@
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（次の音が音符で、タイが付いていないか）（ステップ11-5a）
-  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {}, canGlissando = false } = $props();
+  //   head         … 重音の中で選んでいる玉の番号（低い順。0 から。［ひし形］のボタンを青くするのに使う）（ステップ14-5a）
+  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, onspanner = () => {}, canGlissando = false, head = 0 } = $props();
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
   let disabled = $derived(!note);
 
   // 選んでいる音符が重音か（重音には、装飾・前打音を付けられない。もう付いているものは、外すために押せる）（ステップ14-1）
   let isChord = $derived(!!note?.chord);
+
+  // 選んでいる音符に、ひし形の玉（ハーモニクス）があるか（ステップ14-5a）
+  let isHarmonic = $derived(!!note && hasDiamond(note));
+
+  // 選んでいる玉が、ひし形か（［ひし形］のボタンを青くする）（ステップ14-5a）
+  let headIsDiamond = $derived(!!note && !!notePitches(note)[head]?.diamond);
 </script>
 
 <div class="symbol-tools">
@@ -63,6 +86,32 @@
         <span class="icon string-mark">{symbol.icon}</span>
       </button>
     {/each}
+  </div>
+
+  <!-- 人工ハーモニクス（1音の音符のときに押せる。ひし形のある音符では、外すために押せる）（ステップ14-5a） -->
+  <!-- ひし形（選んでいる玉を、ひし形にする・戻す）（ステップ14-5a） -->
+  <div class="group">
+    <button
+      class="tool"
+      class:on={isHarmonic}
+      disabled={disabled || (isChord && !isHarmonic)}
+      onclick={() => onsymbol("artificialHarmonic")}
+      title={isChord && !isHarmonic ? `${ARTIFICIAL_HARMONIC.label}（ひし形のない重音には付けられません）` : ARTIFICIAL_HARMONIC.label}
+      aria-label={ARTIFICIAL_HARMONIC.label}
+    >
+      <!-- 白抜きのひし形（触れる音）と、黒い玉（押さえる音）と符尾を SVG で描く -->
+      <svg class="harmonic-icon" width="22" height="30" viewBox="0 0 22 30">
+        <path d="M8 5 L12 1.5 L16 5 L12 8.5 Z" fill="none" stroke="currentColor" stroke-width="1.5" />
+        <ellipse cx="12" cy="13" rx="4" ry="3" transform="rotate(-20 12 13)" fill="currentColor" />
+        <line x1="15.7" y1="12" x2="15.7" y2="28" stroke="currentColor" stroke-width="1.3" />
+      </svg>
+    </button>
+    <button class="tool" class:on={headIsDiamond} {disabled} onclick={() => onsymbol("diamond")} title={DIAMOND_HEAD.label} aria-label={DIAMOND_HEAD.label}>
+      <!-- 白抜きのひし形の玉だけを SVG で描く -->
+      <svg class="harmonic-icon" width="22" height="22" viewBox="0 0 22 22">
+        <path d="M5 11 L11 5 L17 11 L11 17 Z" fill="none" stroke="currentColor" stroke-width="1.6" />
+      </svg>
+    </button>
   </div>
 
   <!-- 装飾（トリルなど）（ステップ11-3a） -->
@@ -129,9 +178,9 @@
     <button
       class="tool"
       class:on={!!note?.arpeggio}
-      disabled={disabled || (!isChord && !note?.arpeggio)}
+      disabled={disabled || ((!isChord || isHarmonic) && !note?.arpeggio)}
       onclick={() => onsymbol("arpeggio")}
-      title={isChord ? ARPEGGIO.label : `${ARPEGGIO.label}（重音のときだけ付けられます）`}
+      title={isChord && !isHarmonic ? ARPEGGIO.label : `${ARPEGGIO.label}（重音のときだけ付けられます。ひし形の玉のある音符には付けられません）`}
       aria-label={ARPEGGIO.label}
     >
       <!-- 縦の波線を SVG で描く（楽譜用フォントの文字だと、ブラウザによってボタンから大きくはみ出したため） -->
@@ -255,7 +304,9 @@
     top: -2px;
   }
   /* アルペジオの波線（SVG）。押したときの操作は、下のボタンに通す（ステップ14-4a） */
-  .arpeggio-icon {
+  /* 人工ハーモニクスの記号（SVG）も同じ（ステップ14-5a） */
+  .arpeggio-icon,
+  .harmonic-icon {
     pointer-events: none;
   }
   .icon.grace {

@@ -44,6 +44,14 @@ export function createNote(VF, note, clef, accidentals = [], keySignature = 0, m
   // 音の高さ（休符は五線のまん中に置く）
   // 重音なら、高さを低い順に全部並べる（VexFlow は keys に並べた高さの玉を、1本の符尾にまとめて描く）（ステップ14-1）
   const keys = note.rest ? [CLEFS[clef].restKey] : notePitches(note).map((pitch) => pitchToVexKey(pitch));
+  // ハーモニクスで軽く触れる玉（diamond の付いた高さ）を、白抜きのひし形にする（ステップ14-5a）
+  //   VexFlow では、高さのうしろに「/玉の形の記号」を付けると玉の形を変えられる
+  //   D1 … 白抜きのひし形（2分音符の形）、D0 … 全音符のひし形（触れる音は、長さにかかわらず白抜きで書く決まり）
+  if (!note.rest) {
+    notePitches(note).forEach((pitch, k) => {
+      if (pitch.diamond) keys[k] = keys[k] + (note.duration === "whole" ? "/D0" : "/D1");
+    });
+  }
 
   // VexFlow の音符を作る
   const staveNote = new VF.StaveNote({

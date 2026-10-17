@@ -132,6 +132,7 @@ function splitTicks(length) {
 // 関数：plainNote
 // 分けた2つ目からの音符を作る（高さと長さだけ。記号は最初の音符にだけ残すため）
 // 重音なら、重ねる音（chord）も同じにする（ステップ14-1）
+// （ひし形の印 diamond も、高さといっしょに写る（ステップ14-5a））
 // ----------------------------------------------------------
 function plainNote(note, value) {
   const piece = { pitch: { ...note.pitch }, duration: value.duration, dots: value.dots, tie: false };

@@ -28,6 +28,7 @@ import {
   setNotePitches,
   samePitch,
   MAX_CHORD_NOTES,
+  hasDiamond,
 } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES } from "./symbols.js";
 import { positionsInRange, selectedHead } from "./selection.js";
@@ -299,8 +300,8 @@ export function transposeNote(score, selection, semitones) {
         // オクターブだけ変える（音名と♯♭はそのまま）
         return { ...pitch, octave: pitch.octave + semitones / 12 };
       }
-      // 半音ずつ：調に合わせて♯か♭で呼び直す
-      return midiToPitch(pitchToMidi(pitch) + semitones, key);
+      // 半音ずつ：調に合わせて♯か♭で呼び直す（ひし形の印は残す（ステップ14-5a））
+      return { ...midiToPitch(pitchToMidi(pitch) + semitones, key), ...(pitch.diamond ? { diamond: true } : {}) };
     });
     setNotePitches(n, moved); // 低い順に入れ直す（全部同じだけ動かすので、並びは変わらない）
   });
@@ -393,7 +394,7 @@ export function toggleTie(score, selection) {
     const nextNotes = newScore.parts[next.part].measures[next.measure].notes;
     nextNotes[next.note] = {
       pitch: { ...note.pitch },
-      // 重音なら、重ねる音も同じにする（ステップ14-1）
+      // 重音なら、重ねる音も同じにする（ステップ14-1）（ひし形の印 diamond も、高さといっしょに写る（ステップ14-5a））
       ...(note.chord ? { chord: note.chord.map((pitch) => ({ ...pitch })) } : {}),
       duration: nextNote.duration,
       dots: nextNote.dots ?? 0,
@@ -603,6 +604,8 @@ export function canGlissando(score, selection) {
 //            'tremolo'（トレモロ。value は斜線の本数）（ステップ11-4）
 //            'grace'（前打音。value は "short"（短前打音）か "long"（長前打音））（ステップ11-8a）
 //            'arpeggio'（アルペジオ。重音だけ。value は使わない）（ステップ14-4a）
+//            'artificialHarmonic'（人工ハーモニクス。1音の音符の4度上にひし形の玉を足す・ひし形を外す。value は使わない）（ステップ14-5a）
+//            'diamond'（選んでいる玉を、ひし形にする・戻す。value は使わない）（ステップ14-5a）
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
@@ -617,9 +620,66 @@ export function toggleNoteSymbol(score, selection, kind, value) {
   if (note.chord && kind === "ornament" && !note.ornament) return score;
   if (note.chord && kind === "grace" && !note.grace) return score;
 
+  // 人工ハーモニクス（kind が 'artificialHarmonic'）（ステップ14-5a）
+  //   ひし形の玉がある音符：ひし形を外す
+  //     ふつうの玉もあるとき … ひし形の玉を消す（例：ラ4＋レ5◇ → ラ4）
+  //     ひし形の玉だけのとき … ひし形の印だけを外して、ふつうの玉にする
+  //   ひし形のない1音の音符：4度上に、ひし形の玉を足す（2音の重音になる）
+  //   ひし形のない重音：何もしない（付けられない）
+  if (kind === "artificialHarmonic") {
+    if (hasDiamond(note)) {
+      return updateNote(score, selection, (n) => {
+        const pitches = notePitches(n);
+        const normals = pitches.filter((pitch) => !pitch.diamond);
+        if (normals.length > 0) {
+          setNotePitches(n, normals);
+        } else {
+          setNotePitches(
+            n,
+            pitches.map((pitch) => ({ step: pitch.step, alter: pitch.alter, octave: pitch.octave })),
+          );
+        }
+        if (!n.chord) delete n.arpeggio; // 1音になったら、アルペジオは外す
+      });
+    }
+    if (note.chord) return score; // 重音には付けられない
+    const touch = { ...fourthAbove(note.pitch), diamond: true };
+    if (pitchToMidi(touch) > HIGHEST_MIDI) return score; // 高すぎる
+    const newScore = updateNote(score, selection, (n) => {
+      setNotePitches(n, [n.pitch, touch]);
+      // 重音には付けられない記号を外す（toggleChordPitch と同じ）
+      delete n.ornament;
+      delete n.grace;
+      delete n.glissando;
+    });
+    // 前の音からこの音へのグリッサンドも外す
+    const prev = findPrevious(newScore, selection);
+    if (prev) {
+      const prevNote = newScore.parts[prev.part].measures[prev.measure].notes[prev.note];
+      if (prevNote.glissando) delete prevNote.glissando;
+    }
+    return newScore;
+  }
+
+  // ひし形（kind が 'diamond'）：選んでいる玉を、ひし形にする・戻す（ステップ14-5a）
+  // ひし形の玉がある音符には、アルペジオは付けない（付いていたら外す）
+  if (kind === "diamond") {
+    const head = selectedHead(score, selection);
+    return updateNote(score, selection, (n) => {
+      const pitches = notePitches(n).map((pitch, k) => {
+        if (k !== head) return pitch;
+        const { diamond, ...plain } = pitch; // ひし形の印を取りのぞいた形
+        return diamond ? plain : { ...plain, diamond: true };
+      });
+      setNotePitches(n, pitches);
+      if (hasDiamond(n)) delete n.arpeggio;
+    });
+  }
+
   // アルペジオ（kind が 'arpeggio'）：付いていれば外す。付けるのは重音のときだけ（ステップ14-4a）
+  // （ひし形の玉がある音符には付けない（ステップ14-5a））
   if (kind === "arpeggio") {
-    if (!note.arpeggio && !note.chord) return score;
+    if (!note.arpeggio && (!note.chord || hasDiamond(note))) return score;
     return updateNote(score, selection, (n) => {
       if (n.arpeggio) {
         delete n.arpeggio;
@@ -758,6 +818,36 @@ function stepAbove(pitch, key) {
   // シ（B）の次はドなので、オクターブが1つ上がる
   const octave = pitch.step === "B" ? pitch.octave + 1 : pitch.octave;
   return { step: nextStep, alter: keyAlters(key)[nextStep], octave: octave };
+}
+
+// ----------------------------------------------------------
+// 関数：fourthAbove / fourthBelow
+// 完全4度上・下の音の高さを返す（人工ハーモニクスの触れる音を決めるのに使う）（ステップ14-5a）
+// 音名を3つ先（後）にして、半音5つぶんになるように ♯♭ を決める
+//   例：ラ4 → レ5、ファ♯4 → シ4、シ♭4 → ミ♭5、ド4 → ファ4
+//   pitch … もとの音の高さ { step, alter, octave }
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+function fourthAbove(pitch) {
+  return shiftByFourth(pitch, 1);
+}
+
+function fourthBelow(pitch) {
+  return shiftByFourth(pitch, -1);
+}
+
+// ----------------------------------------------------------
+// 関数：shiftByFourth
+// fourthAbove・fourthBelow の中身（direction が 1 なら上、-1 なら下）（ステップ14-5a）
+// ----------------------------------------------------------
+function shiftByFourth(pitch, direction) {
+  const STEPS = ["C", "D", "E", "F", "G", "A", "B"];
+  const index = STEPS.indexOf(pitch.step) + 3 * direction; // 音名を3つ進める（戻す）
+  const step = STEPS[((index % 7) + 7) % 7];
+  const octave = pitch.octave + Math.floor(index / 7); // ドをこえたらオクターブが変わる
+  const target = pitchToMidi(pitch) + 5 * direction; // 半音5つぶん上（下）
+  const natural = pitchToMidi({ step: step, alter: 0, octave: octave });
+  return { step: step, alter: target - natural, octave: octave };
 }
 
 // ----------------------------------------------------------
@@ -1086,6 +1176,12 @@ function replaceChordHead(score, selection, newPitch) {
 export function transposeChordHead(score, selection, semitones) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   const head = selectedHead(score, selection);
+  // ひし形の玉がある音符（ハーモニクス）：玉どうしの間を保つため、全部の玉をいっしょに動かす（ステップ14-5a）
+  if (hasDiamond(note)) {
+    const moved = transposeNote(score, selection, semitones);
+    if (moved === score) return { score: score, error: "これ以上は高さを変えられません", head: head };
+    return { score: moved, error: "", head: head };
+  }
   const pitch = notePitches(note)[head];
   const midi = pitchToMidi(pitch) + semitones;
   if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) {
@@ -1106,6 +1202,19 @@ export function setChordHeadAccidental(score, selection, alter) {
   const head = selectedHead(score, selection);
   const pitch = notePitches(note)[head];
   if ((pitch.alter ?? 0) === alter) return { score: score, error: "", head: head }; // 変わらない
+  // 人工ハーモニクス（ふつうの玉＋その4度上のひし形の2音）：選んだ玉の ♯♭♮ を変えて、もう1つの玉を4度の間に合わせ直す（ステップ14-5a）
+  // （ほかの形のひし形の音符は、選んだ玉だけを変える）
+  const pitches = notePitches(note);
+  const isArtificialPair = pitches.length === 2 && !pitches[0].diamond && pitches[1].diamond && pitchToMidi(pitches[1]) - pitchToMidi(pitches[0]) === 5;
+  if (isArtificialPair) {
+    const changed = { step: pitch.step, alter: alter, octave: pitch.octave };
+    const lower = head === 0 ? changed : fourthBelow(changed);
+    const upper = { ...(head === 0 ? fourthAbove(changed) : changed), diamond: true };
+    const newScore = updateNote(score, selection, (n) => {
+      setNotePitches(n, [lower, upper]);
+    });
+    return { score: newScore, error: "", head: head };
+  }
   return replaceChordHead(score, selection, { ...pitch, alter: alter });
 }
 
