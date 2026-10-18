@@ -95,7 +95,8 @@
     {:else if soundState === "loading"}
       <span class="sound-status">音を読み込み中…</span>
     {:else if soundState === "error"}
-      <span class="sound-status error">音を読み込めませんでした（ページを再読み込みしてください）</span>
+      <!-- 文が長いと上のバーが2行になるので、短く書いて、続きは title（マウスを乗せる・長押しで出る説明）に入れる（後で直す候補の手直し） -->
+      <span class="sound-status error" title="楽器の音を読み込めませんでした。ページを再読み込みしてください（電子音なら鳴らせます）">音を読み込めません（再読み込みしてください）</span>
     {/if}
 
     <span class="tempo">{tempoText ? `${tempoText} ` : ""}♩ = {tempo}</span>
@@ -149,6 +150,7 @@
     color: #333;
   }
   .sound-status {
+    white-space: nowrap; /* 文字を途中で折り返さない（後で直す候補の手直し：上のバーが2行にならないように） */
     font-size: 12px;
     color: #6b7280; /* うすいグレーの文字 */
   }

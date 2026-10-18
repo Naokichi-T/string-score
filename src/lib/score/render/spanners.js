@@ -23,6 +23,8 @@ const GLISS_GAP = 3; // グリッサンドの線と、音符の玉（臨時記�
 const GLISS_TEXT_SIZE = 11; // 「gliss.」の文字の大きさ
 const GLISS_TEXT_RAISE = 3; // 「gliss.」の文字を、線からどれだけ上に離すか
 const GLISS_TEXT_MARGIN = 6; // 線の長さが「文字の幅＋これ」より短いときは、文字を書かない
+const GLISS_TEXT_HEIGHT = 8; // 「gliss.」の文字の高さ（だいたい。符尾をよけるときの計算に使う）（後で直す候補の手直し）
+const GLISS_STEM_GAP = 3; // 「gliss.」の文字と、1つ目の音の上向きの符尾とのすき間（後で直す候補の手直し）
 
 // ----------------------------------------------------------
 // 関数：drawSpanners
@@ -417,9 +419,14 @@ function drawGlissando(context, from, to, lineBounds) {
   const y1 = fromNote.getYs()[0];
   const y2 = toNote.getYs()[0];
 
+  // 1つ目の音の符尾が上向きなら、文字がその符尾に近づかないように、符尾の右の位置を渡す（後で直す候補の手直し）
+  // （全音符など符尾のない音、下向きの符尾の音は、よけなくてよいので null）
+  const hasUpStem = fromNote.hasStem() && fromNote.getStemDirection() === 1; // 1 は VexFlow の「上向き」（Stem.UP）
+  const avoidX = hasUpStem ? fromNote.getStemX() + GLISS_STEM_GAP : null;
+
   // 同じ段なら、1本の線で描く
   if (from.line === to.line) {
-    drawGlissLine(context, x1, y1, x2, y2);
+    drawGlissLine(context, x1, y1, x2, y2, true, avoidX);
     return;
   }
 
@@ -428,7 +435,7 @@ function drawGlissando(context, from, to, lineBounds) {
   const fromTop = fromNote.getStave().getYForLine(0);
   const toTop = toNote.getStave().getYForLine(0);
   const half = (y2 - toTop - (y1 - fromTop)) / 2; // 高さの差の半分
-  const hasText = drawGlissLine(context, x1, y1, lineBounds[from.line].endX - 4, y1 + half);
+  const hasText = drawGlissLine(context, x1, y1, lineBounds[from.line].endX - 4, y1 + half, true, avoidX);
   // 1段目に文字が入らなかったときだけ、2段目に文字を書く
   drawGlissLine(context, lineBounds[to.line].startX - 4, y2 - half, x2, y2, !hasText);
 }
@@ -439,9 +446,12 @@ function drawGlissando(context, from, to, lineBounds) {
 //   x1, y1 … 線の始まり
 //   x2, y2 … 線の終わり
 //   withText … 文字を書こうとするか（省略したら書こうとする）
+//   avoidX   … 文字の左の端がこれより左に来ないようにする位置（1つ目の音の上向きの符尾の右）。null ならよけない（後で直す候補の手直し）
+// 文字はふつう線のまん中に書く。線が急に上がっていて、文字の左上の角が符尾に近づくときは、
+// 入る範囲で文字を線にそって右上へずらす
 // 戻り値：文字を書いたら true、書かなかったら false
 // ----------------------------------------------------------
-function drawGlissLine(context, x1, y1, x2, y2, withText = true) {
+function drawGlissLine(context, x1, y1, x2, y2, withText = true, avoidX = null) {
   if (x2 <= x1) return false; // 線を引く場所がない（音がくっついている）ときは描かない
 
   // 線を引く
@@ -468,9 +478,27 @@ function drawGlissLine(context, x1, y1, x2, y2, withText = true) {
     return false;
   }
 
-  // 線のまん中を中心にして、線と同じ傾きに回してから、線の少し上に書く
-  const cx = (x1 + x2) / 2;
-  const cy = (y1 + y2) / 2;
+  // 文字の中心の位置：まずは線のまん中
+  let cx = (x1 + x2) / 2;
+  let cy = (y1 + y2) / 2;
+
+  // 符尾をよける（後で直す候補の手直し）
+  // 回したあとの文字の左上の角の横の位置 ＝ 中心 − (幅の半分)×cos ＋ (上に離す分＋文字の高さ)×sin
+  //   （右上がりの線では sin がマイナスなので、角は中心より左に出る）
+  if (avoidX !== null) {
+    const rad = (angle * Math.PI) / 180;
+    const cornerX = cx - (textWidth / 2) * Math.cos(rad) + (GLISS_TEXT_RAISE + GLISS_TEXT_HEIGHT) * Math.sin(rad);
+    const need = avoidX - cornerX; // 右へずらしたい横の量
+    if (need > 0) {
+      // 線にそって動かす長さ（横に need 進むには need ÷ cos）。文字が線の終わりからはみ出さない所まで
+      const room = (length - textWidth) / 2;
+      const move = Math.min(need / Math.cos(rad), room);
+      cx = cx + move * Math.cos(rad);
+      cy = cy + move * Math.sin(rad);
+    }
+  }
+
+  // 線と同じ傾きに回してから、線の少し上に書く
   context.openRotation(angle, cx, cy);
   context.fillText(GLISSANDO.text, cx - textWidth / 2, cy - GLISS_TEXT_RAISE);
   context.closeRotation();
