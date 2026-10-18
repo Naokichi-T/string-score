@@ -9,6 +9,7 @@
   // （ステップ8-1：［MusicXML 書き出し］ボタンが動くようにした）
   // （ステップ9：［PDF 出力］ボタンを足した）
   // （ステップ12-3b：鳴らすパートを選ぶ欄をやめた。「再生」タブのソロで選ぶ）
+  // （ステップ18-6：タブレットのときだけ、右端に［？］（タブレットでの使い方）を出す）
   // ==========================================================
 
   // 親から受け取るもの
@@ -28,7 +29,11 @@
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   //   onexport   … ［MusicXML 書き出し］ボタンが押されたときに呼ぶ関数（ステップ8-1）
   //   onprint    … ［PDF 出力］ボタンが押されたときに呼ぶ関数（ステップ9）
+  //   showHelp   … ［？］を出すか（タブレットのときだけ true）（ステップ18-6）
+  //   onhelp     … ［？］が押されたときに呼ぶ関数（ステップ18-6）
   let {
+    showHelp = false,
+    onhelp = () => {},
     tempo,
     tempoText = "",
     canUndo = false,
@@ -108,6 +113,10 @@
     {/if}
     <button onclick={() => onexport()} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">MusicXML 書き出し</button>
     <button onclick={() => onprint()} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">PDF 出力</button>
+    <!-- タブレットでの使い方の窓を開く（タブレットのときだけ）（ステップ18-6） -->
+    {#if showHelp}
+      <button class="help" onclick={() => onhelp()} title="タブレットでの使い方を見る">？</button>
+    {/if}
   </div>
 </header>
 
@@ -160,6 +169,13 @@
     padding: 0 12px;
     font-size: 14px;
     white-space: nowrap; /* 文字を途中で折り返さない */
+  }
+  /* ［？］（ステップ18-6） */
+  .help {
+    width: 40px; /* 正方形にする */
+    padding: 0;
+    font-size: 16px;
+    font-weight: bold;
   }
   .play {
     min-width: 72px; /* 「再生」と「停止」でボタンの幅が変わらないようにする */

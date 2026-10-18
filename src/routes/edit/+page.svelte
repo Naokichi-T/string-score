@@ -31,6 +31,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
+  import TabletGuide from "#lib/components/TabletGuide.svelte"; // タブレットでの使い方の窓（ステップ18-6）
   import {
     createEmptyScore,
     keyAt,
@@ -555,6 +556,24 @@
   const PHONE_QUERY = "(pointer: coarse) and (max-width: 599px), (pointer: coarse) and (max-height: 599px)";
   let isPhone = $state(false);
 
+  // タブレットかどうか（ステップ18-6）
+  // 指で操作する画面（pointer: coarse）で、スマホではないもの
+  let coarsePointer = $state(false); // 指で操作する画面か
+  let isTablet = $derived(coarsePointer && !isPhone);
+
+  // タブレットでの使い方の窓を出しているか（ステップ18-6）
+  let guideOpen = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handleCloseGuide
+  // タブレットでの使い方の窓を閉じる（ステップ18-6）
+  // 閉じたことを覚えておいて、次からは開いたときに出さない（［？］からはいつでも開ける）
+  // ----------------------------------------------------------
+  function handleCloseGuide() {
+    guideOpen = false;
+    saveSetting("tabletGuideSeen", true);
+  }
+
   // 楽器の音を読み込んだか（スマホのときは読み込まないので、あとでスマホでなくなったときに読み込むため）（ステップ18-5）
   let soundRequested = false;
 
@@ -586,6 +605,19 @@
       }
     };
     phoneMedia.addEventListener("change", handlePhoneChange);
+
+    // 指で操作する画面かを調べる（タブレットかどうかを決めるため）（ステップ18-6）
+    const coarseMedia = window.matchMedia("(pointer: coarse)");
+    coarsePointer = coarseMedia.matches;
+    const handleCoarseChange = () => {
+      coarsePointer = coarseMedia.matches;
+    };
+    coarseMedia.addEventListener("change", handleCoarseChange);
+
+    // タブレットで初めて開いたときは、使い方の窓を出す（一度閉じたら出さない）（ステップ18-6）
+    if (isTablet && loadSettings().tabletGuideSeen !== true) {
+      guideOpen = true;
+    }
 
     // URL の id の楽譜を開く（id がなければトップページへ戻す）
     openScore();
@@ -626,6 +658,7 @@
       stopPlayback();
       cancelAnimationFrame(highlightFrame);
       phoneMedia.removeEventListener("change", handlePhoneChange); // スマホかどうかを調べるのもやめる（ステップ18-5）
+      coarseMedia.removeEventListener("change", handleCoarseChange); // 指で操作する画面かを調べるのもやめる（ステップ18-6）
     };
   });
 
@@ -2212,6 +2245,8 @@
       onsoundtype={handleSoundType}
       onexport={handleExport}
       onprint={handlePrint}
+      showHelp={isTablet}
+      onhelp={() => (guideOpen = true)}
     />
     <!-- collapsed・ontoggle：タブの中身をたたむ（ステップ18-1） -->
     <ToolTabs
@@ -2328,6 +2363,11 @@
       <p>楽譜を印刷するときは、画面の右上の［PDF 出力］ボタンか、⌘P（Windows は Ctrl＋P）を使ってください。</p>
       <p>A4 の大きさに合わせた印刷用のページを作ってから、印刷の画面を開きます。</p>
     </div>
+  {/if}
+
+  <!-- タブレットでの使い方の窓（ステップ18-6） -->
+  {#if guideOpen}
+    <TabletGuide onclose={handleCloseGuide} />
   {/if}
 
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
