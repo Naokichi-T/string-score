@@ -280,134 +280,142 @@
   <!-- （消してしまうと、入力の途中の文字などが、出し直したときに消えてしまうため）（ステップ18-1） -->
   <div class="tab-content" class:collapsed>
     {#if activeTab === "note"}
-      <!-- 入力のしかたの切り替え（上書き・挿入） -->
-      <div class="mode-switch">
-        <button class:on={mode === "overwrite"} onclick={() => onmode("overwrite")} title="選んでいる所を新しい音に置き換える（I キーで切り替え）"> 上書き </button>
-        <button class:on={mode === "insert"} onclick={() => onmode("insert")} title="選んでいる音の前に入れて、後ろの音をずらす（I キーで切り替え）"> 挿入 </button>
-      </div>
+      <!-- 1行目：入力（上書き・挿入、長さ、付点、休符、連符、臨時記号、▲▼）（どの画面の幅でも、ここで行を分ける。狭すぎるときだけ、行の中で折り返す）（後で直す候補の手直し） -->
+      <div class="tool-row">
+        <!-- 入力のしかたの切り替え（上書き・挿入） -->
+        <div class="mode-switch">
+          <button class:on={mode === "overwrite"} onclick={() => onmode("overwrite")} title="選んでいる所を新しい音に置き換える（I キーで切り替え）"> 上書き </button>
+          <button class:on={mode === "insert"} onclick={() => onmode("insert")} title="選んでいる音の前に入れて、後ろの音をずらす（I キーで切り替え）"> 挿入 </button>
+        </div>
 
-      <!-- 長さのボタン（今の長さは色が付く。入らない長さは押せない） -->
-      <div class="group">
-        {#each INPUT_DURATIONS as d (d)}
+        <!-- 長さのボタン（今の長さは色が付く。入らない長さは押せない） -->
+        <div class="group">
+          {#each INPUT_DURATIONS as d (d)}
+            <button
+              class="tool"
+              class:on={duration === d}
+              disabled={!canUse(d, dotted ? 1 : 0) && !canUse(d, 0)}
+              onclick={() => onduration(d)}
+              title="{DURATION_LABELS[d].name}（{DURATION_LABELS[d].key}）"
+              aria-label={DURATION_LABELS[d].name}
+            >
+              <span class="icon" class:flat={DURATION_LABELS[d].flat}>{DURATION_LABELS[d].icon}</span>
+            </button>
+          {/each}
+        </div>
+
+        <!-- 付点 -->
+        <div class="group">
+          <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点（.）" aria-label="付点">
+            <span class="icon">{DOT_ICON}</span>
+          </button>
+        </div>
+
+        <!-- 休符 -->
+        <div class="group">
+          <button class="tool" disabled={!canRest} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
+            <span class="icon flat">{REST_ICON}</span>
+          </button>
+          <!-- 全休符（小節まるごとの休符）（ステップ13-3b） -->
           <button
             class="tool"
-            class:on={duration === d}
-            disabled={!canUse(d, dotted ? 1 : 0) && !canUse(d, 0)}
-            onclick={() => onduration(d)}
-            title="{DURATION_LABELS[d].name}（{DURATION_LABELS[d].key}）"
-            aria-label={DURATION_LABELS[d].name}
+            class:on={measureRestActive}
+            disabled={!canMeasureRest}
+            onclick={() => onmeasurerest()}
+            title="全休符：選んでいる小節を、小節まるごとの休符にする（中の音符は消える）。全休符の小節で押すと、拍ごとの休符に戻す。範囲を選んでいるときは、範囲にかかる小節すべて"
+            aria-label="全休符"
           >
-            <span class="icon" class:flat={DURATION_LABELS[d].flat}>{DURATION_LABELS[d].icon}</span>
+            <span class="icon measure-rest">{MEASURE_REST_ICON}</span>
           </button>
-        {/each}
+        </div>
+
+        <!-- 連符（音か休符を選んでいるときだけ押せる）（ステップ10-2） -->
+        <!-- 連符の中の音を選んでいるときは、かわりに［連符を解除］を出す（ステップ10-3） -->
+        <div class="group">
+          {#if inTuplet}
+            <button class="tool text clip" onclick={() => onremovetuplet()} title="選んでいる音が入っている連符を、ふつうの音符に戻す（入りきらない音は消える）"> 連符を解除 </button>
+          {:else}
+            <button class="tool text clip" disabled={!canTuplet} onclick={() => ontuplet(3)} title="選んでいる音の長さで3連符を作る（例：8分音符を選んで押すと、8分音符2つ分に3つ入る）">
+              3連符
+            </button>
+            <!-- ほかの連符（2〜12連符）は、プルダウンから選ぶ（ステップ10-3） -->
+            <!-- 選んだらすぐ連符を作り、表示は「その他」に戻す -->
+            <select
+              class="tool-select"
+              disabled={!canTuplet}
+              value=""
+              onchange={(event) => {
+                const actual = Number(event.currentTarget.value);
+                event.currentTarget.value = ""; // 「その他」に戻す（同じ数字をもう一度選べるように）
+                if (actual) ontuplet(actual);
+              }}
+              title="ほかの連符を作る（選んでいる音の長さで作る）"
+            >
+              <option value="">その他</option>
+              {#each [2, 4, 5, 6, 7, 8, 9, 10, 11, 12] as n (n)}
+                <option value={n}>{n}連符</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+
+        <!-- 臨時記号（音符を選んでいるときだけ押せる。重音のときは、選んでいる玉だけに付く（ステップ14-2）） -->
+        <div class="group">
+          {#each ACCIDENTALS as acc (acc.alter)}
+            <button
+              class="tool"
+              disabled={!noteSelected}
+              onclick={() => onaccidental(acc.alter)}
+              title={chordSelected ? `${acc.name}（重音の中の、選んでいる音だけ。⌥（Alt）＋↑↓ で選ぶ音を変える）` : acc.name}
+              aria-label={acc.name}
+            >
+              <span class="icon accidental">{acc.icon}</span>
+            </button>
+          {/each}
+        </div>
+
+        <!-- 半音上げる・下げる -->
+        <div class="group">
+          <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(1)} title="半音上げる（↑。⌘ / Ctrl＋↑ で1オクターブ）"> ▲ </button>
+          <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(-1)} title="半音下げる（↓。⌘ / Ctrl＋↓ で1オクターブ）"> ▼ </button>
+        </div>
       </div>
 
-      <!-- 付点 -->
-      <div class="group">
-        <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点（.）" aria-label="付点">
-          <span class="icon">{DOT_ICON}</span>
-        </button>
-      </div>
+      <!-- 2行目：編集（タイ・削除、重音、範囲、コピー・切り取り・貼り付け） -->
+      <div class="tool-row">
+        <!-- タイ・削除 -->
+        <div class="group">
+          <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
+          <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
+            削除
+          </button>
+        </div>
 
-      <!-- 休符 -->
-      <div class="group">
-        <button class="tool" disabled={!canRest} onclick={() => onrest()} title="休符にする（0）" aria-label="休符にする">
-          <span class="icon flat">{REST_ICON}</span>
-        </button>
-        <!-- 全休符（小節まるごとの休符）（ステップ13-3b） -->
-        <button
-          class="tool"
-          class:on={measureRestActive}
-          disabled={!canMeasureRest}
-          onclick={() => onmeasurerest()}
-          title="全休符：選んでいる小節を、小節まるごとの休符にする（中の音符は消える）。全休符の小節で押すと、拍ごとの休符に戻す。範囲を選んでいるときは、範囲にかかる小節すべて"
-          aria-label="全休符"
-        >
-          <span class="icon measure-rest">{MEASURE_REST_ICON}</span>
-        </button>
-      </div>
-
-      <!-- 連符（音か休符を選んでいるときだけ押せる）（ステップ10-2） -->
-      <!-- 連符の中の音を選んでいるときは、かわりに［連符を解除］を出す（ステップ10-3） -->
-      <div class="group">
-        {#if inTuplet}
-          <button class="tool text clip" onclick={() => onremovetuplet()} title="選んでいる音が入っている連符を、ふつうの音符に戻す（入りきらない音は消える）"> 連符を解除 </button>
-        {:else}
-          <button class="tool text clip" disabled={!canTuplet} onclick={() => ontuplet(3)} title="選んでいる音の長さで3連符を作る（例：8分音符を選んで押すと、8分音符2つ分に3つ入る）"> 3連符 </button>
-          <!-- ほかの連符（2〜12連符）は、プルダウンから選ぶ（ステップ10-3） -->
-          <!-- 選んだらすぐ連符を作り、表示は「その他」に戻す -->
-          <select
-            class="tool-select"
-            disabled={!canTuplet}
-            value=""
-            onchange={(event) => {
-              const actual = Number(event.currentTarget.value);
-              event.currentTarget.value = ""; // 「その他」に戻す（同じ数字をもう一度選べるように）
-              if (actual) ontuplet(actual);
-            }}
-            title="ほかの連符を作る（選んでいる音の長さで作る）"
-          >
-            <option value="">その他</option>
-            {#each [2, 4, 5, 6, 7, 8, 9, 10, 11, 12] as n (n)}
-              <option value={n}>{n}連符</option>
-            {/each}
-          </select>
-        {/if}
-      </div>
-
-      <!-- 臨時記号（音符を選んでいるときだけ押せる。重音のときは、選んでいる玉だけに付く（ステップ14-2）） -->
-      <div class="group">
-        {#each ACCIDENTALS as acc (acc.alter)}
+        <!-- 重音（押すたびに入・切。入のとき、鍵盤・音名キーで選んでいる音に音を足す。同じ高さをもう一度押すと外れる）（ステップ14-1） -->
+        <div class="group">
           <button
-            class="tool"
-            disabled={!noteSelected}
-            onclick={() => onaccidental(acc.alter)}
-            title={chordSelected ? `${acc.name}（重音の中の、選んでいる音だけ。⌥（Alt）＋↑↓ で選ぶ音を変える）` : acc.name}
-            aria-label={acc.name}
+            class="tool text clip"
+            class:on={chordMode}
+            onclick={() => onchordmode()}
+            title="入にすると、鍵盤（音名キー）で、選んでいる音に音を足して重音にする（次の音へは進まない）。同じ高さをもう一度押すと外れる。4音まで"
           >
-            <span class="icon accidental">{acc.icon}</span>
+            重音
           </button>
-        {/each}
-      </div>
+        </div>
 
-      <!-- 半音上げる・下げる -->
-      <div class="group">
-        <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(1)} title="半音上げる（↑。⌘ / Ctrl＋↑ で1オクターブ）"> ▲ </button>
-        <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(-1)} title="半音下げる（↓。⌘ / Ctrl＋↓ で1オクターブ）"> ▼ </button>
-      </div>
+        <!-- 範囲（押すたびに入・切。入のとき、次にタップした音までを範囲にする。Shift＋クリックと同じ）（ステップ12-8b） -->
+        <div class="group">
+          <button class="tool text clip" class:on={rangeMode} onclick={() => onrangemode()} title="入にすると、選んでいる音から、次にタップ（クリック）した音までを範囲にする（Shift＋クリックと同じ）">
+            範囲
+          </button>
+        </div>
 
-      <!-- タイ・削除 -->
-      <div class="group">
-        <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
-        <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
-          削除
-        </button>
-      </div>
-
-      <!-- 重音（押すたびに入・切。入のとき、鍵盤・音名キーで選んでいる音に音を足す。同じ高さをもう一度押すと外れる）（ステップ14-1） -->
-      <div class="group">
-        <button
-          class="tool text clip"
-          class:on={chordMode}
-          onclick={() => onchordmode()}
-          title="入にすると、鍵盤（音名キー）で、選んでいる音に音を足して重音にする（次の音へは進まない）。同じ高さをもう一度押すと外れる。4音まで"
-        >
-          重音
-        </button>
-      </div>
-
-      <!-- 範囲（押すたびに入・切。入のとき、次にタップした音までを範囲にする。Shift＋クリックと同じ）（ステップ12-8b） -->
-      <div class="group">
-        <button class="tool text clip" class:on={rangeMode} onclick={() => onrangemode()} title="入にすると、選んでいる音から、次にタップ（クリック）した音までを範囲にする（Shift＋クリックと同じ）">
-          範囲
-        </button>
-      </div>
-
-      <!-- コピー・切り取り・貼り付け -->
-      <div class="group">
-        <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("copy")} title="選んでいる音（範囲）をコピーする（⌘ / Ctrl＋C）"> コピー </button>
-        <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("cut")} title="コピーしてから、音符を休符にする（⌘ / Ctrl＋X）"> 切り取り </button>
-        <button class="tool text clip" disabled={!canPaste} onclick={() => onclipboard("paste")} title="選んでいる音の頭から、コピーした音を上書きで貼り付ける（⌘ / Ctrl＋V）"> 貼り付け </button>
+        <!-- コピー・切り取り・貼り付け -->
+        <div class="group">
+          <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("copy")} title="選んでいる音（範囲）をコピーする（⌘ / Ctrl＋C）"> コピー </button>
+          <button class="tool text clip" disabled={!canCopy} onclick={() => onclipboard("cut")} title="コピーしてから、音符を休符にする（⌘ / Ctrl＋X）"> 切り取り </button>
+          <button class="tool text clip" disabled={!canPaste} onclick={() => onclipboard("paste")} title="選んでいる音の頭から、コピーした音を上書きで貼り付ける（⌘ / Ctrl＋V）"> 貼り付け </button>
+        </div>
       </div>
     {:else if activeTab === "symbol"}
       <!-- head：［ひし形］のボタンを青くするための、選んでいる玉の番号（ステップ14-5a） -->
@@ -493,6 +501,15 @@
     gap: 8px 12px; /* 縦の間 8px・横の間 12px（ステップ12-8c：横の間を 16px から少しつめた） */
     padding: 6px 16px;
     border-top: 1px solid #ddd;
+  }
+  /* 「音符」タブの1つの行（後で直す候補の手直し：どこで行を分けるかを決めた）
+     幅いっぱいを取って、1行目と2行目をいつも分ける。画面がとても狭いときだけ、行の中で折り返す */
+  .tool-row {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px; /* 縦の間 8px・横の間 12px（タブの中身と同じ） */
   }
   /* たたんでいるときは中身を見えなくする（場所も取らない）（ステップ18-1） */
   .tab-content.collapsed {

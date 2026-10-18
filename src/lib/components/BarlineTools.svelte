@@ -77,133 +77,146 @@
 </script>
 
 <div class="barline-tools">
-  <!-- 小節の終わりの線（範囲を選んでいるときは、範囲の最後の小節の終わり） -->
-  <div class="group">
-    <span class="label">小節の終わり</span>
-    {#each END_BUTTONS as button (button.label)}
-      <button class:active={isEndActive(button.type)} {disabled} onclick={() => onbarline(button.type)} title={button.title}>
-        <!-- 線の形を、小さな SVG で描く -->
-        <svg width="22" height="28" viewBox="0 0 22 28">
-          {#if button.type === null}
-            <rect x="10" y="2" width="1.5" height="24" fill="currentColor" />
-          {:else if button.type === "double"}
-            <rect x="7" y="2" width="1.5" height="24" fill="currentColor" />
-            <rect x="12" y="2" width="1.5" height="24" fill="currentColor" />
-          {:else}
-            <rect x="6" y="2" width="1.5" height="24" fill="currentColor" />
-            <rect x="11" y="2" width="5" height="24" fill="currentColor" />
-          {/if}
-        </svg>
-        <span class="text">{button.label}</span>
-      </button>
-    {/each}
-  </div>
+  <!-- 1行目（どの画面の幅でも、ここで行を分ける。狭すぎるときだけ、行の中で折り返す）（後で直す候補の手直し） -->
+  <div class="row">
+    <!-- 小節の終わりの線（範囲を選んでいるときは、範囲の最後の小節の終わり） -->
+    <div class="group">
+      <span class="label">小節の終わり</span>
+      {#each END_BUTTONS as button (button.label)}
+        <button class:active={isEndActive(button.type)} {disabled} onclick={() => onbarline(button.type)} title={button.title}>
+          <!-- 線の形を、小さな SVG で描く -->
+          <svg width="22" height="28" viewBox="0 0 22 28">
+            {#if button.type === null}
+              <rect x="10" y="2" width="1.5" height="24" fill="currentColor" />
+            {:else if button.type === "double"}
+              <rect x="7" y="2" width="1.5" height="24" fill="currentColor" />
+              <rect x="12" y="2" width="1.5" height="24" fill="currentColor" />
+            {:else}
+              <rect x="6" y="2" width="1.5" height="24" fill="currentColor" />
+              <rect x="11" y="2" width="5" height="24" fill="currentColor" />
+            {/if}
+          </svg>
+          <span class="text">{button.label}</span>
+        </button>
+      {/each}
+    </div>
 
-  <!-- くり返し（‖: は範囲の最初の小節の頭、:‖ は範囲の最後の小節の終わり） -->
-  <div class="group">
-    <span class="label">くり返し</span>
-    <button
-      class:active={!!current?.repeatStart}
-      {disabled}
-      onclick={() => onrepeatmark("start")}
-      title="くり返しの始まり（‖:）：選んでいる小節の頭に付ける（範囲を選んでいるときは、範囲の最初の小節）"
-    >
-      <svg width="22" height="28" viewBox="0 0 22 28">
-        <rect x="3" y="2" width="5" height="24" fill="currentColor" />
-        <rect x="10" y="2" width="1.5" height="24" fill="currentColor" />
-        <circle cx="16" cy="10.5" r="1.8" fill="currentColor" />
-        <circle cx="16" cy="17.5" r="1.8" fill="currentColor" />
-      </svg>
-      <span class="text">始まり</span>
-    </button>
-    <button
-      class:active={!!current?.repeatEnd}
-      {disabled}
-      onclick={() => onrepeatmark("end")}
-      title="くり返しの終わり（:‖）：選んでいる小節の終わりに付ける（範囲を選んでいるときは、範囲の最後の小節）。再生では、2回目はそのまま進む"
-    >
-      <svg width="22" height="28" viewBox="0 0 22 28">
-        <circle cx="6" cy="10.5" r="1.8" fill="currentColor" />
-        <circle cx="6" cy="17.5" r="1.8" fill="currentColor" />
-        <rect x="10.5" y="2" width="1.5" height="24" fill="currentColor" />
-        <rect x="14" y="2" width="5" height="24" fill="currentColor" />
-      </svg>
-      <span class="text">終わり</span>
-    </button>
-  </div>
-
-  <!-- 1番・2番かっこ（範囲を選んでいるときは、範囲にかかる小節に付ける。ここから始まっている所でもう一度押すと外れる）（ステップ11-7b） -->
-  <div class="group">
-    <span class="label">かっこ</span>
-    {#each [1, 2] as number (number)}
+    <!-- くり返し（‖: は範囲の最初の小節の頭、:‖ は範囲の最後の小節の終わり） -->
+    <div class="group">
+      <span class="label">くり返し</span>
       <button
-        class:active={current?.ending === number}
+        class:active={!!current?.repeatStart}
         {disabled}
-        onclick={() => onending(number)}
-        title={`${number}番かっこ：選んでいる小節に付ける（範囲を選んでいるときは、範囲にかかる小節）。くり返しの${number}回目だけ弾く`}
+        onclick={() => onrepeatmark("start")}
+        title="くり返しの始まり（‖:）：選んでいる小節の頭に付ける（範囲を選んでいるときは、範囲の最初の小節）"
       >
         <svg width="22" height="28" viewBox="0 0 22 28">
-          <rect x="2" y="4" width="18" height="1.5" fill="currentColor" />
-          <rect x="2" y="4" width="1.5" height="12" fill="currentColor" />
-          {#if number === 1}
-            <rect x="18.5" y="4" width="1.5" height="12" fill="currentColor" />
-          {/if}
-          <text x="6" y="17" class="ending-number">{number}.</text>
+          <rect x="3" y="2" width="5" height="24" fill="currentColor" />
+          <rect x="10" y="2" width="1.5" height="24" fill="currentColor" />
+          <circle cx="16" cy="10.5" r="1.8" fill="currentColor" />
+          <circle cx="16" cy="17.5" r="1.8" fill="currentColor" />
         </svg>
-        <span class="text">{number}番</span>
+        <span class="text">始まり</span>
       </button>
-    {/each}
-  </div>
-
-  <!-- 𝄋・𝄌（小節の頭）と To Coda・Fine（小節の終わり）。もう一度押すと外れる（ステップ11-7c） -->
-  <div class="group">
-    <span class="label">記号</span>
-    {#each MARK_BUTTONS as button (button.kind)}
-      <button class:active={!!current?.[button.kind]} {disabled} onclick={() => onjumpmark(button.kind)} title={button.title}>
-        {#if button.glyph}
-          <span class="glyph">{button.glyph}</span>
-        {/if}
-        <span class="text">{button.label}</span>
+      <button
+        class:active={!!current?.repeatEnd}
+        {disabled}
+        onclick={() => onrepeatmark("end")}
+        title="くり返しの終わり（:‖）：選んでいる小節の終わりに付ける（範囲を選んでいるときは、範囲の最後の小節）。再生では、2回目はそのまま進む"
+      >
+        <svg width="22" height="28" viewBox="0 0 22 28">
+          <circle cx="6" cy="10.5" r="1.8" fill="currentColor" />
+          <circle cx="6" cy="17.5" r="1.8" fill="currentColor" />
+          <rect x="10.5" y="2" width="1.5" height="24" fill="currentColor" />
+          <rect x="14" y="2" width="5" height="24" fill="currentColor" />
+        </svg>
+        <span class="text">終わり</span>
       </button>
-    {/each}
-  </div>
+    </div>
 
-  <!-- D.C.・D.S.（選んでいる小節の終わりに付ける）（ステップ11-7c） -->
-  <div class="group">
-    <span class="label">D.C.・D.S.</span>
-    <select
-      {disabled}
-      value={current?.jump ?? ""}
-      onchange={handleJumpChange}
-      title="D.C.・D.S.：選んでいる小節の終わりに付ける（範囲を選んでいるときは、範囲の最後の小節）。再生では、ここから曲の頭（D.C.）か 𝄋（D.S.）へ1回だけ戻る"
-    >
-      <option value="">なし</option>
-      {#each Object.entries(JUMP_TEXTS) as [type, text] (type)}
-        <option value={type}>{text}</option>
+    <!-- 1番・2番かっこ（範囲を選んでいるときは、範囲にかかる小節に付ける。ここから始まっている所でもう一度押すと外れる）（ステップ11-7b） -->
+    <div class="group">
+      <span class="label">かっこ</span>
+      {#each [1, 2] as number (number)}
+        <button
+          class:active={current?.ending === number}
+          {disabled}
+          onclick={() => onending(number)}
+          title={`${number}番かっこ：選んでいる小節に付ける（範囲を選んでいるときは、範囲にかかる小節）。くり返しの${number}回目だけ弾く`}
+        >
+          <svg width="22" height="28" viewBox="0 0 22 28">
+            <rect x="2" y="4" width="18" height="1.5" fill="currentColor" />
+            <rect x="2" y="4" width="1.5" height="12" fill="currentColor" />
+            {#if number === 1}
+              <rect x="18.5" y="4" width="1.5" height="12" fill="currentColor" />
+            {/if}
+            <text x="6" y="17" class="ending-number">{number}.</text>
+          </svg>
+          <span class="text">{number}番</span>
+        </button>
       {/each}
-    </select>
+    </div>
   </div>
 
-  <!-- 練習番号（選んでいる小節の頭に付ける。文字は A, B, C… と自動で決まる）（ステップ11-7d） -->
-  <div class="group">
-    <button
-      class:active={!!current?.rehearsal}
-      {disabled}
-      onclick={() => onjumpmark("rehearsal")}
-      title="練習番号：選んでいる小節の頭に付ける（範囲を選んでいるときは、範囲の最初の小節）。文字は前から A, B, C… と自動で決まる。もう一度押すと外れる"
-    >
-      <span class="rehearsal-icon">A</span>
-      <span class="text">練習番号</span>
-    </button>
+  <!-- 2行目 -->
+  <div class="row">
+    <!-- 𝄋・𝄌（小節の頭）と To Coda・Fine（小節の終わり）。もう一度押すと外れる（ステップ11-7c） -->
+    <div class="group">
+      <span class="label">記号</span>
+      {#each MARK_BUTTONS as button (button.kind)}
+        <button class:active={!!current?.[button.kind]} {disabled} onclick={() => onjumpmark(button.kind)} title={button.title}>
+          {#if button.glyph}
+            <span class="glyph">{button.glyph}</span>
+          {/if}
+          <span class="text">{button.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- D.C.・D.S.（選んでいる小節の終わりに付ける）（ステップ11-7c） -->
+    <div class="group">
+      <span class="label">D.C.・D.S.</span>
+      <select
+        {disabled}
+        value={current?.jump ?? ""}
+        onchange={handleJumpChange}
+        title="D.C.・D.S.：選んでいる小節の終わりに付ける（範囲を選んでいるときは、範囲の最後の小節）。再生では、ここから曲の頭（D.C.）か 𝄋（D.S.）へ1回だけ戻る"
+      >
+        <option value="">なし</option>
+        {#each Object.entries(JUMP_TEXTS) as [type, text] (type)}
+          <option value={type}>{text}</option>
+        {/each}
+      </select>
+    </div>
+
+    <!-- 練習番号（選んでいる小節の頭に付ける。文字は A, B, C… と自動で決まる）（ステップ11-7d） -->
+    <div class="group">
+      <button
+        class:active={!!current?.rehearsal}
+        {disabled}
+        onclick={() => onjumpmark("rehearsal")}
+        title="練習番号：選んでいる小節の頭に付ける（範囲を選んでいるときは、範囲の最初の小節）。文字は前から A, B, C… と自動で決まる。もう一度押すと外れる"
+      >
+        <span class="rehearsal-icon">A</span>
+        <span class="text">練習番号</span>
+      </button>
+    </div>
   </div>
 </div>
 
 <style>
+  /* 1行目・2行目を縦に並べる（後で直す候補の手直し：どこで行を分けるかを決めた） */
   .barline-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 12px; /* 行と行の間 */
+  }
+  /* 1つの行：グループを横に並べる（画面がとても狭いときだけ、行の中で折り返す） */
+  .row {
     display: flex;
     align-items: center;
     gap: 16px;
-    flex-wrap: wrap; /* 画面が狭いときは折り返す */
+    flex-wrap: wrap;
   }
   .group {
     display: flex;

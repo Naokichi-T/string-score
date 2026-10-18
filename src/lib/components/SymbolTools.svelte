@@ -57,215 +57,228 @@
 </script>
 
 <div class="symbol-tools">
-  <!-- 弓 -->
-  <div class="group" title="弓">
-    {#each Object.entries(BOWINGS) as [name, symbol] (name)}
-      <button class="tool" class:on={note?.bowing === name} {disabled} onclick={() => onsymbol("bowing", name)} title={symbol.label} aria-label={symbol.label}>
-        <span class="icon bow">{symbol.icon}</span>
+  <!-- 1行目（どの画面の幅でも、ここで行を分ける。狭すぎるときだけ、行の中で折り返す）（後で直す候補の手直し） -->
+  <div class="row">
+    <!-- 弓 -->
+    <div class="group" title="弓">
+      {#each Object.entries(BOWINGS) as [name, symbol] (name)}
+        <button class="tool" class:on={note?.bowing === name} {disabled} onclick={() => onsymbol("bowing", name)} title={symbol.label} aria-label={symbol.label}>
+          <span class="icon bow">{symbol.icon}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- 指番号 -->
+    <div class="group" title="指番号">
+      {#each FINGERINGS as number (number)}
+        <button class="tool text" class:on={(note?.fingerings ?? []).includes(number)} {disabled} onclick={() => onsymbol("fingering", number)} title="指番号 {number}" aria-label="指番号 {number}">
+          {number}
+        </button>
+      {/each}
+    </div>
+
+    <!-- スタッカート・テヌート・アクセント・フェルマータ -->
+    <div class="group">
+      {#each Object.entries(ARTICULATIONS) as [name, symbol] (name)}
+        <button class="tool" class:on={(note?.articulations ?? []).includes(name)} {disabled} onclick={() => onsymbol("articulation", name)} title={symbol.label} aria-label={symbol.label}>
+          <span class="icon artic">{symbol.icon}</span>
+        </button>
+      {/each}
+      <button class="tool" class:on={!!note?.fermata} {disabled} onclick={() => onsymbol("fermata")} title={FERMATA.label} aria-label={FERMATA.label}>
+        <span class="icon fermata">{FERMATA.icon}</span>
       </button>
-    {/each}
-  </div>
+    </div>
 
-  <!-- 指番号 -->
-  <div class="group" title="指番号">
-    {#each FINGERINGS as number (number)}
-      <button class="tool text" class:on={(note?.fingerings ?? []).includes(number)} {disabled} onclick={() => onsymbol("fingering", number)} title="指番号 {number}" aria-label="指番号 {number}">
-        {number}
-      </button>
-    {/each}
-  </div>
+    <!-- 弦楽器の記号（ハーモニクス・左手ピチカート・バルトーク・ピチカート）（ステップ11-1b） -->
+    <div class="group">
+      {#each Object.entries(STRING_MARKS) as [name, symbol] (name)}
+        <button class="tool" class:on={(note?.stringMarks ?? []).includes(name)} {disabled} onclick={() => onsymbol("stringMark", name)} title={symbol.label} aria-label={symbol.label}>
+          <span class="icon string-mark">{symbol.icon}</span>
+        </button>
+      {/each}
+    </div>
 
-  <!-- スタッカート・テヌート・アクセント・フェルマータ -->
-  <div class="group">
-    {#each Object.entries(ARTICULATIONS) as [name, symbol] (name)}
-      <button class="tool" class:on={(note?.articulations ?? []).includes(name)} {disabled} onclick={() => onsymbol("articulation", name)} title={symbol.label} aria-label={symbol.label}>
-        <span class="icon artic">{symbol.icon}</span>
-      </button>
-    {/each}
-    <button class="tool" class:on={!!note?.fermata} {disabled} onclick={() => onsymbol("fermata")} title={FERMATA.label} aria-label={FERMATA.label}>
-      <span class="icon fermata">{FERMATA.icon}</span>
-    </button>
-  </div>
-
-  <!-- 弦楽器の記号（ハーモニクス・左手ピチカート・バルトーク・ピチカート）（ステップ11-1b） -->
-  <div class="group">
-    {#each Object.entries(STRING_MARKS) as [name, symbol] (name)}
-      <button class="tool" class:on={(note?.stringMarks ?? []).includes(name)} {disabled} onclick={() => onsymbol("stringMark", name)} title={symbol.label} aria-label={symbol.label}>
-        <span class="icon string-mark">{symbol.icon}</span>
-      </button>
-    {/each}
-  </div>
-
-  <!-- 人工ハーモニクス（1音の音符のときに押せる。ひし形のある音符では、外すために押せる）（ステップ14-5a） -->
-  <!-- ひし形（選んでいる玉を、ひし形にする・戻す）（ステップ14-5a） -->
-  <div class="group">
-    <button
-      class="tool"
-      class:on={isHarmonic}
-      disabled={disabled || (isChord && !isHarmonic)}
-      onclick={() => onsymbol("artificialHarmonic")}
-      title={isChord && !isHarmonic ? `${ARTIFICIAL_HARMONIC.label}（ひし形のない重音には付けられません）` : ARTIFICIAL_HARMONIC.label}
-      aria-label={ARTIFICIAL_HARMONIC.label}
-    >
-      <!-- 白抜きのひし形（触れる音）と、黒い玉（押さえる音）と符尾を SVG で描く -->
-      <svg class="harmonic-icon" width="22" height="30" viewBox="0 0 22 30">
-        <path d="M8 5 L12 1.5 L16 5 L12 8.5 Z" fill="none" stroke="currentColor" stroke-width="1.5" />
-        <ellipse cx="12" cy="13" rx="4" ry="3" transform="rotate(-20 12 13)" fill="currentColor" />
-        <line x1="15.7" y1="12" x2="15.7" y2="28" stroke="currentColor" stroke-width="1.3" />
-      </svg>
-    </button>
-    <button class="tool" class:on={headIsDiamond} {disabled} onclick={() => onsymbol("diamond")} title={DIAMOND_HEAD.label} aria-label={DIAMOND_HEAD.label}>
-      <!-- 白抜きのひし形の玉だけを SVG で描く -->
-      <svg class="harmonic-icon" width="22" height="22" viewBox="0 0 22 22">
-        <path d="M5 11 L11 5 L17 11 L11 17 Z" fill="none" stroke="currentColor" stroke-width="1.6" />
-      </svg>
-    </button>
-  </div>
-
-  <!-- 装飾（トリルなど）（ステップ11-3a） -->
-  <div class="group">
-    {#each Object.entries(ORNAMENTS) as [name, symbol] (name)}
-      <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+    <!-- 人工ハーモニクス（1音の音符のときに押せる。ひし形のある音符では、外すために押せる）（ステップ14-5a） -->
+    <!-- ひし形（選んでいる玉を、ひし形にする・戻す）（ステップ14-5a） -->
+    <div class="group">
       <button
         class="tool"
-        class:on={note?.ornament === name}
-        disabled={disabled || (isChord && note?.ornament !== name)}
-        onclick={() => onsymbol("ornament", name)}
-        title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
-        aria-label={symbol.label}
+        class:on={isHarmonic}
+        disabled={disabled || (isChord && !isHarmonic)}
+        onclick={() => onsymbol("artificialHarmonic")}
+        title={isChord && !isHarmonic ? `${ARTIFICIAL_HARMONIC.label}（ひし形のない重音には付けられません）` : ARTIFICIAL_HARMONIC.label}
+        aria-label={ARTIFICIAL_HARMONIC.label}
       >
-        <span class="icon ornament">{symbol.icon}</span>
+        <!-- 白抜きのひし形（触れる音）と、黒い玉（押さえる音）と符尾を SVG で描く -->
+        <svg class="harmonic-icon" width="22" height="30" viewBox="0 0 22 30">
+          <path d="M8 5 L12 1.5 L16 5 L12 8.5 Z" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <ellipse cx="12" cy="13" rx="4" ry="3" transform="rotate(-20 12 13)" fill="currentColor" />
+          <line x1="15.7" y1="12" x2="15.7" y2="28" stroke="currentColor" stroke-width="1.3" />
+        </svg>
       </button>
-    {/each}
-  </div>
-
-  <!-- トレモロ（斜線の本数）（ステップ11-4） -->
-  <div class="group">
-    {#each TREMOLOS as tremolo (tremolo.count)}
-      <button class="tool" class:on={note?.tremolo === tremolo.count} {disabled} onclick={() => onsymbol("tremolo", tremolo.count)} title={tremolo.label} aria-label={tremolo.label}>
-        <span class="icon tremolo">{tremolo.icon}</span>
+      <button class="tool" class:on={headIsDiamond} {disabled} onclick={() => onsymbol("diamond")} title={DIAMOND_HEAD.label} aria-label={DIAMOND_HEAD.label}>
+        <!-- 白抜きのひし形の玉だけを SVG で描く -->
+        <svg class="harmonic-icon" width="22" height="22" viewBox="0 0 22 22">
+          <path d="M5 11 L11 5 L17 11 L11 17 Z" fill="none" stroke="currentColor" stroke-width="1.6" />
+        </svg>
       </button>
-    {/each}
-    <!-- 2音トレモロ（2音の重音で、全・2分・4分音符のときに押せる。2音トレモロなら、ふつうの重音に戻すために押せる）（ステップ14-6a） -->
-    <button
-      class="tool"
-      class:on={alternateOn}
-      disabled={disabled || (!alternateOn && !alternateOk)}
-      onclick={() => onsymbol("alternate")}
-      title={alternateOn || alternateOk ? ALTERNATE_TREMOLO.label : `${ALTERNATE_TREMOLO.label}（2音の重音で、全・2分・4分音符のときだけ付けられます。連符・ひし形の玉のある音符には付けられません）`}
-      aria-label={ALTERNATE_TREMOLO.label}
-    >
-      <!-- 2つの白い玉と符尾のあいだに、離れた連桁を3本描く（SVG） -->
-      <svg class="alternate-icon" width="30" height="30" viewBox="0 0 30 30">
-        <ellipse cx="6" cy="24" rx="3.6" ry="2.6" transform="rotate(-20 6 24)" fill="none" stroke="currentColor" stroke-width="1.4" />
-        <line x1="9.3" y1="23" x2="9.3" y2="3" stroke="currentColor" stroke-width="1.2" />
-        <ellipse cx="21" cy="19" rx="3.6" ry="2.6" transform="rotate(-20 21 19)" fill="none" stroke="currentColor" stroke-width="1.4" />
-        <line x1="24.3" y1="18" x2="24.3" y2="1" stroke="currentColor" stroke-width="1.2" />
-        <path d="M11.5 5 L22 3 L22 5.2 L11.5 7.2 Z" fill="currentColor" />
-        <path d="M11.5 9 L22 7 L22 9.2 L11.5 11.2 Z" fill="currentColor" />
-        <path d="M11.5 13 L22 11 L22 13.2 L11.5 15.2 Z" fill="currentColor" />
-      </svg>
-    </button>
+    </div>
+
+    <!-- 装飾（トリルなど）（ステップ11-3a） -->
+    <div class="group">
+      {#each Object.entries(ORNAMENTS) as [name, symbol] (name)}
+        <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+        <button
+          class="tool"
+          class:on={note?.ornament === name}
+          disabled={disabled || (isChord && note?.ornament !== name)}
+          onclick={() => onsymbol("ornament", name)}
+          title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
+          aria-label={symbol.label}
+        >
+          <span class="icon ornament">{symbol.icon}</span>
+        </button>
+      {/each}
+    </div>
   </div>
 
-  <!-- ブレス・カエスーラ（ステップ11-1c） -->
-  <div class="group">
-    {#each Object.entries(BREATHS) as [name, symbol] (name)}
-      <button class="tool" class:on={note?.breath === name} {disabled} onclick={() => onsymbol("breath", name)} title={symbol.label} aria-label={symbol.label}>
-        <span class="icon breath">{symbol.icon}</span>
-      </button>
-    {/each}
-  </div>
-
-  <!-- 強弱 -->
-  <div class="group">
-    {#each Object.entries(DYNAMICS) as [name, symbol] (name)}
-      <button class="tool" class:on={note?.dynamic === name} {disabled} onclick={() => onsymbol("dynamic", name)} title={symbol.label} aria-label={symbol.label}>
-        <span class="icon dynamic">{symbol.glyph}</span>
-      </button>
-    {/each}
-  </div>
-
-  <!-- グリッサンド（ステップ11-5a） -->
-  <!-- 付けられないときは押せない。ただし、もう付いている音なら、外すために押せる -->
-  <div class="group">
-    <button
-      class="tool text wide"
-      class:on={!!note?.glissando}
-      disabled={disabled || (!canGlissando && !note?.glissando)}
-      onclick={() => onsymbol("glissando")}
-      title={GLISSANDO.label}
-      aria-label={GLISSANDO.label}
-    >
-      <span class="gliss-text">{GLISSANDO.text}</span>
-    </button>
-  </div>
-
-  <!-- アルペジオ（重音のときだけ押せる。もう付いているものは、外すために押せる）（ステップ14-4a） -->
-  <div class="group">
-    <button
-      class="tool"
-      class:on={!!note?.arpeggio}
-      disabled={disabled || ((!isChord || isHarmonic) && !note?.arpeggio)}
-      onclick={() => onsymbol("arpeggio")}
-      title={isChord && !isHarmonic ? ARPEGGIO.label : `${ARPEGGIO.label}（重音のときだけ付けられます。ひし形の玉のある音符には付けられません）`}
-      aria-label={ARPEGGIO.label}
-    >
-      <!-- 縦の波線を SVG で描く（楽譜用フォントの文字だと、ブラウザによってボタンから大きくはみ出したため） -->
-      <!-- q は「曲がった線」：右・左に交互にふくらませて、上から下へ4回くねらせる -->
-      <svg class="arpeggio-icon" width="16" height="28" viewBox="0 0 16 28">
-        <path d="M8 2 q 5 3 0 6 q -5 3 0 6 q 5 3 0 6 q -5 3 0 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      </svg>
-    </button>
-  </div>
-
-  <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
-  <div class="group">
-    {#each Object.entries(GRACES) as [name, symbol] (name)}
-      <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+  <!-- 2行目 -->
+  <div class="row">
+    <!-- トレモロ（斜線の本数）（ステップ11-4） -->
+    <div class="group">
+      {#each TREMOLOS as tremolo (tremolo.count)}
+        <button class="tool" class:on={note?.tremolo === tremolo.count} {disabled} onclick={() => onsymbol("tremolo", tremolo.count)} title={tremolo.label} aria-label={tremolo.label}>
+          <span class="icon tremolo">{tremolo.icon}</span>
+        </button>
+      {/each}
+      <!-- 2音トレモロ（2音の重音で、全・2分・4分音符のときに押せる。2音トレモロなら、ふつうの重音に戻すために押せる）（ステップ14-6a） -->
       <button
         class="tool"
-        class:on={note?.grace?.type === name}
-        disabled={disabled || (isChord && note?.grace?.type !== name)}
-        onclick={() => onsymbol("grace", name)}
-        title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
-        aria-label={symbol.label}
+        class:on={alternateOn}
+        disabled={disabled || (!alternateOn && !alternateOk)}
+        onclick={() => onsymbol("alternate")}
+        title={alternateOn || alternateOk ? ALTERNATE_TREMOLO.label : `${ALTERNATE_TREMOLO.label}（2音の重音で、全・2分・4分音符のときだけ付けられます。連符・ひし形の玉のある音符には付けられません）`}
+        aria-label={ALTERNATE_TREMOLO.label}
       >
-        <span class="icon grace">{symbol.glyph}</span>
+        <!-- 2つの白い玉と符尾のあいだに、離れた連桁を3本描く（SVG） -->
+        <svg class="alternate-icon" width="30" height="30" viewBox="0 0 30 30">
+          <ellipse cx="6" cy="24" rx="3.6" ry="2.6" transform="rotate(-20 6 24)" fill="none" stroke="currentColor" stroke-width="1.4" />
+          <line x1="9.3" y1="23" x2="9.3" y2="3" stroke="currentColor" stroke-width="1.2" />
+          <ellipse cx="21" cy="19" rx="3.6" ry="2.6" transform="rotate(-20 21 19)" fill="none" stroke="currentColor" stroke-width="1.4" />
+          <line x1="24.3" y1="18" x2="24.3" y2="1" stroke="currentColor" stroke-width="1.2" />
+          <path d="M11.5 5 L22 3 L22 5.2 L11.5 7.2 Z" fill="currentColor" />
+          <path d="M11.5 9 L22 7 L22 9.2 L11.5 11.2 Z" fill="currentColor" />
+          <path d="M11.5 13 L22 11 L22 13.2 L11.5 15.2 Z" fill="currentColor" />
+        </svg>
       </button>
-    {/each}
-  </div>
+    </div>
 
-  <!-- スラー・松葉（スラーは範囲を選んだときだけ押せる。松葉は、音符を1つだけ選んだときも押せて、その音符の下だけに付く（ステップ16-1）） -->
-  <div class="group">
-    <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（S）（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
-    <button
-      class="tool text"
-      class:on={spanState.wedge === "crescendo"}
-      disabled={!canSpanRange && !canWedgeNote}
-      onclick={() => onspanner("crescendo")}
-      title="クレッシェンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
-      aria-label="クレッシェンド"
-    >
-      ＜
-    </button>
-    <button
-      class="tool text"
-      class:on={spanState.wedge === "diminuendo"}
-      disabled={!canSpanRange && !canWedgeNote}
-      onclick={() => onspanner("diminuendo")}
-      title="ディミヌエンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
-      aria-label="ディミヌエンド"
-    >
-      ＞
-    </button>
+    <!-- ブレス・カエスーラ（ステップ11-1c） -->
+    <div class="group">
+      {#each Object.entries(BREATHS) as [name, symbol] (name)}
+        <button class="tool" class:on={note?.breath === name} {disabled} onclick={() => onsymbol("breath", name)} title={symbol.label} aria-label={symbol.label}>
+          <span class="icon breath">{symbol.icon}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- 強弱 -->
+    <div class="group">
+      {#each Object.entries(DYNAMICS) as [name, symbol] (name)}
+        <button class="tool" class:on={note?.dynamic === name} {disabled} onclick={() => onsymbol("dynamic", name)} title={symbol.label} aria-label={symbol.label}>
+          <span class="icon dynamic">{symbol.glyph}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- グリッサンド（ステップ11-5a） -->
+    <!-- 付けられないときは押せない。ただし、もう付いている音なら、外すために押せる -->
+    <div class="group">
+      <button
+        class="tool text wide"
+        class:on={!!note?.glissando}
+        disabled={disabled || (!canGlissando && !note?.glissando)}
+        onclick={() => onsymbol("glissando")}
+        title={GLISSANDO.label}
+        aria-label={GLISSANDO.label}
+      >
+        <span class="gliss-text">{GLISSANDO.text}</span>
+      </button>
+    </div>
+
+    <!-- アルペジオ（重音のときだけ押せる。もう付いているものは、外すために押せる）（ステップ14-4a） -->
+    <div class="group">
+      <button
+        class="tool"
+        class:on={!!note?.arpeggio}
+        disabled={disabled || ((!isChord || isHarmonic) && !note?.arpeggio)}
+        onclick={() => onsymbol("arpeggio")}
+        title={isChord && !isHarmonic ? ARPEGGIO.label : `${ARPEGGIO.label}（重音のときだけ付けられます。ひし形の玉のある音符には付けられません）`}
+        aria-label={ARPEGGIO.label}
+      >
+        <!-- 縦の波線を SVG で描く（楽譜用フォントの文字だと、ブラウザによってボタンから大きくはみ出したため） -->
+        <!-- q は「曲がった線」：右・左に交互にふくらませて、上から下へ4回くねらせる -->
+        <svg class="arpeggio-icon" width="16" height="28" viewBox="0 0 16 28">
+          <path d="M8 2 q 5 3 0 6 q -5 3 0 6 q 5 3 0 6 q -5 3 0 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
+    <div class="group">
+      {#each Object.entries(GRACES) as [name, symbol] (name)}
+        <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
+        <button
+          class="tool"
+          class:on={note?.grace?.type === name}
+          disabled={disabled || (isChord && note?.grace?.type !== name)}
+          onclick={() => onsymbol("grace", name)}
+          title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
+          aria-label={symbol.label}
+        >
+          <span class="icon grace">{symbol.glyph}</span>
+        </button>
+      {/each}
+    </div>
+
+    <!-- スラー・松葉（スラーは範囲を選んだときだけ押せる。松葉は、音符を1つだけ選んだときも押せて、その音符の下だけに付く（ステップ16-1）） -->
+    <div class="group">
+      <button class="tool text wide" class:on={spanState.slur} disabled={!canSpanRange} onclick={() => onspanner("slur")} title="スラー（S）（Shift＋クリックで範囲を選んでから押す）"> スラー </button>
+      <button
+        class="tool text"
+        class:on={spanState.wedge === "crescendo"}
+        disabled={!canSpanRange && !canWedgeNote}
+        onclick={() => onspanner("crescendo")}
+        title="クレッシェンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
+        aria-label="クレッシェンド"
+      >
+        ＜
+      </button>
+      <button
+        class="tool text"
+        class:on={spanState.wedge === "diminuendo"}
+        disabled={!canSpanRange && !canWedgeNote}
+        onclick={() => onspanner("diminuendo")}
+        title="ディミヌエンド（Shift＋クリックで範囲を選んでから押す。音符を1つだけ選んで押すと、その音符の下だけに付く）"
+        aria-label="ディミヌエンド"
+      >
+        ＞
+      </button>
+    </div>
   </div>
 </div>
 
 <style>
+  /* 1行目・2行目を縦に並べる（後で直す候補の手直し：どこで行を分けるかを決めた） */
   .symbol-tools {
     display: flex;
-    flex-wrap: wrap; /* 画面が狭いときは折り返す */
+    flex-direction: column;
+    gap: 12px; /* 行と行の間 */
+  }
+  /* 1つの行：グループを横に並べる（画面がとても狭いときだけ、行の中で折り返す） */
+  .row {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
   }

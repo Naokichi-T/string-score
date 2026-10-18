@@ -166,176 +166,187 @@
 </script>
 
 <div class="measure-tools">
-  <!-- 小節の追加 -->
-  <div class="group">
-    <button onclick={() => onmeasure("before")} title="選んでいる小節の前に、小節を1つ足す（何も選んでいないときは最後に足す）"> 前に追加 </button>
-    <button onclick={() => onmeasure("after")} title="選んでいる小節の後ろに、小節を1つ足す（何も選んでいないときは最後に足す）"> 後ろに追加 </button>
-  </div>
+  <!-- 1行目：小節の追加・削除、拍子、音部記号（どの画面の幅でも、ここで行を分ける。狭すぎるときだけ、行の中で折り返す）（後で直す候補の手直し） -->
+  <div class="row">
+    <!-- 小節の追加・削除（後で直す候補の手直し：2行に収めるため、「小節」の見出しの横に［前に追加］［後ろに追加］［削除］をまとめた） -->
+    <div class="group">
+      <span class="label">小節</span>
+      <button onclick={() => onmeasure("before")} title="選んでいる小節の前に、小節を1つ足す（何も選んでいないときは最後に足す）"> 前に追加 </button>
+      <button onclick={() => onmeasure("after")} title="選んでいる小節の後ろに、小節を1つ足す（何も選んでいないときは最後に足す）"> 後ろに追加 </button>
+      <button disabled={!canDelete} onclick={() => onmeasure("delete")} title="選んでいる小節を消す（範囲を選んでいるときは、範囲にかかる小節をまとめて消す）"> 削除 </button>
+    </div>
 
-  <!-- 小節の削除 -->
-  <div class="group">
-    <button disabled={!canDelete} onclick={() => onmeasure("delete")} title="選んでいる小節を消す（範囲を選んでいるときは、範囲にかかる小節をまとめて消す）"> 小節を削除 </button>
-  </div>
+    <!-- 拍子：よく使う拍子のボタン -->
+    <div class="group">
+      <span class="label">拍子</span>
+      {#each PRESETS as time}
+        <button
+          class="time"
+          class:active={isCurrent(time)}
+          onclick={() => pickTime(time)}
+          title={`${time.name ? time.name + "：" : ""}選んでいる小節から、次に拍子が変わる所までの拍子を変える（範囲を選んでいるときは、範囲にかかる小節だけ）`}
+        >
+          {#if time.symbol}
+            <!-- C・¢ は楽譜用フォントの記号を SVG で描く（文字の基準の線を、ボタンのまん中に合わせるため） -->
+            <svg width="30" height="40" viewBox="0 0 30 40">
+              <text x="15" y="20" class="time-icon">{time.icon}</text>
+            </svg>
+          {:else}
+            <!-- 分数のように、上の数字と下の数字を縦に並べる -->
+            <span class="fraction">
+              <span>{time.beats}</span>
+              <span>{time.beatType}</span>
+            </span>
+          {/if}
+        </button>
+      {/each}
+    </div>
 
-  <!-- 拍子：よく使う拍子のボタン -->
-  <div class="group">
-    <span class="label">拍子</span>
-    {#each PRESETS as time}
-      <button
-        class="time"
-        class:active={isCurrent(time)}
-        onclick={() => pickTime(time)}
-        title={`${time.name ? time.name + "：" : ""}選んでいる小節から、次に拍子が変わる所までの拍子を変える（範囲を選んでいるときは、範囲にかかる小節だけ）`}
-      >
-        {#if time.symbol}
-          <!-- C・¢ は楽譜用フォントの記号を SVG で描く（文字の基準の線を、ボタンのまん中に合わせるため） -->
-          <svg width="30" height="40" viewBox="0 0 30 40">
-            <text x="15" y="20" class="time-icon">{time.icon}</text>
+    <!-- 拍子：その他（数字を選んで変える） -->
+    <!-- （後で直す候補の手直し：2行に収めるため「その他」の見出しを外した。拍子のボタンのすぐ右に置くので、拍子の続きだと分かる） -->
+    <div class="group">
+      <select bind:value={otherBeats} title="上の数字（1小節に何拍あるか）">
+        {#each BEATS_CHOICES as n}
+          <option value={n}>{n}</option>
+        {/each}
+      </select>
+      <span class="slash">/</span>
+      <select bind:value={otherBeatType} title="下の数字（何分音符を1拍とするか）">
+        {#each BEAT_TYPE_CHOICES as n}
+          <option value={n}>{n}</option>
+        {/each}
+      </select>
+      <button onclick={() => ontime({ beats: otherBeats, beatType: otherBeatType })} title="選んだ数字の拍子に変える"> 変更 </button>
+    </div>
+
+    <!-- 音部記号：選んでいるパートだけに効く（何も選んでいないときは押せない） -->
+    <div class="group">
+      <span class="label">音部記号</span>
+      {#each CLEF_BUTTONS as item}
+        <button
+          class="clef"
+          class:active={currentClef === item.clef}
+          disabled={currentClef === null}
+          onclick={() => onclef(item.clef)}
+          title={`${item.name}：選んでいるパートの、選んでいる小節から次に音部記号が変わる所まで（範囲を選んでいるときは、範囲にかかる小節だけ）`}
+        >
+          <!-- 小さな五線と記号を、SVG で描く（文字の基準の線を、決まった線にぴったり合わせられるため） -->
+          <svg width="34" height="40" viewBox="0 0 34 40">
+            {#each STAFF_LINES as lineY}
+              <line x1="2" y1={lineY} x2="32" y2={lineY} stroke="currentColor" stroke-width="0.8" />
+            {/each}
+            <text x="7" y={item.y} class="clef-icon">{item.icon}</text>
           </svg>
-        {:else}
-          <!-- 分数のように、上の数字と下の数字を縦に並べる -->
-          <span class="fraction">
-            <span>{time.beats}</span>
-            <span>{time.beatType}</span>
-          </span>
-        {/if}
-      </button>
-    {/each}
-  </div>
-
-  <!-- 拍子：その他（数字を選んで変える） -->
-  <div class="group">
-    <span class="label">その他</span>
-    <select bind:value={otherBeats} title="上の数字（1小節に何拍あるか）">
-      {#each BEATS_CHOICES as n}
-        <option value={n}>{n}</option>
+        </button>
       {/each}
-    </select>
-    <span class="slash">/</span>
-    <select bind:value={otherBeatType} title="下の数字（何分音符を1拍とするか）">
-      {#each BEAT_TYPE_CHOICES as n}
-        <option value={n}>{n}</option>
-      {/each}
-    </select>
-    <button onclick={() => ontime({ beats: otherBeats, beatType: otherBeatType })} title="選んだ数字の拍子に変える"> 変更 </button>
+    </div>
   </div>
 
-  <!-- アウフタクト：選んだらすぐ変わる（どの小節を選んでいても、1小節目に効く）（ステップ15-1） -->
-  <div class="group">
-    <span class="label">アウフタクト</span>
-    <select
-      class="pickup"
-      value={pickup.count}
-      disabled={pickupCounts.length === 0}
-      onchange={(event) => pickPickup(event.currentTarget)}
-      title="1小節目を、拍子より短い小節（アウフタクト）にする。長さは、拍子の下の数字の音符がいくつ分かで選ぶ"
-    >
-      <option value={0}>なし</option>
-      {#each pickupCounts as count}
-        <option value={count}>{pickupLabel(count)}</option>
-      {/each}
-    </select>
-  </div>
-
-  <!-- 調：選んだらすぐ変わる（今の小節の調が選ばれた状態で出る） -->
-  <div class="group">
-    <span class="label">調</span>
-    <select
-      class="key"
-      value={currentKey}
-      onchange={(event) => onkey(Number(event.currentTarget.value))}
-      title="選んでいる小節から、次に調が変わる所までの調を変える（範囲を選んでいるときは、範囲にかかる小節だけ）"
-    >
-      {#each KEYS as item}
-        <option value={item.key}>{item.name}</option>
-      {/each}
-    </select>
-  </div>
-
-  <!-- テンポ：選んでいる小節の頭から変える（何も選んでいないときは使えない）（ステップ11-6a） -->
-  <div class="group">
-    <span class="label">テンポ</span>
-    <input
-      class="tempo-word"
-      type="text"
-      list="measure-tempo-words"
-      placeholder="速度記号"
-      bind:value={tempoWord}
-      disabled={!currentTempo}
-      onkeydown={handleTempoKeydown}
-      title="速度記号（Allegro など。なくてもよい）"
-    />
-    <datalist id="measure-tempo-words">
-      {#each TEMPO_WORDS as word}
-        <option value={word}></option>
-      {/each}
-    </datalist>
-    <span class="label">♩＝</span>
-    <input class="tempo-number" type="number" min="20" max="300" step="1" bind:value={tempoNumber} disabled={!currentTempo} onkeydown={handleTempoKeydown} title="テンポ（20〜300）" />
-    <button disabled={!currentTempo} onclick={() => ontempo(tempoNumber, tempoWord)} title="選んでいる小節の頭から、テンポを変える（範囲を選んでいるときは、範囲の最初の小節から）"> 変える </button>
-    <button disabled={!currentTempo?.isChange} onclick={() => onremovetempo()} title="選んでいる小節のテンポ変更を消す（前の小節のテンポが続く）"> 元に戻す </button>
-  </div>
-
-  <!-- rit.・accel.・a tempo（ステップ11-6b） -->
-  <!-- rit.・accel. は、範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける。ここから始まっている所でもう一度押すと外れる -->
-  <div class="group">
-    <button
-      class="words"
-      class:active={currentGradual?.gradual === "rit"}
-      disabled={!currentGradual}
-      onclick={() => ongradual("rit")}
-      title="リタルダンド（だんだん遅く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん遅くする"
-    >
-      rit.
-    </button>
-    <button
-      class="words"
-      class:active={currentGradual?.gradual === "accel"}
-      disabled={!currentGradual}
-      onclick={() => ongradual("accel")}
-      title="アッチェレランド（だんだん速く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん速くする"
-    >
-      accel.
-    </button>
-    <button
-      class="words"
-      class:active={!!currentGradual?.aTempo}
-      disabled={!currentTempo || currentTempo.measure === 0}
-      onclick={() => onatempo()}
-      title="ア・テンポ（元の速さに戻す）：選んでいる小節の頭から、rit.・accel. の前の速さに戻す"
-    >
-      a tempo
-    </button>
-  </div>
-
-  <!-- 音部記号：選んでいるパートだけに効く（何も選んでいないときは押せない） -->
-  <div class="group">
-    <span class="label">音部記号</span>
-    {#each CLEF_BUTTONS as item}
-      <button
-        class="clef"
-        class:active={currentClef === item.clef}
-        disabled={currentClef === null}
-        onclick={() => onclef(item.clef)}
-        title={`${item.name}：選んでいるパートの、選んでいる小節から次に音部記号が変わる所まで（範囲を選んでいるときは、範囲にかかる小節だけ）`}
+  <!-- 2行目：アウフタクト、調、テンポ、rit.・accel.・a tempo -->
+  <div class="row">
+    <!-- アウフタクト：選んだらすぐ変わる（どの小節を選んでいても、1小節目に効く）（ステップ15-1） -->
+    <div class="group">
+      <span class="label">アウフタクト</span>
+      <select
+        class="pickup"
+        value={pickup.count}
+        disabled={pickupCounts.length === 0}
+        onchange={(event) => pickPickup(event.currentTarget)}
+        title="1小節目を、拍子より短い小節（アウフタクト）にする。長さは、拍子の下の数字の音符がいくつ分かで選ぶ"
       >
-        <!-- 小さな五線と記号を、SVG で描く（文字の基準の線を、決まった線にぴったり合わせられるため） -->
-        <svg width="34" height="40" viewBox="0 0 34 40">
-          {#each STAFF_LINES as lineY}
-            <line x1="2" y1={lineY} x2="32" y2={lineY} stroke="currentColor" stroke-width="0.8" />
-          {/each}
-          <text x="7" y={item.y} class="clef-icon">{item.icon}</text>
-        </svg>
+        <option value={0}>なし</option>
+        {#each pickupCounts as count}
+          <option value={count}>{pickupLabel(count)}</option>
+        {/each}
+      </select>
+    </div>
+
+    <!-- 調：選んだらすぐ変わる（今の小節の調が選ばれた状態で出る） -->
+    <div class="group">
+      <span class="label">調</span>
+      <select
+        class="key"
+        value={currentKey}
+        onchange={(event) => onkey(Number(event.currentTarget.value))}
+        title="選んでいる小節から、次に調が変わる所までの調を変える（範囲を選んでいるときは、範囲にかかる小節だけ）"
+      >
+        {#each KEYS as item}
+          <option value={item.key}>{item.name}</option>
+        {/each}
+      </select>
+    </div>
+
+    <!-- テンポ：選んでいる小節の頭から変える（何も選んでいないときは使えない）（ステップ11-6a） -->
+    <div class="group">
+      <span class="label">テンポ</span>
+      <input
+        class="tempo-word"
+        type="text"
+        list="measure-tempo-words"
+        placeholder="速度記号"
+        bind:value={tempoWord}
+        disabled={!currentTempo}
+        onkeydown={handleTempoKeydown}
+        title="速度記号（Allegro など。なくてもよい）"
+      />
+      <datalist id="measure-tempo-words">
+        {#each TEMPO_WORDS as word}
+          <option value={word}></option>
+        {/each}
+      </datalist>
+      <span class="label">♩＝</span>
+      <input class="tempo-number" type="number" min="20" max="300" step="1" bind:value={tempoNumber} disabled={!currentTempo} onkeydown={handleTempoKeydown} title="テンポ（20〜300）" />
+      <button disabled={!currentTempo} onclick={() => ontempo(tempoNumber, tempoWord)} title="選んでいる小節の頭から、テンポを変える（範囲を選んでいるときは、範囲の最初の小節から）"> 変える </button>
+      <button disabled={!currentTempo?.isChange} onclick={() => onremovetempo()} title="選んでいる小節のテンポ変更を消す（前の小節のテンポが続く）"> 元に戻す </button>
+    </div>
+
+    <!-- rit.・accel.・a tempo（ステップ11-6b） -->
+    <!-- rit.・accel. は、範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける。ここから始まっている所でもう一度押すと外れる -->
+    <div class="group">
+      <button
+        class="words"
+        class:active={currentGradual?.gradual === "rit"}
+        disabled={!currentGradual}
+        onclick={() => ongradual("rit")}
+        title="リタルダンド（だんだん遅く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん遅くする"
+      >
+        rit.
       </button>
-    {/each}
+      <button
+        class="words"
+        class:active={currentGradual?.gradual === "accel"}
+        disabled={!currentGradual}
+        onclick={() => ongradual("accel")}
+        title="アッチェレランド（だんだん速く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん速くする"
+      >
+        accel.
+      </button>
+      <button
+        class="words"
+        class:active={!!currentGradual?.aTempo}
+        disabled={!currentTempo || currentTempo.measure === 0}
+        onclick={() => onatempo()}
+        title="ア・テンポ（元の速さに戻す）：選んでいる小節の頭から、rit.・accel. の前の速さに戻す"
+      >
+        a tempo
+      </button>
+    </div>
   </div>
 </div>
 
 <style>
+  /* 1行目・2行目を縦に並べる（後で直す候補の手直し：どこで行を分けるかを決めた） */
   .measure-tools {
     display: flex;
+    flex-direction: column;
+    gap: 12px; /* 行と行の間 */
+  }
+  /* 1つの行：グループを横に並べる（画面がとても狭いときだけ、行の中で折り返す）
+     グループの間は 16px → 12px につめた（iPad の横向きの幅で2行に収めるため） */
+  .row {
+    display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     flex-wrap: wrap;
   }
   .group {
@@ -345,7 +356,7 @@
   }
   button {
     height: 40px;
-    padding: 0 14px;
+    padding: 0 10px; /* 文字の左右の余白（後で直す候補の手直し：14px → 10px につめた） */
     font-size: 14px;
     border: 1px solid #ccc;
     border-radius: 4px;
@@ -358,7 +369,7 @@
   }
   /* 拍子のボタンは、正方形に近い形にする */
   button.time {
-    width: 40px;
+    width: 36px; /* 後で直す候補の手直し：40px → 36px につめた */
     padding: 0;
   }
   /* 今の拍子・音部記号のボタンは青（記号タブと同じ色） */
@@ -378,7 +389,7 @@
   .label {
     font-size: 13px;
     color: #666;
-    margin-right: 4px;
+    margin-right: 2px; /* 後で直す候補の手直し：4px → 2px につめた */
   }
   .slash {
     color: #666;
@@ -435,7 +446,7 @@
     opacity: 0.35;
   }
   .tempo-word {
-    width: 110px;
+    width: 96px; /* 後で直す候補の手直し：110px → 96px につめた（「速度記号」の文字は入る） */
   }
   .tempo-number {
     width: 64px;
