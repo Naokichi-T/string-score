@@ -17,6 +17,7 @@
 //   ・終わり（stop）は、同じ番号で開いている松葉のうち、いちばん古いものを閉じる（番号を書かないファイルも組になる）
 //   ・始まりと同じ音符で終わる松葉 → その音符の下だけの松葉（wedgeInside）
 //   ・始まりと違う音符で終わる松葉 → 終わりの音符に wedgeEnd（その音符から次の松葉が始まっていてもよい）
+// （ステップ19-2：連桁（<beam number="1">）を読んで、自動のつなぎ方と違う所に連桁の印（join・break）を付けるようにした）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -75,6 +76,7 @@ import {
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners, cleanAlternates } from "./edit.js";
+import { marksFromFile } from "./beams.js"; // 連桁の印（ステップ19-2）
 
 // ----------------------------------------------------------
 // 16分音符いくつ分か → 音の長さの名前と付点の数の表
@@ -1227,6 +1229,10 @@ function readPart(partElement, counter, skipped) {
   //   openWedges    … 開いている松葉の一覧（ステップ16-2）
   const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false, openWedges: [] };
 
+  // このパートに連桁（<beam>）が1つでも書いてあったか（ステップ19-2）
+  // （連桁を書かないアプリのファイルでは、全部を「つながない」にしないよう、自動のつなぎ方のままにするため）
+  let hasBeams = false;
+
   let divisions = 1; // ファイルで書いていなければ 1（MusicXML の決まり）
   let firstClef = null;
   let mainVoice = null; // このパートで使う声部（最初の音の声部）
@@ -1379,6 +1385,14 @@ function readPart(partElement, counter, skipped) {
         }
 
         if (note) {
+          // 連桁の1本目（<beam number="1">）の中身を、一時的に覚えておく（あとで marksFromFile が印にして消す）（ステップ19-2）
+          // （number を書かないファイルもあるので、書いていなければ 1 とみなす）
+          const beamElement = childElements(element, "beam").find((beam) => (beam.getAttribute("number") ?? "1") === "1");
+          if (beamElement) {
+            note.beamXml = beamElement.textContent.trim();
+            hasBeams = true;
+          }
+
           // 記号を付ける（ステップ8-4a）
           applyPending(note, state, counter);
           readNotations(element, note, state, counter);
@@ -1435,7 +1449,7 @@ function readPart(partElement, counter, skipped) {
     });
   });
 
-  return { measures: measures, firstClef: firstClef, problems: problems };
+  return { measures: measures, firstClef: firstClef, problems: problems, hasBeams: hasBeams };
 }
 
 // 2音トレモロにまとめられなかったとき、組の音を「半分の長さの形」にする表（ステップ14-6b）
@@ -1801,6 +1815,18 @@ export function musicXMLToScore(text, fallbackTitle = "") {
       }
       partMeasures.push(measure);
     }
+
+    // 連桁：ファイルのつなぎ方を、このアプリの印（join・break）にする（ステップ19-2）
+    //   ・パートに <beam> が1つもなければ、自動のつなぎ方のまま（一時的な印 beamXml を消すだけ）
+    //   ・アウフタクトの小節は、拍子どおりの小節の後ろの部分として区切る（画面と同じ）
+    partMeasures.forEach((measure, i) => {
+      if (read.hasBeams) {
+        const offset = i === 0 && pickupTicks > 0 ? measureTicks(times[0]) - pickupTicks : 0;
+        marksFromFile(measure.notes, times[i], offset);
+      } else {
+        measure.notes.forEach((note) => delete note.beamXml);
+      }
+    });
 
     // パートの最後の音からタイが出ていたら外す（つながる先がない）
     const lastNotes = partMeasures[partMeasures.length - 1].notes;

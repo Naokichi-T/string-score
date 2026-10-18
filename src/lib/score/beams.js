@@ -14,7 +14,7 @@
 //   ③ 休符・4分音符より長い音符・連符の中・小節線は、印があってもいつも切る
 //      （連符の中は、今までどおりいつも全部つなぐ）
 //
-// VexFlow を使わずに計算するので、画面（render/tuplets.js）と MusicXML の書き出し（ステップ19-2）の両方で使える
+// VexFlow を使わずに計算するので、画面（render/tuplets.js）と MusicXML の書き出し・読み込み（ステップ19-2）の両方で使える
 // edit.js と同じく、楽譜データを直接書き換えずに、新しい楽譜データを作って返す
 // ==========================================================
 
@@ -421,4 +421,75 @@ export function unbeam(score, selection, range) {
     cleanMarks(notes, timeAt(newScore, measure), measureOffset(newScore, measure));
   });
   return newScore;
+}
+
+// ==========================================================
+// MusicXML の連桁（ステップ19-2）
+// ==========================================================
+
+// 長さの名前 → 連桁の本数（8分音符は1本、16分音符は2本、32分音符は3本）
+const BEAM_LEVELS = { eighth: 1, "16th": 2, "32nd": 3 };
+
+// ----------------------------------------------------------
+// 関数：beamXmlValues
+// 1小節の音ごとに、MusicXML の <beam> に書く中身を決める（書き出し用）
+//   notes  … 小節の音のデータの並び
+//   groups … measureBeamGroups で決めたまとまり（画面と同じつなぎ方）
+// ・1本目（number 1）：まとまりの最初 begin、途中 continue、最後 end
+// ・2本目・3本目（16分音符・32分音符）：その本数がある音どうしが続く所を begin〜end でつなぐ
+//     1つだけのときは「かぎ」（短い横棒）にする：まとまりの最初なら forward hook（右向き）、それ以外は backward hook（左向き）
+// 戻り値：音の番号ごとの [{ number: 何本目か, value: 中身 }, ...] の配列（連桁のない音は空の配列）
+// ----------------------------------------------------------
+export function beamXmlValues(notes, groups) {
+  const result = notes.map(() => []);
+  groups.forEach((group) => {
+    const levels = group.map((k) => BEAM_LEVELS[notes[k].duration] ?? 1);
+    const maxLevel = Math.max(...levels);
+    for (let number = 1; number <= maxLevel; number++) {
+      // この本数がある音が続く所（まとまりの中の位置で）を探す
+      let p = 0;
+      while (p < group.length) {
+        if (levels[p] < number) {
+          p = p + 1;
+          continue;
+        }
+        let q = p;
+        while (q + 1 < group.length && levels[q + 1] >= number) q = q + 1;
+        if (number === 1 || q > p) {
+          // 2つ以上続く（1本目はまとまり全体）：begin 〜 continue 〜 end
+          for (let r = p; r <= q; r++) {
+            const value = r === p ? "begin" : r === q ? "end" : "continue";
+            result[group[r]].push({ number: number, value: value });
+          }
+        } else {
+          // 1つだけ：かぎ
+          result[group[p]].push({ number: number, value: p === 0 ? "forward hook" : "backward hook" });
+        }
+        p = q + 1;
+      }
+    }
+  });
+  return result;
+}
+
+// ----------------------------------------------------------
+// 関数：marksFromFile
+// MusicXML から読んだ連桁（音ごとの beamXml）を、このアプリの印（join・break）にする（読み込み用）
+//   notes  … 小節の音のデータの並び（読み込みで、主音に beamXml を一時的に付けてある）
+//             beamXml … その音の <beam number="1"> の中身（"begin"・"continue"・"end" など。なければ付いていない）
+//   time   … 小節の拍子
+//   offset … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（アウフタクトの小節だけ 0 より大きい）
+// ・ファイルで前の音とつながっている（前が begin・continue で、自分が continue・end）なら "join"、そうでなければ "break"
+// ・そのあと cleanMarks で、自動と同じになる印・効かない印を外す（自動と違う所だけ印が残る）
+// ・beamXml は消す（notes を直接書き換える）
+// ----------------------------------------------------------
+export function marksFromFile(notes, time, offset = 0) {
+  notes.forEach((note, i) => {
+    if (i === 0) return;
+    const prev = notes[i - 1];
+    const joined = ["begin", "continue"].includes(prev.beamXml) && ["continue", "end"].includes(note.beamXml);
+    note.beam = joined ? "join" : "break";
+  });
+  notes.forEach((note) => delete note.beamXml);
+  cleanMarks(notes, time, offset);
 }

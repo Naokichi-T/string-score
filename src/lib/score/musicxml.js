@@ -11,6 +11,7 @@
 // （ステップ15-3：アウフタクト。1小節目を <measure number="0" implicit="yes"> にして、次の小節から 1, 2, 3… と数える）
 //   implicit="yes" … 「小節番号として数えない小節」という MusicXML の決まり
 // （ステップ16-2：松葉に番号（number）を付けて、同じ音符での「＜の終わり → ＞の始まり」と、1つの音符の下だけの松葉を書く）
+// （ステップ19-2：連桁を <beam> で書く。画面と同じつなぎ方（手で変えた所も）がほかのアプリでも同じになるように）
 //   番号が 1 のときは書かない（書かなければ 1 という決まり。今までの楽譜の書き出しは変わらない）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
@@ -54,7 +55,9 @@ import {
   isAlternate,
   hasPickup,
   measureNumber,
+  measureOffset,
 } from "./model.js";
+import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつなぎ方（ステップ19-2）
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 
@@ -407,11 +410,12 @@ function tempoXml(score) {
 //                start … 連符の最初の音か　stop … 連符の最後の音か　bracket … 括弧を付けるか
 //   measureRest … 小節まるごとの休符か（true なら <rest measure="yes"/> にして、形 <type> は書かない）（ステップ13-3）
 //   chordMember … 重音の2つ目からの音か（true なら <chord/> の印を書く。「前の音と同時に鳴る」という意味）（ステップ14-3）
+//   beams     … この音に書く連桁 [{ number: 何本目か, value: "begin" など }, ...]（なければ空の配列）（ステップ19-2）
 // 重音のときは、高さ1つ分ずつの「書き出し用の音」を作って、この関数を高さの数だけ呼ぶ（partXml を参照）
 //   書き出し用の音の pitch はその高さ、tie は「その高さが次の音へタイでつながるか」
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false, chordMember = false) {
+function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false, chordMember = false, beams = []) {
   const lines = [];
   lines.push("      <note>");
 
@@ -473,6 +477,12 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest =
   if (!note.rest && !measureRest && note.pitch.diamond) {
     lines.push("        <notehead>diamond</notehead>");
   }
+
+  // 連桁（<notehead> のあと・<notations> の前に書く決まり）（ステップ19-2）
+  //   例：<beam number="1">begin</beam>
+  beams.forEach((beam) => {
+    lines.push(`        <beam number="${beam.number}">${beam.value}</beam>`);
+  });
 
   // 音符に付く記号（タイの表示・スラー・アーティキュレーション・弓・指番号・フェルマータ・連符の始まりと終わり）
   lines.push(...notationsXml(note, tieStop, tieStart, tupletMark));
@@ -973,6 +983,9 @@ function partXml(score, p, divisions) {
     // この小節の連符（ステップ10-5）
     const groups = tupletGroups(measure.notes);
 
+    // この小節の連桁（画面と同じつなぎ方）と、音ごとに書く <beam> の中身（ステップ19-2）
+    const beamValues = beamXmlValues(measure.notes, measureBeamGroups(measure.notes, nowTime, measureOffset(score, i)));
+
     // 音符・休符
     let prevTie = tiedIn; // 1つ前の音が、この音にタイでつながっているか
     let prevTiedNote = tiedInNote; // 1つ前の音（タイでこの音につながっているときだけ。高さごとのタイの「ここまで」に使う）（ステップ14-3）
@@ -1016,7 +1029,8 @@ function partXml(score, p, divisions) {
         chordParts(xmlNote, prevTie ? prevTiedNote : null, nextNote).forEach((piece, h) => {
           // 2つ目からの音は <chord/> を付け、連符の始まり・終わりの印は書かない（1つ目に書く）
           const mark = tupletMark && h > 0 ? { ...tupletMark, start: false, stop: false } : tupletMark;
-          lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0));
+          // 連桁は、重音の1つ目の <note> にだけ書く決まり（ステップ19-2）
+          lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0, h === 0 ? beamValues[k] : []));
         });
       }
       lines.push(...directionsAfterXml(note, wedgeNumber)); // 松葉の終わり（ステップ8-2。ステップ16-2：音符の下だけの松葉の終わりも）
