@@ -545,10 +545,48 @@
   let currentInstrument = $derived(selection ? score.parts[selection.part].instrument : "violin");
 
   // ----------------------------------------------------------
+  // スマホかどうか（ステップ18-5）
+  // スマホでは楽譜の入力ができない（ボタンや鍵盤が小さすぎる）ので、編集の画面のかわりに案内を出す
+  // 見分け方：指で操作する画面（pointer: coarse）で、画面の短いほうの辺が 600px より小さいとき
+  //   ・横向きにしたスマホもスマホ（短いほうの辺で見るため）
+  //   ・いちばん小さい iPad mini の短い辺は 744px なので、タブレットは止まらない
+  //   ・パソコン（マウス操作）は、ブラウザの窓をどれだけ小さくしても止まらない
+  // ----------------------------------------------------------
+  const PHONE_QUERY = "(pointer: coarse) and (max-width: 599px), (pointer: coarse) and (max-height: 599px)";
+  let isPhone = $state(false);
+
+  // 楽器の音を読み込んだか（スマホのときは読み込まないので、あとでスマホでなくなったときに読み込むため）（ステップ18-5）
+  let soundRequested = false;
+
+  // ----------------------------------------------------------
+  // 関数：requestSound
+  // 楽器の音を読み込み始める（スマホのときは、通信量を使わないように読み込まない）（ステップ18-5）
+  // ----------------------------------------------------------
+  function requestSound() {
+    if (isPhone || soundRequested) return;
+    soundRequested = true;
+    // 楽器の音B を選んでいれば B、それ以外（A・電子音）は A（ステップ12-2）
+    loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
+  }
+
+  // ----------------------------------------------------------
   // ページが開いたら、楽器の音（バイオリン・ビオラ・チェロ・コントラバス）を裏で読み込み始める
   // （読み込みが終わるまでは、鍵盤は電子音で鳴る。再生ボタンは押せない）
   // ----------------------------------------------------------
   onMount(() => {
+    // スマホかどうかを調べる。画面の大きさが変わったとき（iPad の画面分割など）も調べ直す（ステップ18-5）
+    const phoneMedia = window.matchMedia(PHONE_QUERY);
+    isPhone = phoneMedia.matches;
+    const handlePhoneChange = () => {
+      isPhone = phoneMedia.matches;
+      if (isPhone) {
+        handleStop(); // 案内に切り替わるときは、鳴っている音を止める
+      } else {
+        requestSound(); // スマホでなくなったら、楽器の音を読み込む
+      }
+    };
+    phoneMedia.addEventListener("change", handlePhoneChange);
+
     // URL の id の楽譜を開く（id がなければトップページへ戻す）
     openScore();
 
@@ -580,13 +618,14 @@
     // 前に（ほかのタブ・ほかの楽譜で）コピーした音を読み込む（なければ null のまま）（ステップ13-1）
     clipboard = loadClipboard();
 
-    // 楽器の音を読み込む（楽器の音B を選んでいれば B、それ以外（A・電子音）は A）（ステップ12-2）
-    loadSound(soundType === "instrumentB" ? "instrumentB" : "instrument");
+    // 楽器の音を読み込む（スマホのときは読み込まない）（ステップ18-5：requestSound に分けた）
+    requestSound();
 
     // ページから離れるときは、鳴っている音を止めて、緑を調べるのもやめる
     return () => {
       stopPlayback();
       cancelAnimationFrame(highlightFrame);
+      phoneMedia.removeEventListener("change", handlePhoneChange); // スマホかどうかを調べるのもやめる（ステップ18-5）
     };
   });
 
@@ -2009,6 +2048,8 @@
   function handleKeydown(event) {
     // 楽譜を読み込む前は何もしない（ステップ7-1）
     if (loadState !== "ready") return;
+    // スマホで案内を出しているときも何もしない（見えない楽譜を変えないため）（ステップ18-5）
+    if (isPhone) return;
 
     // Ctrl キー（Mac は ⌘ キー）を押しているか
     const command = event.ctrlKey || event.metaKey;
@@ -2142,7 +2183,14 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
-{#if loadState === "ready"}
+{#if isPhone}
+  <!-- スマホのとき：編集の画面のかわりに案内を出す（ステップ18-5） -->
+  <div class="phone-notice">
+    <p class="phone-title">この画面はスマホでは使えません</p>
+    <p>楽譜の作成・編集は、パソコンかタブレット（iPad など、横向き）で開いてください。</p>
+    <p class="phone-links"><a href="/">楽譜の一覧へ</a><a href="/help">Q&amp;A を見る</a></p>
+  </div>
+{:else if loadState === "ready"}
   <!-- 画面全体：上から 上のバー・タブ・選択中の表示・五線譜・鍵盤 -->
   <!-- no-print-view：印刷用のページを作っていない間だけ付ける（ステップ18-2） -->
   <!--   ブラウザのメニューから印刷したときに、編集の画面を紙に出さないようにするため -->
@@ -2323,6 +2371,25 @@
   }
   .load-status {
     padding: 16px; /* 読み込み中・見つからないときの文字のまわりの余白 */
+  }
+  /* スマホのときの案内（ステップ18-5） */
+  .phone-notice {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 32px 20px;
+    font-size: 15px;
+    line-height: 1.8;
+    color: #333;
+  }
+  .phone-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #111;
+  }
+  .phone-links {
+    display: flex;
+    gap: 20px; /* 2つのリンクの間 */
+    margin-top: 24px;
   }
   /* メニューから印刷したときの案内（ステップ18-2）：画面では出さない */
   .print-fallback {
