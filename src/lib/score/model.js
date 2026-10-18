@@ -508,9 +508,25 @@ export function hasPickup(score) {
 }
 
 // ----------------------------------------------------------
+// 関数：isShortEnd
+// i 小節目が「短い最後の小節」か調べる（ステップ20）
+// 短い最後の小節は、楽譜全体の小節の情報の最後の小節（score.measures[最後]）に
+//   short: 拍の数（拍子の下の数字の音符がいくつ分か）
+// として持つ（例：4分の4拍子で、最後の小節が付点2分音符だけ → short: 3）
+// 小節が1つだけで、それがアウフタクトのときは、アウフタクトのほうを使う（short は使わない）
+// 戻り値：true か false
+// ----------------------------------------------------------
+export function isShortEnd(score, i) {
+  const last = score.measures.length - 1;
+  if (i !== last || !score.measures[i]?.short) return false;
+  return !(i === 0 && hasPickup(score));
+}
+
+// ----------------------------------------------------------
 // 関数：measureLength
 // i 小節目（0 から数える）の長さ（ティック）を返す（ステップ15-1）
 //   ・1小節目がアウフタクトなら … アウフタクトの長さ（拍の数 × 拍子の下の数字の音符1つ分）
+//   ・短い最後の小節なら     … その長さ（拍の数 × 拍子の下の数字の音符1つ分）（ステップ20）
 //   ・それ以外             … 拍子どおりの1小節の長さ（measureTicks と同じ）
 // 小節の中に入る音の長さを調べるときは、measureTicks(timeAt(...)) ではなく、いつもこれを使う
 // 例：4分の4拍子で pickup: 1 → 1小節目は 4分音符1つ分、2小節目からは 4分音符4つ分
@@ -519,6 +535,9 @@ export function measureLength(score, i) {
   const time = timeAt(score, i);
   if (i === 0 && hasPickup(score)) {
     return (score.measures[0].pickup * 16 * TICKS_PER_16TH) / time.beatType;
+  }
+  if (isShortEnd(score, i)) {
+    return (score.measures[i].short * 16 * TICKS_PER_16TH) / time.beatType;
   }
   return measureTicks(time);
 }
@@ -529,9 +548,11 @@ export function measureLength(score, i) {
 //   ・アウフタクトの小節 … 拍子どおりの1小節の長さ − アウフタクトの長さ
 //                         （アウフタクトは小節の後ろの部分なので。4/4 で1拍のアウフタクトなら、4拍目から始まる）
 //   ・それ以外         … 0
+//   （ステップ20：短い最後の小節は、小節の「前の部分」なので 0（拍の線・メトロノームは小節の頭からそろう））
 // 拍の線・連桁のつなぎ方・メトロノームを、拍子どおりの位置にそろえるのに使う
 // ----------------------------------------------------------
 export function measureOffset(score, i) {
+  if (isShortEnd(score, i)) return 0;
   return measureTicks(timeAt(score, i)) - measureLength(score, i);
 }
 

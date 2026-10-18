@@ -19,7 +19,7 @@
 // edit.js と同じく、渡された楽譜データは書き換えずに、新しい楽譜データを作って返す
 // ==========================================================
 
-import { noteTicks, timeAt, measureTicks, measureLength, hasPickup, restsForSpan, tupletGroups, isMeasureRest } from "./model.js";
+import { noteTicks, timeAt, measureTicks, measureLength, hasPickup, restsForSpan, tupletGroups, isMeasureRest, isShortEnd } from "./model.js";
 import { cloneScore, cleanSpanners, timeRangeEnd } from "./edit.js";
 import { splitTicks, plainNote } from "./clipboard.js";
 
@@ -164,11 +164,17 @@ function layoutPart(events, count, length, time) {
 //   to   … null のときは「次に拍子が変わる小節の手前まで（なければ最後まで）」（changeTime と同じ）
 // （changeTime で「入りきらない音がある」と分かったあとに使う）
 // 戻り値：{ score: 新しい楽譜データ, added: 増えた小節の数, error: 知らせる文 }
-//   流し直せないとき（連符が小節線をまたぐ）は { score: 元の楽譜データ, added: 0, error: 知らせる文 }
+//   流し直せないとき（連符が小節線をまたぐ・範囲に短い最後の小節が入っている（ステップ20））は { score: 元の楽譜データ, added: 0, error: 知らせる文 }
 // ----------------------------------------------------------
 export function reflowTime(score, from, to, time) {
   const last = timeRangeEnd(score, from, to);
   const length = measureTicks(time); // 新しい拍子の1小節の長さ
+
+  // 短い最後の小節は流し直さない（アウフタクトと同じ）（ステップ20）
+  // 範囲に入っているときは、流し直さずに知らせる
+  if (isShortEnd(score, last)) {
+    return { score: score, added: 0, error: "最後の小節が短い小節なので、流し直せません（先に「楽譜の設定」タブで最後の小節の長さを「なし」にしてください）" };
+  }
 
   // アウフタクトは流し直さないので、範囲がアウフタクトから始まるときは、その次の小節から流し直す
   const keepPickup = from === 0 && hasPickup(score);

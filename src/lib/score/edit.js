@@ -18,6 +18,7 @@ import {
   tempoAt,
   measureTicks,
   measureLength,
+  isShortEnd, // 短い最後の小節か（ステップ20）
   measureName,
   hasPickup,
   restsForSpan,
@@ -167,6 +168,9 @@ export function setDuration(score, selection, duration, dots) {
 // 関数：appendMeasure
 // 楽譜の最後に、空の小節を1つ足す（全パート）
 // 拍子は最後の小節と同じにして、全部休符で埋める
+// （ステップ20：最後の小節が短い小節なら）
+//   ・「短い」は、新しい最後の小節（足した小節）へ移す（足した小節は短い長さの休符で埋める）
+//   ・もとの最後の小節は、ふつうの長さにする（後ろを休符で埋める）
 // 戻り値：新しい楽譜データ
 // ----------------------------------------------------------
 export function appendMeasure(score) {
@@ -175,11 +179,39 @@ export function appendMeasure(score) {
   const time = timeAt(newScore, lastIndex);
   const total = measureTicks(time);
 
-  newScore.measures.push({}); // 拍子・調は変えない
+  // 最後の小節が短い小節か（ステップ20）
+  const short = isShortEnd(newScore, lastIndex) ? newScore.measures[lastIndex].short : null;
+  const shortLength = short ? measureLength(newScore, lastIndex) : total;
+
+  newScore.measures.push(short ? { short: short } : {}); // 拍子・調は変えない（「短い」は新しい最後の小節へ）
+  if (short) delete newScore.measures[lastIndex].short;
   newScore.parts.forEach((part) => {
-    part.measures.push({ notes: restsForSpan(0, total, time) });
+    // もとの最後の小節を、ふつうの長さにする（後ろを休符で埋める）（ステップ20）
+    if (short) part.measures[lastIndex].notes = resizeFromBack(part.measures[lastIndex].notes, total, time);
+    part.measures.push({ notes: restsForSpan(0, shortLength, time) });
   });
   return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：resizeFromBack
+// 小節の長さを、後ろの側で変える（前の音はそのまま。後ろの休符を消す・足す）（ステップ20）
+//   notes     … 小節の音の並び
+//   newLength … 新しい長さ（ティック）
+//   time      … その小節の拍子
+// ・終わりに続く休符を取りのぞいてから、新しい長さまで1拍ずつの休符で埋める
+// ・中身の最後の音のうしろに休符が来たら、その音のタイは外す（休符とはつなげないため）
+// 戻り値：新しい音の並び（中身が新しい長さに入りきらないときは null）
+// ----------------------------------------------------------
+function resizeFromBack(notes, newLength, time) {
+  const contents = notes.slice(0, contentCount(notes)).map((note) => ({ ...note }));
+  const rebuilt = rebuildMeasure(contents, newLength, time);
+  if (!rebuilt) return null;
+  if (contents.length > 0 && rebuilt.length > contents.length) {
+    const lastNote = rebuilt[contents.length - 1];
+    if (lastNote.tie) lastNote.tie = false;
+  }
+  return rebuilt;
 }
 
 // ----------------------------------------------------------
@@ -199,6 +231,10 @@ export function nextPosition(score, selection) {
   // 次の小節がある
   if (selection.measure + 1 < measures.length) {
     return { score: score, selection: { ...selection, measure: selection.measure + 1, note: 0 } };
+  }
+  // 最後の小節の最後の音で、最後の小節が短い小節なら、小節を足さずにそこで止まる（曲の終わりなので）（ステップ20）
+  if (isShortEnd(score, selection.measure)) {
+    return { score: score, selection: selection };
   }
   // 最後の小節の最後の音 → 小節を足す
   const newScore = appendMeasure(score);
@@ -1758,6 +1794,9 @@ export function toggleMeasureRest(score, part, from, to) {
 // 戻り値：新しい楽譜データ
 // ----------------------------------------------------------
 export function insertMeasure(score, index) {
+  // 最後の小節の後ろに足すときで、最後の小節が短い小節なら、「短い」を新しい最後の小節へ移す（ステップ20）
+  if (index === score.measures.length && isShortEnd(score, index - 1)) return appendMeasure(score);
+
   const newScore = cloneScore(score);
 
   // 足す小節の拍子（前の小節と同じ。1小節目の前なら今の1小節目と同じ）
@@ -2058,9 +2097,22 @@ export function changeTime(score, from, to, time) {
     newPickup = pickupCount;
   }
 
+  // ①-3 短い最後の小節の拍の数を、新しい拍子で数え直す（最後の小節を変えるときだけ）（ステップ20）
+  const lastIndex = count - 1;
+  let newShort = null; // 新しい拍子での、短い最後の小節の拍の数（変えないときは null）
+  if (last === lastIndex && isShortEnd(score, lastIndex) && !(lastIndex === 0 && newPickup !== null)) {
+    const unit = full / time.beats;
+    const shortCount = measureLength(score, lastIndex) / unit;
+    if (!Number.isInteger(shortCount) || shortCount >= time.beats) {
+      return { score: score, error: "最後の小節の長さが新しい拍子に合わないので、拍子を変えられません（先に「楽譜の設定」タブで最後の小節の長さを変えてください）" };
+    }
+    newShort = shortCount;
+  }
+
   // ② 入りきらない音がないか、全パート・全小節を先に調べる
   // （アウフタクトの小節は、アウフタクトの長さで調べる（ステップ15-1））
-  const totalAt = (m) => (m === 0 && newPickup !== null ? measureLength(score, 0) : full);
+  // （ステップ20：短い最後の小節は、その長さで調べる）
+  const totalAt = (m) => (m === 0 && newPickup !== null ? measureLength(score, 0) : m === lastIndex && newShort !== null ? measureLength(score, lastIndex) : full);
   for (const part of score.parts) {
     for (let m = from; m <= last; m++) {
       const notes = part.measures[m].notes;
@@ -2098,6 +2150,8 @@ export function changeTime(score, from, to, time) {
   if (time.symbol) newScore.measures[from].time.symbol = time.symbol;
   // アウフタクトの拍の数を、新しい拍子で数え直したものにする（ステップ15-1）
   if (newPickup !== null) newScore.measures[0].pickup = newPickup;
+  // 短い最後の小節の拍の数も、新しい拍子で数え直したものにする（ステップ20）
+  if (newShort !== null) newScore.measures[lastIndex].short = newShort;
   // 範囲の中にあった、ほかの拍子の変化は消す
   for (let m = from + 1; m <= last; m++) {
     delete newScore.measures[m].time;
@@ -2226,6 +2280,57 @@ export function setPickup(score, count) {
     delete newScore.measures[0].pickup;
   } else {
     newScore.measures[0].pickup = count;
+  }
+  return { score: newScore, error: "" };
+}
+
+// ----------------------------------------------------------
+// 関数：canShortEnd
+// 最後の小節を短くできるか（ステップ20）
+// 小節が1つだけで、それがアウフタクトのときはできない（アウフタクトのほうを使う）
+// ----------------------------------------------------------
+export function canShortEnd(score) {
+  const last = score.measures.length - 1;
+  return !(last === 0 && hasPickup(score));
+}
+
+// ----------------------------------------------------------
+// 関数：setShortEnd
+// 最後の小節を短くする・長さを変える・ふつうの長さに戻す（ステップ20）
+//   count … 最後の小節の拍の数（拍子の下の数字の音符がいくつ分か）。0 ならふつうの長さに戻す
+// 全パートの最後の小節を、resizeFromBack で新しい長さにする（後ろの休符を消す・足す）
+// 短くするときに、取りのぞく所に音符があるパートが1つでもあれば、何も変えずに知らせる
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+//   （長さが変わらないとき・変えられないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setShortEnd(score, count) {
+  const last = score.measures.length - 1;
+  const time = timeAt(score, last);
+  // 選べない数・短くできない楽譜なら何もしない（欄からは来ないはず）
+  if (!canShortEnd(score)) return { score: score, error: "" };
+  if (count !== 0 && !pickupChoices(time).includes(count)) return { score: score, error: "" };
+
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  const oldLength = measureLength(score, last); // 今の最後の小節の長さ
+  const newLength = count === 0 ? full : (full / time.beats) * count; // 新しい長さ
+  if (newLength === oldLength) return { score: score, error: "" };
+
+  const newScore = cloneScore(score);
+  // パートごとに、最後の小節の長さを変える
+  for (const part of newScore.parts) {
+    const resized = resizeFromBack(part.measures[last].notes, newLength, time);
+    if (!resized) {
+      return { score: score, error: `${part.name} の最後の小節の後ろのほうに音があるので、最後の小節をこの長さにできません` };
+    }
+    part.measures[last].notes = resized;
+    cleanSpanners(part); // 消えた休符に付いていた印などを整える
+  }
+
+  // 最後の小節の情報に、拍の数を書く（戻すときは消す）
+  if (count === 0) {
+    delete newScore.measures[last].short;
+  } else {
+    newScore.measures[last].short = count;
   }
   return { score: newScore, error: "" };
 }

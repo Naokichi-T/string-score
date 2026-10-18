@@ -78,6 +78,8 @@
     deleteMeasures,
     changeTime,
     setPickup,
+    setShortEnd, // 最後の小節を短くする（ステップ20）
+    canShortEnd,
     changeKey,
     changeClef,
     clefAt,
@@ -1608,8 +1610,33 @@
     commit(result.score, newSelection);
   }
 
-  // 1小節目の拍子と、今のアウフタクトの拍の数（「小節」タブのアウフタクトの欄に出す）（ステップ15-1）
+  // 1小節目の拍子と、今のアウフタクトの拍の数（「楽譜の設定」タブのアウフタクトの欄に出す）（ステップ15-1。ステップ20で移した）
   let pickup = $derived({ time: timeAt(score, 0), count: score.measures[0].pickup ?? 0 });
+
+  // 最後の小節の拍子と、今の拍の数と、短くできるか（「楽譜の設定」タブの最後の小節の欄に出す）（ステップ20）
+  let shortEnd = $derived.by(() => {
+    const last = score.measures.length - 1;
+    return { time: timeAt(score, last), count: score.measures[last].short ?? 0, enabled: canShortEnd(score) };
+  });
+
+  // ----------------------------------------------------------
+  // 関数：handleShortEnd
+  // 「楽譜の設定」タブで最後の小節の長さを選んだとき（ステップ20）
+  //   count … 最後の小節の拍の数（0 ならふつうの長さに戻す）
+  // 後ろのほうに音があって短くできないときは、知らせて終わり（楽譜は変えない）
+  // 最後の小節の中の音の数が変わるので、最後の小節を選んでいたときは、その最初の音を選び直す
+  // ----------------------------------------------------------
+  function handleShortEnd(count) {
+    message = "";
+    const result = setShortEnd(score, count);
+    if (result.error) {
+      message = result.error;
+      return;
+    }
+    const last = score.measures.length - 1;
+    const newSelection = selection && selection.measure === last ? { part: selection.part, measure: last, note: 0 } : selection;
+    commit(result.score, newSelection);
+  }
 
   // ----------------------------------------------------------
   // 関数：handlePickup
@@ -2334,6 +2361,8 @@
       ontime={handleTime}
       {pickup}
       onpickup={handlePickup}
+      {shortEnd}
+      onshortend={handleShortEnd}
       {currentKey}
       {currentTempo}
       ontempo={handleTempoChange}

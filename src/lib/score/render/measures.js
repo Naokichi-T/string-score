@@ -4,7 +4,7 @@
 // 小節の頭に付ける記号（音部記号・調号・拍子記号）を扱う
 // ==========================================================
 
-import { CLEFS, hasPickup, measureOffset } from "../model.js";
+import { CLEFS, hasPickup, measureOffset, isShortEnd } from "../model.js";
 import { timeToSignature, keyToVexKey } from "./helpers.js";
 
 // 2段目からの段の頭で、音部記号・調号と最初の音符の間に空けるすき間（ピクセル）
@@ -56,7 +56,8 @@ export function buildStates(score) {
 
     // 声部に渡す長さと、小節の頭の位置（ステップ15-1）
     const isPickup = i === 0 && hasPickup(score);
-    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : time;
+    // 短い最後の小節も、その長さで声部を作る（ステップ20）
+    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : isShortEnd(score, i) ? { beats: info.short, beatType: time.beatType } : time;
 
     states.push({
       time: time,

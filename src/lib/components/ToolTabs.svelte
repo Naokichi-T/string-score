@@ -64,8 +64,10 @@
   //   onmeasure    … 「小節」タブのボタンが押されたときに呼ぶ関数（"before"・"after"・"delete" を渡す）
   //   currentTime  … 選んでいる小節の拍子 { beats, beatType }（「小節」タブで使う）
   //   ontime       … 拍子のボタンが押されたときに呼ぶ関数（新しい拍子を渡す。「小節」タブで使う）
-  //   pickup       … 1小節目の拍子と、今のアウフタクトの拍の数 { time, count }（count が 0 ならアウフタクトなし。「小節」タブで使う）（ステップ15-1）
-  //   onpickup     … アウフタクトの長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならやめる。「小節」タブで使う）（ステップ15-1）
+  //   pickup       … 1小節目の拍子と、今のアウフタクトの拍の数 { time, count }（count が 0 ならアウフタクトなし。「楽譜の設定」タブで使う）（ステップ15-1。ステップ20で「小節」タブから移した）
+  //   onpickup     … アウフタクトの長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならやめる。「楽譜の設定」タブで使う）（ステップ15-1）
+  //   shortEnd     … 最後の小節の拍子と、今の拍の数と、短くできるか { time, count, enabled }（「楽譜の設定」タブで使う）（ステップ20）
+  //   onshortend   … 最後の小節の長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならふつうの長さ。「楽譜の設定」タブで使う）（ステップ20）
   //   currentKey   … 選んでいる小節の調（「小節」タブで使う）
   //   currentTempo … 選んでいる小節のテンポ（何も選んでいないときは null。「小節」タブで使う）（ステップ11-6a）
   //   ontempo      … テンポの［変える］が押されたときに呼ぶ関数（数字の文字と速度記号を渡す。「小節」タブで使う）（ステップ11-6a）
@@ -160,6 +162,8 @@
     ontime = () => {},
     pickup = { time: { beats: 4, beatType: 4 }, count: 0 },
     onpickup = () => {},
+    shortEnd = { time: { beats: 4, beatType: 4 }, count: 0, enabled: true },
+    onshortend = () => {},
     currentKey = 0,
     currentTempo = null,
     ontempo = () => {},
@@ -443,8 +447,6 @@
         {onmeasure}
         {currentTime}
         {ontime}
-        {pickup}
-        {onpickup}
         {currentKey}
         {onkey}
         {currentClef}
@@ -463,7 +465,8 @@
     {:else if activeTab === "playback"}
       <PlaybackTools parts={score.parts} {mixer} {onmixer} {metronome} {onmetronome} {repeatOn} {repeatText} {onrepeat} />
     {:else if activeTab === "settings"}
-      <ScoreSettings {score} {onsettings} {focusTitle} {ontranspose} />
+      <!-- アウフタクト・最後の小節の長さも渡す（ステップ20） -->
+      <ScoreSettings {score} {onsettings} {focusTitle} {ontranspose} {pickup} {onpickup} {shortEnd} {onshortend} />
     {/if}
   </div>
 </div>

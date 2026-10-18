@@ -52,7 +52,9 @@ export function drawBeatLines(context, staves, voices, measures, time, offset = 
   // 小節の終わり（音符を並べる所の右の端）も入れておく（最後の拍の位置を割り出すため）
   // アウフタクトの小節は、拍子どおりの1小節より offset だけ短い（ステップ15-1）
   const full = measureTicks(time); // 拍子どおりの1小節の長さ
-  const length = full - offset;
+  // この小節の長さ：音の長さの合計（アウフタクトの小節・短い最後の小節は、拍子どおりの1小節より短い）
+  // （ステップ20：前は「full − offset」で出していたが、短い最後の小節は offset が 0 なので、音の長さから出すようにした）
+  const length = Math.max(...measures.map((measure) => measure.notes.reduce((sum, note) => sum + noteTicks(note), 0)));
   if (!positions.has(length)) positions.set(length, staves[0].getNoteEndX());
 
   // 時刻の順に並べる [[時刻, 横の位置], ...]

@@ -18,6 +18,7 @@
 //   ・始まりと同じ音符で終わる松葉 → その音符の下だけの松葉（wedgeInside）
 //   ・始まりと違う音符で終わる松葉 → 終わりの音符に wedgeEnd（その音符から次の松葉が始まっていてもよい）
 // （ステップ19-2：連桁（<beam number="1">）を読んで、自動のつなぎ方と違う所に連桁の印（join・break）を付けるようにした）
+// （ステップ20：全部のパートの最後の小節が拍子より短ければ、短い最後の小節（short）として読むようにした）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -1646,10 +1647,17 @@ function isMeasureRestOnly(read) {
 //   pickupTicks … アウフタクトの長さ（ティック）（ステップ15-3）
 //                 0 より大きいときは、小節の長さを拍子どおりではなく、この長さにする
 //                 （0 のときは、アウフタクトでも拍子どおりの長さにして、前を休符で埋める（前と同じ））
+//   endTicks    … 短い最後の小節の長さ（ティック）（ステップ20）
+//                 0 より大きいときは、小節の長さをこの長さにする（足りない分は、ふつうの小節と同じく後ろを埋める）
 // 戻り値：{ notes: 音符・休符の配列, ok: そのまま使えたか }
 // ----------------------------------------------------------
-function fitMeasure(read, time, isPickup = false, pickupTicks = 0) {
-  const total = isPickup && pickupTicks > 0 ? pickupTicks : measureTicks(time);
+function fitMeasure(read, time, isPickup = false, pickupTicks = 0, endTicks = 0) {
+  const total = isPickup && pickupTicks > 0 ? pickupTicks : endTicks > 0 ? endTicks : measureTicks(time);
+  // 短い最後の小節の全休符で、長さが合わないもの（1小節ぶんの長さで書いてあるなど）は、
+  // 短い長さの、拍ごとの休符にする（アウフタクトと同じ）（ステップ20）
+  if (endTicks > 0 && isMeasureRestOnly(read) && read.ticks !== total) {
+    return { notes: restsForSpan(0, total, time), ok: true };
+  }
   // アウフタクトの小節の全休符で、長さが合わないもの（1小節ぶんの長さで書いてあるなど）は、
   // アウフタクトの長さの、拍ごとの休符にする（ステップ15-3）
   if (isPickup && isMeasureRestOnly(read) && read.ticks !== total) {
@@ -1784,6 +1792,30 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     }
   }
 
+  // ⑤-2 短い最後の小節か調べる（ステップ20）
+  // 最後の小節で、どのパートも拍子より短い（読めた音の長さが一番長いパートでも足りない）なら、短い最後の小節
+  // （アウフタクトと同じく、全休符だけのパートは数えない。長さは拍の単位で切り上げる）
+  // 小節が1つだけでアウフタクトになったときは調べない
+  const lastIndex = measureCount - 1;
+  let endTicks = 0; // 短い最後の小節の長さ（ティック）。短くしないときは 0
+  if (lastIndex > 0 || !(isPickup && pickupTicks > 0)) {
+    const lastTotal = measureTicks(times[lastIndex]);
+    const lastReads = readParts.map((read) => read.measures[lastIndex]);
+    const countedLast = lastReads.some((read) => read && !isMeasureRestOnly(read)) ? lastReads.filter((read) => read && !isMeasureRestOnly(read)) : [];
+    const longestLast = Math.max(0, ...countedLast.map((read) => (read.readable ? read.ticks : lastTotal)));
+    if (longestLast > 0 && longestLast < lastTotal) {
+      const unit = lastTotal / times[lastIndex].beats; // 拍子の下の数字の音符1つ分
+      const count = Math.ceil(longestLast / unit);
+      if (count < times[lastIndex].beats) {
+        measures[lastIndex].short = count;
+        endTicks = count * unit;
+        if (endTicks !== longestLast) {
+          warnings.push(`最後の小節の長さが拍の単位で割り切れないので、${times[lastIndex].beatType}分音符${count}つ分の小節にして、後ろを休符で埋めました`);
+        }
+      }
+    }
+  }
+
   // ⑥ パートのデータを作る
   const problemMeasures = new Set(); // 休符にした小節の番号（0 から数えたデータの順番。同じ小節は1回だけ）（ステップ8-4c。ステップ15-3：1 からの番号から変えた）
   const parts = readParts.map((read, p) => {
@@ -1803,7 +1835,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const partMeasures = [];
     for (let i = 0; i < measureCount; i++) {
       const readMeasure = read.measures[i] ?? { notes: [], ticks: 0, readable: true };
-      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup, pickupTicks);
+      // （ステップ20：短い最後の小節は、その長さに合わせる）
+      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup, pickupTicks, i === lastIndex ? endTicks : 0);
       if (!fitted.ok) problemMeasures.add(i);
 
       const measure = { notes: fitted.notes };
