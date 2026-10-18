@@ -10,16 +10,57 @@
 //   臨時記号・付点・前打音・連符の数字なども入った幅になる。
 //   （連桁も描くときと同じように作る。連桁でつながった音符は旗がないので、旗のぶんの幅を取らないため）
 //   その最低の幅に、少しゆとりを足して、小節の幅にする。
+//
+// 【音の長さに合わせた幅】（後で直す候補の手直し：最低の幅だけだと、2分音符などの長い音の小節が窮屈だった）
+//   ふつうの浄書の楽譜と同じく、長い音ほど少し広く取る
+//   小節の中の「音の始まり」（全パートを合わせたもの）の間の長さごとに、
+//     基本の幅 × (長さ ÷ 4分音符の長さ) の 0.6 乗
+//   を足して、「音の長さに合わせた幅」を出す（2分音符は4分音符の約1.5倍、全音符は約2.3倍、8分音符は約0.66倍）
+//   最低の幅と「音の長さに合わせた幅」のうち、広いほうを使う（細かい音符の多い小節は、今までどおり最低の幅で決まる）
 // ==========================================================
 
 import { createNote } from "./notes.js";
-import { isMeasureRest } from "../model.js";
+import { isMeasureRest, noteTicks, TICKS_PER_16TH } from "../model.js";
 import { createTuplets, createBeams } from "./tuplets.js";
 
 // ゆとりの付け方：最低の幅 × SPACE_RATE ＋ SPACE_EXTRA
 // （最低の幅は、音符どうしがくっつくほど詰めた幅なので、少し広げて読みやすくする）
 const SPACE_RATE = 1.0; // 最低の幅を何倍にするか（VexFlow の最低の幅は、もともと少しゆとりがあるので、そのまま使う）
 const SPACE_EXTRA = 10; // さらに足す幅
+
+// 音の長さに合わせた幅の決め方（後で直す候補の手直し）
+const QUARTER_SPACE = 28; // 4分音符1つ分の基本の幅（控えめに広げる大きさ。4分音符の小節が今の約1.3倍になる）
+const SPACE_POWER = 0.6; // 長さが2倍になったとき、幅を何倍にするか（2 の 0.6 乗 ＝ 約1.5倍）
+const QUARTER_TICKS = 4 * TICKS_PER_16TH; // 4分音符1つ分のティック
+
+// ----------------------------------------------------------
+// 関数：durationWidth
+// 1小節の「音の長さに合わせた幅」を計算する（後で直す候補の手直し）
+//   measures … この小節の、パートごとのデータ（notes の入ったもの）
+// ・全パートの「音の始まり」の位置を集めて、となり合う始まりの間の長さごとに幅を足す
+//   （どこかのパートで音が始まる所には、ほかのパートが長い音でも、その分の幅を取る）
+// 戻り値：幅（ピクセル）
+// ----------------------------------------------------------
+function durationWidth(measures) {
+  const starts = new Set();
+  let end = 0;
+  measures.forEach((measure) => {
+    let position = 0;
+    measure.notes.forEach((note) => {
+      starts.add(position);
+      position = position + noteTicks(note);
+    });
+    end = Math.max(end, position);
+  });
+  const points = [...starts].sort((a, b) => a - b);
+  points.push(end);
+  let width = 0;
+  for (let k = 0; k < points.length - 1; k++) {
+    const gap = points[k + 1] - points[k];
+    if (gap > 0) width = width + QUARTER_SPACE * Math.pow(gap / QUARTER_TICKS, SPACE_POWER);
+  }
+  return width;
+}
 
 // 最後に計算した楽譜と、その結果を覚えておく
 // 楽譜データが前と同じなら計算し直さない（選択の青や再生中の緑では、幅は変わらないため）
@@ -60,7 +101,9 @@ export function measureNoteWidths(VF, score, states, accidentalsList) {
     const formatter = new VF.Formatter();
     voices.forEach((voice) => formatter.joinVoices([voice]));
     const minWidth = formatter.preCalculateMinTotalWidth(voices);
-    return minWidth * SPACE_RATE + SPACE_EXTRA;
+    // 最低の幅と、音の長さに合わせた幅の、広いほう（後で直す候補の手直し）
+    const byDuration = durationWidth(score.parts.map((part) => part.measures[i]));
+    return Math.max(minWidth * SPACE_RATE, byDuration) + SPACE_EXTRA;
   });
 
   lastResult = { score: score, widths: widths };
