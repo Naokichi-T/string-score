@@ -19,7 +19,8 @@
 //   最低の幅と「音の長さに合わせた幅」のうち、広いほうを使う（細かい音符の多い小節は、今までどおり最低の幅で決まる）
 // ==========================================================
 
-import { createNote } from "./notes.js";
+import { createNote, vexStemDirection } from "./notes.js";
+import { measureStemDirections } from "../stems.js"; // 決めた符尾の向き（ステップ22）
 import { isMeasureRest, noteTicks, TICKS_PER_16TH } from "../model.js";
 import { createTuplets, createBeams } from "./tuplets.js";
 
@@ -86,11 +87,13 @@ export function measureNoteWidths(VF, score, states, accidentalsList) {
       const measure = part.measures[i];
       // 小節まるごとの休符は、描くときと同じく全休符で作る（ステップ13-3）
       const measureRest = isMeasureRest(measure.notes);
-      const staveNotes = measure.notes.map((note, j) => createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, measureRest));
+      // 符尾の向きも、描くときと同じにする（下向きの符尾は玉の左に付くので、幅が少し変わることがある）（ステップ22）
+      const stemDirs = measureStemDirections(measure.notes, state.time, state.offset);
+      const staveNotes = measure.notes.map((note, j) => createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, measureRest, vexStemDirection(VF, stemDirs[j])));
       createTuplets(VF, measure.notes, staveNotes); // 連符の音符は、連符にしてから声部に入れる（長さが正しくなる）
       // 連桁も作る（連桁でつながった8分音符は旗がなくなるので、そのぶん幅が狭くなる。描くときと同じ幅で計算するため）
       // （ステップ15-1：アウフタクトの小節は、描くときと同じく、拍子どおりの小節の後ろの部分として区切る）
-      createBeams(VF, measure.notes, staveNotes, state.time, state.offset);
+      createBeams(VF, measure.notes, staveNotes, state.time, state.offset, stemDirs);
       // 声部はアウフタクトの長さで作る（ステップ15-1）
       const voice = new VF.Voice({ numBeats: state.voiceTime.beats, beatValue: state.voiceTime.beatType });
       voice.addTickables(staveNotes);

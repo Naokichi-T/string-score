@@ -18,6 +18,19 @@ const HALF_DURATION = { whole: "h", half: "q", quarter: "8", eighth: "16", "16th
 const ALTER_TO_VF = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 
 // ----------------------------------------------------------
+// 関数：vexStemDirection
+// 決めた符尾の向き（"up"・"down"・null）を、VexFlow の書き方にする（ステップ22）
+//   VF  … VexFlow の部品一式
+//   dir … stems.js の measureStemDirections で決めた向き
+// 戻り値：VF.Stem.UP・VF.Stem.DOWN・null（null は自動で決める）
+// ----------------------------------------------------------
+export function vexStemDirection(VF, dir) {
+  if (dir === "up") return VF.Stem.UP;
+  if (dir === "down") return VF.Stem.DOWN;
+  return null;
+}
+
+// ----------------------------------------------------------
 // 関数：createNote
 // 音符・休符1つ分のデータから VexFlow の音符を作る
 //   VF         … VexFlow の部品一式
@@ -28,6 +41,7 @@ const ALTER_TO_VF = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
 //   keySignature … 今の調号（前打音の臨時記号を決めるのに使う）（ステップ11-8a）
 //   measureRest  … 小節まるごとの休符として描くか（model.js の isMeasureRest で調べたもの）（ステップ13-3）
 //   stemDirection … 符尾の向き（VF.Stem.UP・VF.Stem.DOWN）。省略したら自動で決める（2音トレモロで使う）（ステップ14-6a）
+//                   （ステップ22：［符尾↑］［符尾↓］で決めた向きも、ここで渡す。stems.js の measureStemDirections で決めたもの）
 // 2音トレモロの音符は、下の音の音符を返す。上の音の音符は、その音符の alternate に入れておく（render/alternate.js）
 // ----------------------------------------------------------
 export function createNote(VF, note, clef, accidentals = [], keySignature = 0, measureRest = false, stemDirection = null) {
@@ -35,7 +49,8 @@ export function createNote(VF, note, clef, accidentals = [], keySignature = 0, m
   if (measureRest) return createMeasureRest(VF, note, clef);
 
   // 2音トレモロ：下の音と上の音を、別々の音符として作る（ステップ14-6a）
-  if (isAlternate(note)) return createAlternate(VF, note, clef, accidentals, keySignature);
+  // （ステップ22：決めた符尾の向きがあれば、それも渡す）
+  if (isAlternate(note)) return createAlternate(VF, note, clef, accidentals, keySignature, stemDirection);
 
   // VexFlow での長さの書き方（例：'q'）
   let duration = DURATIONS[note.duration].vf;
@@ -139,19 +154,21 @@ function centerWholeDiamonds(VF, staveNote, note) {
 // 関数：createAlternate
 // 2音トレモロの音符を、下の音と上の音の2つの VexFlow の音符にする（ステップ14-6a）
 //   ・符尾の向きは、2つの音をまとめて自動で決めた向きにそろえる
+//     （ステップ22：stemDirection（［符尾↑］［符尾↓］で決めた向き）が渡されたら、その向きにする）
 //   ・記号（弓・指番号・強弱など）は、下の音の音符にだけ付ける
 //   ・トレモロの斜線は描かない（2つの音符の間の連桁で表す。render/alternate.js で描く）
 //   ・臨時記号は、高さごと（低い順）に決めたものを、それぞれの音符に付ける
 // 戻り値：下の音の VexFlow の音符（上の音の音符は alternate に入っている）
 // ----------------------------------------------------------
-function createAlternate(VF, note, clef, accidentals, keySignature) {
+function createAlternate(VF, note, clef, accidentals, keySignature, stemDirection = null) {
   const [lowPitch, highPitch] = notePitches(note);
   const marks = accidentals ?? [];
 
   // 2つの音をまとめた向き（重音として仮に作って、VexFlow に決めさせる）
   const duration = DURATIONS[note.duration].vf + "d".repeat(note.dots ?? 0);
   const probe = new VF.StaveNote({ keys: [pitchToVexKey(lowPitch), pitchToVexKey(highPitch)], duration: duration, clef: CLEFS[clef].vf, autoStem: true });
-  const direction = probe.getStemDirection();
+  // 決めた向きがあれば、そちらを使う（ステップ22）
+  const direction = stemDirection ?? probe.getStemDirection();
 
   // 下の音：記号も付ける（重音・2音トレモロ・トレモロの印は外したデータで作る）
   const lowData = { ...note, pitch: lowPitch };

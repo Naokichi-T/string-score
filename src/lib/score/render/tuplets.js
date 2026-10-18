@@ -57,6 +57,7 @@ export function createTuplets(VF, notes, staveNotes) {
 //   time       … その小節の拍子
 //   offset     … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（ティック。アウフタクトの小節だけ 0 より大きい）（ステップ15-1）
 //                 例：6/8 で8分音符4つ分のアウフタクト → 8分音符2つ分。連桁は「拍子どおりの小節の後ろの部分」として区切る
+//   stemDirs   … 音ごとの決めた符尾の向き（"up"・"down"・null）（stems.js の measureStemDirections で決めたもの）（ステップ22）
 // 【考え方】
 //   小節を「連符」と「連符でない所」に区切って、区切りごとに連桁を作る
 //     ・連符でない所 … 今までと同じように、拍子に合わせてつなぐ
@@ -65,9 +66,11 @@ export function createTuplets(VF, notes, staveNotes) {
 //   （ステップ19-1：連符でない所に連桁の印（beam: "join"・"break"）があるときは、
 //     自動のまとまりを beams.js で計算して印を当てはめ、そのまとまりで連桁を作る。
 //     印がない所は、今までどおり VexFlow の generateBeams で作る（見た目を変えないため））
+//   （ステップ22：符尾の向きを決めた音がある区切りも、自分でまとまりを決めて作る。
+//     向きを決めた音が入っているまとまりは、その向きのまま連桁を作る（VexFlow に向きを決め直させない））
 // 戻り値：VexFlow の連桁の配列
 // ----------------------------------------------------------
-export function createBeams(VF, notes, staveNotes, time, offset = 0) {
+export function createBeams(VF, notes, staveNotes, time, offset = 0, stemDirs = []) {
   // 音ごとの始まりの位置（小節の頭から何ティックか）と、小節の長さ
   const starts = [];
   let position = 0;
@@ -118,16 +121,30 @@ export function createBeams(VF, notes, staveNotes, time, offset = 0) {
 
     // 連桁の印がある所（連符でない所だけ）：自分でまとまりを決めて、まとまりごとに連桁を作る（ステップ19-1）
     //   new VF.Beam(音符, true) … true で、まとまりに合わせて符尾の向きを決め直す（generateBeams と同じ決め方）
+    // 符尾の向きを決めた音がある所も、同じように自分でまとまりを決める（連符の中も）（ステップ22）
+    //   向きを決めた音が入っているまとまり … その向きにそろえて new VF.Beam(音符, false)（false：向きを決め直さない）
+    //   入っていないまとまり             … 今までどおり new VF.Beam(音符, true)
     const segmentData = notes.slice(segment.from, segment.to + 1);
-    if (!segment.isTuplet && hasMarks(segmentData)) {
-      const groups = applyMarks(segmentData, autoGroups(segmentData, lengths));
+    const segmentDirs = stemDirs.slice(segment.from, segment.to + 1);
+    const hasDirs = segmentDirs.some((dir) => dir === "up" || dir === "down");
+    if ((!segment.isTuplet && hasMarks(segmentData)) || hasDirs) {
+      // 連符の中は印を使わない（いつも全部つなぐ。休符の所では切れる）
+      const autoList = autoGroups(segmentData, lengths);
+      const groups = segment.isTuplet ? autoList : applyMarks(segmentData, autoList);
       groups.forEach((group) => {
-        beams.push(
-          new VF.Beam(
-            group.map((k) => segmentNotes[k]),
-            true,
-          ),
-        );
+        const groupNotes = group.map((k) => segmentNotes[k]);
+        // このまとまりの決めた向き（いちばん前のもの。まとまりの中はふつう全部同じ）
+        const dir = group.map((k) => segmentDirs[k]).find((d) => d === "up" || d === "down");
+        if (dir) {
+          const vfDir = dir === "up" ? VF.Stem.UP : VF.Stem.DOWN;
+          // 向きがちがう音があれば、そろえる（setStemDirection は玉を作り直すので、同じなら呼ばない）
+          groupNotes.forEach((staveNote) => {
+            if (staveNote.getStemDirection() !== vfDir) staveNote.setStemDirection(vfDir);
+          });
+          beams.push(new VF.Beam(groupNotes, false));
+        } else {
+          beams.push(new VF.Beam(groupNotes, true));
+        }
       });
       return;
     }

@@ -18,7 +18,8 @@
 
 import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, measureNumber, measureLength } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { createNote } from "./render/notes.js";
+import { createNote, vexStemDirection } from "./render/notes.js";
+import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
@@ -379,9 +380,12 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       const tupletsList = []; // パートごとの連符の一覧（ステップ10-2）
       score.parts.forEach((part, p) => {
         const measure = part.measures[i];
+        // 音ごとの決めた符尾の向き（連桁・連符のまとまりは同じ向きにそろえたもの）（ステップ22）
+        const stemDirs = measureStemDirections(measure.notes, state.time, state.offset);
         const notes = measure.notes.map((note, j) => {
           // 調号は前打音の臨時記号に使う（ステップ11-8a）。小節まるごとの休符なら全休符で描く（ステップ13-3）
-          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes));
+          // 符尾の向きを決めてあれば、その向きで作る（ステップ22）
+          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes), vexStemDirection(VF, stemDirs[j]));
           // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
           // （2音トレモロは、2つ目の音符と連桁も同じ色にする（setAlternateStyle）（ステップ14-6a））
           const playingStyle = { fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR };
@@ -424,7 +428,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
 
         // 連桁（8分音符などをつなぐ横棒）を拍子に合わせて作る（連符の中は切らずにつなぐ）（ステップ10-2）
         // （ステップ15-1：アウフタクトの小節は、拍子どおりの小節の後ろの部分として区切る（state.offset））
-        const beams = createBeams(VF, measure.notes, notes, state.time, state.offset);
+        // （ステップ22：決めた符尾の向きも渡す。向きを決めたまとまりは、その向きのまま連桁を作る）
+        const beams = createBeams(VF, measure.notes, notes, state.time, state.offset, stemDirs);
         beamsList.push(beams);
         // 2音トレモロの符尾の向きを、連桁を作る前の向きに戻す（連桁を作る処理が決め直してしまうため）（ステップ14-6a）
         notes.forEach((staveNote) => restoreAlternateStem(staveNote));

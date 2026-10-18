@@ -19,6 +19,7 @@
 //   ・始まりと違う音符で終わる松葉 → 終わりの音符に wedgeEnd（その音符から次の松葉が始まっていてもよい）
 // （ステップ19-2：連桁（<beam number="1">）を読んで、自動のつなぎ方と違う所に連桁の印（join・break）を付けるようにした）
 // （ステップ20：全部のパートの最後の小節が拍子より短ければ、短い最後の小節（short）として読むようにした）
+// （ステップ22：符尾の向き（<stem>）を読んで、自動の向きと違う所にだけ、決めた向き（stem）を残すようにした）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -78,6 +79,7 @@ import {
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners, cleanAlternates } from "./edit.js";
 import { marksFromFile } from "./beams.js"; // 連桁の印（ステップ19-2）
+import { stemsFromFile } from "./stems.js"; // 符尾の向き（ステップ22）
 
 // ----------------------------------------------------------
 // 16分音符いくつ分か → 音の長さの名前と付点の数の表
@@ -1394,6 +1396,11 @@ function readPart(partElement, counter, skipped) {
             hasBeams = true;
           }
 
+          // 符尾の向き（<stem>up</stem>・<stem>down</stem>）を覚えておく（ステップ22）
+          // （あとで stemsFromFile が、自動と同じ向きの所は外す。重音の2つ目からの音・前打音の向きは読まない）
+          const stemText = childText(element, "stem");
+          if (!note.rest && (stemText === "up" || stemText === "down")) note.stem = stemText;
+
           // 記号を付ける（ステップ8-4a）
           applyPending(note, state, counter);
           readNotations(element, note, state, counter);
@@ -1859,6 +1866,16 @@ export function musicXMLToScore(text, fallbackTitle = "") {
       } else {
         measure.notes.forEach((note) => delete note.beamXml);
       }
+    });
+
+    // 符尾の向き：自動と同じ向きの所は外して、違う所だけ残す（ステップ22）
+    //   ・連桁が決まってから行う（連桁でつながった音符は、まとまりで向きが決まるため）
+    //   ・小節ごとに、その小節の音部記号で計算する（音部記号で、五線の上の位置が変わるため）
+    let nowClef = INSTRUMENTS[instrument].clef;
+    partMeasures.forEach((measure, i) => {
+      if (measure.clef) nowClef = measure.clef;
+      const offset = i === 0 && pickupTicks > 0 ? measureTicks(times[0]) - pickupTicks : 0;
+      stemsFromFile(measure.notes, nowClef, times[i], offset);
     });
 
     // パートの最後の音からタイが出ていたら外す（つながる先がない）

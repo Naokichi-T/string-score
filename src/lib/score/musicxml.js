@@ -13,6 +13,7 @@
 // （ステップ16-2：松葉に番号（number）を付けて、同じ音符での「＜の終わり → ＞の始まり」と、1つの音符の下だけの松葉を書く）
 // （ステップ19-2：連桁を <beam> で書く。画面と同じつなぎ方（手で変えた所も）がほかのアプリでも同じになるように）
 //   番号が 1 のときは書かない（書かなければ 1 という決まり。今までの楽譜の書き出しは変わらない）
+// （ステップ22：［符尾↑］［符尾↓］で決めた符尾の向きを <stem> で書く。自動の音符には書かない（ほかのアプリが自動で決める））
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -58,6 +59,7 @@ import {
   measureOffset,
 } from "./model.js";
 import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつなぎ方（ステップ19-2）
+import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 
@@ -411,11 +413,12 @@ function tempoXml(score) {
 //   measureRest … 小節まるごとの休符か（true なら <rest measure="yes"/> にして、形 <type> は書かない）（ステップ13-3）
 //   chordMember … 重音の2つ目からの音か（true なら <chord/> の印を書く。「前の音と同時に鳴る」という意味）（ステップ14-3）
 //   beams     … この音に書く連桁 [{ number: 何本目か, value: "begin" など }, ...]（なければ空の配列）（ステップ19-2）
+//   stem      … 決めた符尾の向き（"up"・"down"。自動なら null で、<stem> を書かない）（ステップ22）
 // 重音のときは、高さ1つ分ずつの「書き出し用の音」を作って、この関数を高さの数だけ呼ぶ（partXml を参照）
 //   書き出し用の音の pitch はその高さ、tie は「その高さが次の音へタイでつながるか」
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
-function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false, chordMember = false, beams = []) {
+function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest = false, chordMember = false, beams = [], stem = null) {
   const lines = [];
   lines.push("      <note>");
 
@@ -468,6 +471,13 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest =
     lines.push(`          <actual-notes>${tupletMark.actual}</actual-notes>`);
     lines.push(`          <normal-notes>${tupletMark.normal}</normal-notes>`);
     lines.push("        </time-modification>");
+  }
+
+  // 符尾の向き（連符の印のあと・<notehead> の前に書く決まり）（ステップ22）
+  //   例：<stem>down</stem>
+  //   重音のときは、高さ1つ分ずつの <note> の全部に同じ向きを書く
+  if (!note.rest && !measureRest && stem) {
+    lines.push(`        <stem>${stem}</stem>`);
   }
 
   // ひし形の玉（ハーモニクスで軽く触れる音）：玉の形を書く（ステップ14-5b）
@@ -986,6 +996,9 @@ function partXml(score, p, divisions) {
     // この小節の連桁（画面と同じつなぎ方）と、音ごとに書く <beam> の中身（ステップ19-2）
     const beamValues = beamXmlValues(measure.notes, measureBeamGroups(measure.notes, nowTime, measureOffset(score, i)));
 
+    // この小節の、音ごとの決めた符尾の向き（画面と同じ決め方。連桁・連符のまとまりはそろえる）（ステップ22）
+    const stemDirs = measureStemDirections(measure.notes, nowTime, measureOffset(score, i));
+
     // 音符・休符
     let prevTie = tiedIn; // 1つ前の音が、この音にタイでつながっているか
     let prevTiedNote = tiedInNote; // 1つ前の音（タイでこの音につながっているときだけ。高さごとのタイの「ここまで」に使う）（ステップ14-3）
@@ -1021,7 +1034,8 @@ function partXml(score, p, divisions) {
         // 2音トレモロ：2つの音符の組にして書く（下の音 → 上の音）（ステップ14-6b）
         // 臨時記号は、高さごと（低い順）に決めたものを、それぞれに付ける
         alternateParts(xmlNote).forEach((piece, h) => {
-          lines.push(...noteXml(piece, accidentals[k][h] ?? null, false, divisions, ALTERNATE_TIME));
+          // 決めた符尾の向きは、2つの音符の両方に書く（ステップ22）
+          lines.push(...noteXml(piece, accidentals[k][h] ?? null, false, divisions, ALTERNATE_TIME, false, false, [], stemDirs[k]));
         });
       } else {
         // 音符：高さごとに <note> を書く（重音でなければ1つだけ）（ステップ14-3）
@@ -1030,7 +1044,8 @@ function partXml(score, p, divisions) {
           // 2つ目からの音は <chord/> を付け、連符の始まり・終わりの印は書かない（1つ目に書く）
           const mark = tupletMark && h > 0 ? { ...tupletMark, start: false, stop: false } : tupletMark;
           // 連桁は、重音の1つ目の <note> にだけ書く決まり（ステップ19-2）
-          lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0, h === 0 ? beamValues[k] : []));
+          // 決めた符尾の向きは、重音の全部の <note> に書く（ステップ22）
+          lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0, h === 0 ? beamValues[k] : [], stemDirs[k]));
         });
       }
       lines.push(...directionsAfterXml(note, wedgeNumber)); // 松葉の終わり（ステップ8-2。ステップ16-2：音符の下だけの松葉の終わりも）

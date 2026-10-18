@@ -111,6 +111,7 @@
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
   import { canBeamTogether, canUnbeam, beamTogether, unbeam } from "#lib/score/beams.js"; // 連桁を手でつなぐ・切る（ステップ19-1）
+  import { stemState, canChangeStem, setStem } from "#lib/score/stems.js"; // 符尾の向きを決める（ステップ22）
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts, loadClipboard, saveClipboard, CLIPBOARD_KEY } from "#lib/score/library.js";
@@ -166,6 +167,10 @@
   // ［連桁にする］［連桁を解除］を押せるか（ステップ19-1）
   let beamAllowed = $derived(canBeamTogether(score, range));
   let unbeamAllowed = $derived(canUnbeam(score, selection, range));
+
+  // 選んでいる音（範囲）の、決めた符尾の向きと、［符尾↑］［符尾↓］を押せるか（ステップ22）
+  let stemDir = $derived(stemState(score, selection, range));
+  let stemAllowed = $derived(canChangeStem(score, selection, range));
 
   // 範囲の中に音符が1つでもあるか（範囲をまとめて ▲ ▼・削除できるかどうかに使う）
   let rangeEditable = $derived(!!range && rangeHasNotes(score, range));
@@ -1459,6 +1464,23 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleStem
+  // 「音符」タブの［符尾↑］［符尾↓］が押されたとき（ステップ22）
+  //   direction … "up"（上向き）・"down"（下向き）
+  // ・選んでいる音（範囲）と、連桁・連符で同じまとまりの音の向きを決める
+  // ・もうその向きに決めてあれば（ボタンが青いとき）、自動の向きに戻す（stems.js の setStem）
+  // 音の並びは変わらないので、選んでいる場所と範囲はそのまま残す（連桁のボタンと同じ）
+  // ----------------------------------------------------------
+  function handleStem(direction) {
+    message = "";
+    if (!stemAllowed) return;
+    // commit で範囲選択が消えるので、覚えておいて元に戻す
+    const end = rangeEnd;
+    commit(setStem(score, selection, range, direction));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleTransposeScore
   // 「楽譜の設定」タブの［移調する］が押されたとき：楽譜全体を移調する（ステップ17-1）
   //   toKey     … 行き先の調（♯の数がプラス、♭の数がマイナス）
@@ -2400,6 +2422,9 @@
       canBeam={beamAllowed}
       canUnbeam={unbeamAllowed}
       onbeam={handleBeam}
+      {stemDir}
+      canStem={stemAllowed}
+      onstem={handleStem}
       {rangeMode}
       onrangemode={handleRangeMode}
       {chordMode}
