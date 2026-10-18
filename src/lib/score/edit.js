@@ -2007,6 +2007,23 @@ function sameTime(a, b) {
 // ==========================================================
 
 // ----------------------------------------------------------
+// 関数：timeRangeEnd
+// 拍子を変える範囲の、最後の小節を決める（ステップ18-4：流し直し（reflow.js）でも使うので、changeTime から分けた）
+//   from … 範囲の最初の小節（0 から）
+//   to   … 範囲の最後の小節。null のときは「次に拍子が変わる小節の手前まで（なければ最後まで）」
+// 戻り値：最後の小節の番号
+// ----------------------------------------------------------
+export function timeRangeEnd(score, from, to) {
+  if (to !== null) return to;
+  const count = score.measures.length;
+  let last = from;
+  while (last + 1 < count && !score.measures[last + 1].time) {
+    last = last + 1;
+  }
+  return last;
+}
+
+// ----------------------------------------------------------
 // 関数：changeTime
 // from 小節目から to 小節目までの拍子を変える（全パートいっしょに。番号は 0 から）
 //   time … 新しい拍子 { beats, beatType }（C・¢ のときは symbol: "common"・"cut" も付く）
@@ -2018,20 +2035,16 @@ function sameTime(a, b) {
 //   ・アウフタクトの長さ（ティック）はそのままにして、新しい拍子の拍の数に数え直す
 //   ・新しい拍子の拍の数で割り切れない・新しい1小節より短くならないときは、何も変えずに知らせる
 //     例：4/4 で4分音符1つ分 → 6/8 なら8分音符2つ分（OK）、2/2 なら半分の拍になる（変えられない）
-// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文 }
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文, overflow: 入りきらない音があったか }
 //   （何も変わらないとき・入りきらないときは、元の楽譜データのまま）
+//   （ステップ18-4：入りきらないときは overflow を true にする。編集ページが「後ろへ流し直すか」をたずねるのに使う）
 // ----------------------------------------------------------
 export function changeTime(score, from, to, time) {
   const count = score.measures.length; // 小節の数
 
   // ① 効かせる最後の小節を決める（to が null なら、次に拍子が変わる小節の手前まで）
-  let last = to;
-  if (last === null) {
-    last = from;
-    while (last + 1 < count && !score.measures[last + 1].time) {
-      last = last + 1;
-    }
-  }
+  //    （ステップ18-4：timeRangeEnd に分けた）
+  const last = timeRangeEnd(score, from, to);
 
   // ①-2 アウフタクトの拍の数を、新しい拍子で数え直す（1小節目を変えるときだけ）（ステップ15-1）
   const full = measureTicks(time); // 新しい拍子の1小節の長さ
@@ -2054,7 +2067,7 @@ export function changeTime(score, from, to, time) {
       const contents = notes.slice(0, contentCount(notes)); // 終わりの休符をのぞいた中身
       const used = contents.reduce((sum, note) => sum + noteTicks(note), 0);
       if (used > totalAt(m)) {
-        return { score: score, error: `${measureName(score, m)}の ${part.name} に入りきらない音があります` };
+        return { score: score, error: `${measureName(score, m)}の ${part.name} に入りきらない音があります`, overflow: true };
       }
     }
   }

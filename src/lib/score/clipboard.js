@@ -120,7 +120,8 @@ function measureStartTicks(score) {
 // 例：16分音符5個分 → 4分音符＋16分音符、16分音符7個分 → 付点4分音符＋16分音符
 // 戻り値：NOTE_VALUES の中身の配列
 // ----------------------------------------------------------
-function splitTicks(length) {
+// （ステップ18-4：拍子を変えたときの流し直し（reflow.js）でも使うので export した）
+export function splitTicks(length) {
   const values = [];
   let rest = length;
   while (rest > 0) {
@@ -137,7 +138,8 @@ function splitTicks(length) {
 // 重音なら、重ねる音（chord）も同じにする（ステップ14-1）
 // （ひし形の印 diamond も、高さといっしょに写る（ステップ14-5a））
 // ----------------------------------------------------------
-function plainNote(note, value) {
+// （ステップ18-4：拍子を変えたときの流し直し（reflow.js）でも使うので export した）
+export function plainNote(note, value) {
   const piece = { pitch: { ...note.pitch }, duration: value.duration, dots: value.dots, tie: false };
   if (note.chord) piece.chord = note.chord.map((pitch) => ({ ...pitch }));
   return piece;

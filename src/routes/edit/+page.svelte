@@ -102,7 +102,8 @@
     removeChordHead,
     cleanAlternates,
   } from "#lib/score/edit.js";
-  import { transposeScore } from "#lib/score/transpose.js"; // 楽譜全体の移調（ステップ17-1）
+  import { transposeScore } from "#lib/score/transpose.js";
+  import { reflowTime } from "#lib/score/reflow.js"; // 拍子を変えたときに、入りきらない音を後ろへ流し直す（ステップ18-4） // 楽譜全体の移調（ステップ17-1）
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
@@ -572,7 +573,9 @@
 
     // 前に決めたタブのたたみ方を読み込む（保存していなければ出したまま）（ステップ18-1）
     // ただし新しく作った楽譜のときは、タイトルの入力欄を見せたいので、いつも出す（保存はしない）
-    tabsCollapsed = page.state.isNew === true ? false : loadSettings().tabsCollapsed === true;
+    // （page.state の中身は VSCode には分からないので、「どんな項目でも入る入れ物」（any）として読む）
+    const isNewScore = /** @type {any} */ (page.state).isNew === true;
+    tabsCollapsed = isNewScore ? false : loadSettings().tabsCollapsed === true;
 
     // 前に（ほかのタブ・ほかの楽譜で）コピーした音を読み込む（なければ null のまま）（ステップ13-1）
     clipboard = loadClipboard();
@@ -1451,19 +1454,35 @@
   //   範囲を選んでいるとき … 範囲にかかる小節だけ
   //   音を選んでいるとき   … その小節から、次に拍子が変わる所まで
   //   何も選んでいないとき … 1小節目から、次に拍子が変わる所まで
+  // （ステップ18-4：入りきらない音があるときは、確認の窓を出して、［OK］なら後ろの小節へ流し直す）
   // ----------------------------------------------------------
   function handleTime(time) {
     message = "";
-    let result;
-    if (range) {
-      result = changeTime(score, range.start.measure, range.end.measure, time);
-    } else if (selection) {
-      result = changeTime(score, selection.measure, null, time);
-    } else {
-      result = changeTime(score, 0, null, time);
+    // 効かせる範囲（to が null なら「次に拍子が変わる所まで」）
+    const from = range ? range.start.measure : selection ? selection.measure : 0;
+    const to = range ? range.end.measure : null;
+    let result = changeTime(score, from, to, time);
+
+    // 入りきらない音があったとき：後ろへ流し直すかをたずねる（ステップ18-4）
+    if (result.overflow) {
+      const ok = confirm(`${result.error}。\n\n入りきらない音を、後ろの小節へ流し直しますか？\n（小節線をまたぐ音はタイでつなぎ、足りない小節は範囲の最後に足します。［↶ 元に戻す］で戻せます）`);
+      // ［キャンセル］：今までどおり、知らせて終わり（楽譜は変えない）
+      if (!ok) {
+        message = result.error;
+        return;
+      }
+      const reflowed = reflowTime(score, from, to, time);
+      // 流し直せないとき（連符が小節線をまたぐ）は、知らせて終わり
+      if (reflowed.error) {
+        message = reflowed.error;
+        return;
+      }
+      result = { score: reflowed.score, error: "" };
+      // 増えた小節の数を知らせる
+      if (reflowed.added > 0) message = `後ろへ流し直しました（小節が ${reflowed.added} 個増えました）`;
     }
 
-    // 入りきらない音があったときは、知らせて終わり（楽譜は変えない）
+    // それ以外で変えられなかったとき（アウフタクトの長さが合わない など）は、知らせて終わり（楽譜は変えない）
     if (result.error) {
       message = result.error;
       return;
