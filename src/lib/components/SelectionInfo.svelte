@@ -13,8 +13,9 @@
   //   selection … 選択中の場所（選んでいなければ null）
   //   range     … 範囲選択（範囲を選んでいなければ null）
   //   message   … 知らせたいこと（「小節に入りきりません」など。なければ空の文字）
+  //   info      … message が案内の文（まちがいではない知らせ）なら true。青い字で出す（後で直す候補の手直し）
   //   onmove    … ［◀ 前の音］［次の音 ▶］が押されたときに呼ぶ関数（-1 か 1 を渡す）（ステップ12-10a）
-  let { score, selection, range = null, message = "", onmove = () => {} } = $props();
+  let { score, selection, range = null, message = "", info = false, onmove = () => {} } = $props();
 
   // 表示する文章（score か selection が変わると自動で作り直される）
   let text = $derived(describeSelection(score, selection));
@@ -33,9 +34,9 @@
     {:else}
       <span class="hint">音符をクリックすると選べます（← → キーで前後の音へ、Shift＋クリックか Shift＋← → で範囲を選ぶ、⌥（Alt）＋↑↓ で重音の中の音を選ぶ、Esc で選択を外す）</span>
     {/if}
-    <!-- 知らせたいことがあれば、右側に赤い文字で出す -->
+    <!-- 知らせたいことがあれば、右側に出す（まちがいは赤い字、案内は青い字）（後で直す候補の手直し：案内の色を分けた） -->
     {#if message}
-      <span class="message">{message}</span>
+      <span class="message" class:info>{message}</span>
     {/if}
   </span>
 
@@ -86,6 +87,10 @@
   }
   .message {
     margin-left: 24px;
-    color: #dc2626; /* 赤 */
+    color: #dc2626; /* 赤（まちがいの知らせ） */
+  }
+  /* 案内の文（まちがいではない知らせ）は青（後で直す候補の手直し） */
+  .message.info {
+    color: #1d4ed8; /* 濃い青（うすい青の帯の上でも読みやすい色） */
   }
 </style>

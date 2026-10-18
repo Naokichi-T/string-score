@@ -180,6 +180,21 @@
   // 知らせたいこと（画面の「選択中」の右に赤く出す）
   let message = $state("");
 
+  // 案内の文（まちがいではない知らせ。青い字で出す）（後で直す候補の手直し）
+  //   showInfo で出した文を覚えておき、今の message がその文のときだけ「案内」とみなす
+  //   （ほかの所で message を書きかえたり空にしたりすると、自動で「案内」ではなくなる）
+  let infoText = $state("");
+  let messageIsInfo = $derived(message !== "" && message === infoText);
+
+  // ----------------------------------------------------------
+  // 関数：showInfo
+  // 案内の文を、青い字で出す（前打音の高さを入れる案内・「後ろへ流し直しました」など）（後で直す候補の手直し）
+  // ----------------------------------------------------------
+  function showInfo(text) {
+    infoText = text;
+    message = text;
+  }
+
   // 移調で知らせること（黄色い枠で出す。なければ null）（ステップ17-1）
   //   { items: 知らせることの一覧 }（移調するたびに新しく作るので、{#key} で枠が作り直される）
   let transposeNotice = $state(null);
@@ -1375,7 +1390,7 @@
     graceTarget = null;
     if (kind === "grace" && getSelectedNote(score, selection)?.grace) {
       graceTarget = { ...selection };
-      message = "鍵盤（か音名のキー）で、前打音の高さを選んでください";
+      showInfo("鍵盤（か音名のキー）で、前打音の高さを選んでください"); // 案内なので青い字（後で直す候補の手直し）
     }
   }
 
@@ -1551,7 +1566,7 @@
       }
       result = { score: reflowed.score, error: "" };
       // 増えた小節の数を知らせる
-      if (reflowed.added > 0) message = `後ろへ流し直しました（小節が ${reflowed.added} 個増えました）`;
+      if (reflowed.added > 0) showInfo(`後ろへ流し直しました（小節が ${reflowed.added} 個増えました）`); // 案内なので青い字（後で直す候補の手直し）
     }
 
     // それ以外で変えられなかったとき（アウフタクトの長さが合わない など）は、知らせて終わり（楽譜は変えない）
@@ -2333,7 +2348,7 @@
       selectedHead={selection ? selectedHead(score, selection) : 0}
     />
     <!-- onmove：前後の音へ移るボタン（ステップ12-10a） -->
-    <SelectionInfo {score} {selection} {range} {message} onmove={handleMoveButton} />
+    <SelectionInfo {score} {selection} {range} {message} info={messageIsInfo} onmove={handleMoveButton} />
     <!-- MusicXML を読み込んだときに知らせること（なければ何も出ない）（ステップ8-4c） -->
     <ImportNotice />
     <!-- 移調で知らせること（なければ何も出ない）（ステップ17-1） -->

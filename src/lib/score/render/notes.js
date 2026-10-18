@@ -68,6 +68,9 @@ export function createNote(VF, note, clef, accidentals = [], keySignature = 0, m
     ...(stemDirection ? { stemDirection: stemDirection } : { autoStem: true }),
   });
 
+  // 全音符のひし形の玉を、ふつうの全音符の玉のまん中にそろえる（後で直す候補の手直し）
+  if (!note.rest && note.duration === "whole") centerWholeDiamonds(VF, staveNote, note);
+
   // 臨時記号を、高さごとに付ける（addModifier の2つ目の数は「keys の何番目の玉か」）（ステップ14-1）
   // 重音で臨時記号が重なるときは、VexFlow が左右にずらして並べてくれる
   (accidentals ?? []).forEach((accidental, index) => {
@@ -91,6 +94,45 @@ export function createNote(VF, note, clef, accidentals = [], keySignature = 0, m
   }
 
   return staveNote;
+}
+
+// ----------------------------------------------------------
+// 関数：centerWholeDiamonds
+// 全音符のひし形の玉（D0）を、ふつうの全音符の玉のまん中にそろえる（後で直す候補の手直し）
+//   VexFlow は玉の「左の端」をそろえて描く。全音符のひし形は、ふつうの全音符の玉より細い（約11px と約17px）ので、
+//   そのままだと、まん中が少し左にずれて見える（人工ハーモニクスで、下のふつうの玉とくらべると目立つ）
+//   → 玉の幅の差の半分だけ、右へずらす（setXShift）
+//   （2分音符のひし形 D1 は、ふつうの2分音符の玉とほぼ同じ幅なので、ずらさない）
+//   VexFlow は、符尾の向きを決め直すとき（連桁を作る Beam.generateBeams など）に reset で玉を作り直し、
+//   ずらした量が消えてしまう → この音符の reset を包んで、作り直したあとにもう一度ずらす
+//   VF        … VexFlow の部品一式
+//   staveNote … 作った VexFlow の音符
+//   note      … 音符1つ分のデータ
+// ----------------------------------------------------------
+function centerWholeDiamonds(VF, staveNote, note) {
+  const pitches = notePitches(note);
+  if (!pitches.some((pitch) => pitch.diamond)) return; // ひし形の玉がなければ何もしない
+
+  // ふつうの全音符の玉の幅（仮の音符を作って測る）
+  const wholeWidth = new VF.StaveNote({ keys: ["b/4"], duration: "w" }).noteHeads[0].getWidth();
+
+  // ひし形の玉をずらす（noteHeads は keys と同じ順（低い順）に並んでいる）
+  const shiftHeads = () => {
+    pitches.forEach((pitch, k) => {
+      if (!pitch.diamond) return;
+      const head = staveNote.noteHeads[k];
+      head.setXShift((wholeWidth - head.getWidth()) / 2);
+    });
+  };
+  shiftHeads();
+
+  // 玉が作り直されたら、もう一度ずらす（元の reset を呼んでから shiftHeads）
+  const originalReset = staveNote.reset.bind(staveNote);
+  staveNote.reset = () => {
+    const result = originalReset();
+    shiftHeads();
+    return result;
+  };
 }
 
 // ----------------------------------------------------------
