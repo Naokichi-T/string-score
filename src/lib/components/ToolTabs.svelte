@@ -112,9 +112,15 @@
   //   chordSelected … 選んでいる音符が重音か（ステップ14-1）
   //                   （ステップ14-2：重音でも ♯♭♮ を押せるようにした。説明の文だけ変える）
   //   selectedHead … 重音の中で選んでいる玉の番号（「記号」タブの［ひし形］で使う）（ステップ14-5a）
+  //   canBeam      … ［連桁にする］を押せるか（範囲に、となり合った短い音符があるか）（ステップ19-1）
+  //   canUnbeam    … ［連桁を解除］を押せるか（選んでいる音に、連桁でつながっている音符があるか）（ステップ19-1）
+  //   onbeam       … ［連桁にする］［連桁を解除］が押されたときに呼ぶ関数（"join" か "break" を渡す）（ステップ19-1）
   //   collapsed    … true ならタブの中身（ボタンの部分）をたたむ。名前の列は残す（ステップ18-1）
   //   ontoggle     … ［▲］［▼］が押されたとき・たたんでいる間にタブの名前が押されたときに呼ぶ関数（ステップ18-1）
   let {
+    canBeam = false,
+    canUnbeam = false,
+    onbeam = () => {},
     collapsed = false,
     ontoggle = () => {},
     selectedHead = 0,
@@ -389,6 +395,14 @@
           <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
             削除
           </button>
+        </div>
+
+        <!-- 連桁（8分音符などをつなぐ横棒）を手でつなぐ・切る（Flat と同じ）（ステップ19-1） -->
+        <div class="group">
+          <button class="tool text clip" disabled={!canBeam} onclick={() => onbeam("join")} title="選んだ範囲の音符を、1本の連桁でつなぐ（小節ごと。休符・4分音符より長い音符・連符の所では切れる）">
+            連桁にする
+          </button>
+          <button class="tool text clip" disabled={!canUnbeam} onclick={() => onbeam("break")} title="選んでいる音符（範囲）の連桁を外して、旗の付いた1つずつの音符にする"> 連桁を解除 </button>
         </div>
 
         <!-- 重音（押すたびに入・切。入のとき、鍵盤・音名キーで選んでいる音に音を足す。同じ高さをもう一度押すと外れる）（ステップ14-1） -->

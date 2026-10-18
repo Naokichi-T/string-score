@@ -96,6 +96,9 @@ export function copyNotes(score, range, selection) {
   const last = notes[notes.length - 1];
   if (last.tie) last.tie = false;
 
+  // 最初の音の連桁の印は外す（コピーしていない前の音とのつながりなので）（ステップ19-1）
+  delete notes[0].beam;
+
   // 相手のいないスラー・松葉を外す（cleanSpanners はパートの形を受け取るので、1小節のパートの形にして渡す）
   cleanSpanners({ measures: [{ notes: notes }] });
 

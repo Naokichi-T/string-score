@@ -8,6 +8,7 @@
 
 import { tupletGroups, noteTicks, TICKS_PER_16TH } from "../model.js";
 import { timeToString } from "./helpers.js";
+import { autoGroups, applyMarks, hasMarks } from "../beams.js"; // 連桁の印（ステップ19-1）
 
 // 全音符1つ分のティック（VexFlow の長さは「全音符の何分のいくつか」で書くため）
 const WHOLE_TICKS = 16 * TICKS_PER_16TH;
@@ -61,6 +62,9 @@ export function createTuplets(VF, notes, staveNotes) {
 //     ・連符でない所 … 今までと同じように、拍子に合わせてつなぐ
 //     ・連符         … 連符の中を全部1本でつなぐ（12連符のように1拍より長くても切らない）
 //                      4分音符以上の連符は、連桁がないので何もしない
+//   （ステップ19-1：連符でない所に連桁の印（beam: "join"・"break"）があるときは、
+//     自動のまとまりを beams.js で計算して印を当てはめ、そのまとまりで連桁を作る。
+//     印がない所は、今までどおり VexFlow の generateBeams で作る（見た目を変えないため））
 // 戻り値：VexFlow の連桁の配列
 // ----------------------------------------------------------
 export function createBeams(VF, notes, staveNotes, time, offset = 0) {
@@ -110,6 +114,22 @@ export function createBeams(VF, notes, staveNotes, time, offset = 0) {
       for (let k = 0; k < points.length - 1; k++) {
         lengths.push(points[k + 1] - points[k]);
       }
+    }
+
+    // 連桁の印がある所（連符でない所だけ）：自分でまとまりを決めて、まとまりごとに連桁を作る（ステップ19-1）
+    //   new VF.Beam(音符, true) … true で、まとまりに合わせて符尾の向きを決め直す（generateBeams と同じ決め方）
+    const segmentData = notes.slice(segment.from, segment.to + 1);
+    if (!segment.isTuplet && hasMarks(segmentData)) {
+      const groups = applyMarks(segmentData, autoGroups(segmentData, lengths));
+      groups.forEach((group) => {
+        beams.push(
+          new VF.Beam(
+            group.map((k) => segmentNotes[k]),
+            true,
+          ),
+        );
+      });
+      return;
     }
 
     // VexFlow の書き方（全音符の何分のいくつか）にして、連桁を作る

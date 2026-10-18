@@ -108,6 +108,7 @@
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
   import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
+  import { canBeamTogether, canUnbeam, beamTogether, unbeam } from "#lib/score/beams.js"; // 連桁を手でつなぐ・切る（ステップ19-1）
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches } from "#lib/score/playback.js";
   import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts, loadClipboard, saveClipboard, CLIPBOARD_KEY } from "#lib/score/library.js";
@@ -159,6 +160,10 @@
 
   // 選んでいる音にグリッサンドを付けられるか（「記号」タブのボタンを押せるようにするため）（ステップ11-5a）
   let glissandoAllowed = $derived(canGlissando(score, selection));
+
+  // ［連桁にする］［連桁を解除］を押せるか（ステップ19-1）
+  let beamAllowed = $derived(canBeamTogether(score, range));
+  let unbeamAllowed = $derived(canUnbeam(score, selection, range));
 
   // 範囲の中に音符が1つでもあるか（範囲をまとめて ▲ ▼・削除できるかどうかに使う）
   let rangeEditable = $derived(!!range && rangeHasNotes(score, range));
@@ -1436,6 +1441,22 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：handleBeam
+  // 「音符」タブの［連桁にする］［連桁を解除］が押されたとき（ステップ19-1）
+  //   kind … "join"（連桁にする：範囲の音符を1本でつなぐ）・"break"（連桁を解除：1つずつの音符にする）
+  // 音の並びは変わらないので、選んでいる場所と範囲はそのまま残す
+  // ----------------------------------------------------------
+  function handleBeam(kind) {
+    message = "";
+    if (kind === "join" && !beamAllowed) return;
+    if (kind === "break" && !unbeamAllowed) return;
+    // commit で範囲選択が消えるので、覚えておいて元に戻す
+    const end = rangeEnd;
+    commit(kind === "join" ? beamTogether(score, range) : unbeam(score, selection, range));
+    rangeEnd = end;
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleTransposeScore
   // 「楽譜の設定」タブの［移調する］が押されたとき：楽譜全体を移調する（ステップ17-1）
   //   toKey     … 行き先の調（♯の数がプラス、♭の数がマイナス）
@@ -2347,6 +2368,9 @@
       {canCopy}
       {canPaste}
       onclipboard={handleClipboard}
+      canBeam={beamAllowed}
+      canUnbeam={unbeamAllowed}
+      onbeam={handleBeam}
       {rangeMode}
       onrangemode={handleRangeMode}
       {chordMode}
