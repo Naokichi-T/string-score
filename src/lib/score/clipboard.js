@@ -18,9 +18,11 @@
 //   ・貼り付けられないとき（知らせて、何もしない）
 //       連符の途中（2つ目から）を選んで貼り付けたとき
 //       貼り付ける連符が小節線をまたぐとき
+//         （連符を小節線で分けると、分けた長さが音符で書けないことが多いので、貼らずに知らせる。
+//           知らせる文には、パート・何連符か・どの小節の終わりでまたぐかを出す（ステップ18-7））
 // ==========================================================
 
-import { noteTicks, durationToTicks, timeAt, measureLength, restsForSpan, tupletGroups } from "./model.js";
+import { noteTicks, durationToTicks, timeAt, measureLength, restsForSpan, tupletGroups, measureName } from "./model.js";
 import { cloneScore, appendMeasure, cleanSpanners } from "./edit.js";
 import { positionsInRange } from "./selection.js";
 
@@ -188,8 +190,15 @@ export function pasteNotes(score, selection, clip) {
     const groupStart = clipStarts[group.start];
     const groupEnd = clipStarts[group.end] + noteTicks(clip[group.end]);
     // 連符の始まりと終わりの間に、小節の区切りがあったらまたいでいる
-    if (starts.some((s) => s > groupStart && s < groupEnd)) {
-      return { score: score, error: "連符が小節線をまたぐので、ここには貼り付けられません" };
+    // starts[k] は k 小節目の頭 = (k - 1) 小節目の終わりの小節線（ステップ18-7：どこでまたぐかを知らせるため、番号を探す）
+    const crossed = starts.findIndex((s) => s > groupStart && s < groupEnd);
+    if (crossed !== -1) {
+      const partName = newScore.parts[selection.part].name; // パートの名前（例：Violin I）
+      const where = measureName(newScore, crossed - 1); // またぐ小節線の手前の小節（例：3小節目）
+      return {
+        score: score,
+        error: `${partName}：${group.actual}連符が ${where}の終わりの小節線をまたぐので、ここには貼り付けられません。貼り付ける位置をずらして、連符がその小節に収まるようにしてください`,
+      };
     }
   }
 
