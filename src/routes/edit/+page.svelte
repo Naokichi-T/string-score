@@ -887,6 +887,13 @@
       rangeEnd = samePlace(newSelection, selection) ? null : newSelection;
       return;
     }
+    // 選んでいる音をもう一度クリック（タップ）したら、選択を外す（範囲を選んでいないときだけ）
+    // （タブレットで、1小節目から再生したいときなどに外しやすくするため。何もない所のクリック・Esc でも外れる）
+    // 重音では、選んでいる玉をもう一度押したときだけ外す（別の玉なら、その玉を選び直す）
+    if (!rangeEnd && selection && newSelection && samePlace(newSelection, selection) && (newSelection.head ?? null) === (selection.head ?? null)) {
+      selection = null;
+      return;
+    }
     // ふつうのクリック（または違うパート）：その音だけを選ぶ
     selection = newSelection;
     rangeEnd = null;
