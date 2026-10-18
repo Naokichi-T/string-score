@@ -88,6 +88,8 @@ let lastMeasured = { score: null, width: 0, extents: null };
 //   options   … 見た目の細かい指定（PDF 出力で使う。省略したら画面と同じ）（ステップ13-2）
 //                 titleSize … タイトルの文字の大きさ（省略したら 24）
 //                 titleBold … タイトルを太字にするか（省略したら true）
+//                 keepHeader … true なら、タイトルも作曲者も空のときも、タイトルの場所を空ける（省略したら false）
+//                              （PDF で一部のパートだけを出すとき、左上のパート名を書く場所にする。後で直す候補の手直し）
 // 戻り値：{ hitBoxes, lineTops, lineBottoms, totalHeight }
 //   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
 //                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
@@ -154,7 +156,8 @@ export function renderScore(VF, container, score, width, selection = null, range
   const lines = layoutLines(noteWidths, startWidths, middleWidths, totalWidth - firstLeft - LEFT, totalWidth - otherLeft - LEFT, lengths);
 
   // タイトルか作曲者があるときだけ、上に場所を空ける（テンポの場所はいつも空ける）
-  const hasHeader = !!(score.title || score.composer);
+  // （keepHeader が true なら、空でも空ける：PDF の左上のパート名がテンポに重ならないように。後で直す候補の手直し）
+  const hasHeader = !!(score.title || score.composer || options.keepHeader);
   const headerHeight = (hasHeader ? TITLE_AREA : 0) + TEMPO_AREA;
 
   // 段を描くのに使うもの（下書きと本番で共通）

@@ -161,7 +161,7 @@
       draw.style.left = "-100000px";
       document.body.appendChild(draw);
       // 表示しているパートだけ（ステップ12-6b）。タイトルは大きく、太字にしない（ステップ13-2）
-      const result = renderScore(VF, draw, printScore, width, null, null, [], false, { titleSize: TITLE_SIZE, titleBold: false });
+      const result = renderScore(VF, draw, printScore, width, null, null, [], false, { titleSize: TITLE_SIZE, titleBold: false, keepHeader: partLabel !== "" });
       const svg = draw.querySelector("svg");
       // 幅は renderScore が決めたもの（最低限の幅より狭いときは広がる）を使う
       const svgWidth = Number(svg.getAttribute("width"));

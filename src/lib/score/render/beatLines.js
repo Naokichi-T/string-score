@@ -12,8 +12,9 @@ import { noteTicks, measureTicks } from "../model.js";
 import { beatTicks } from "../playback.js";
 
 // 線の色（1拍目と、ほかの拍）と太さ
-const STRONG_COLOR = "rgba(220, 38, 38, 0.45)"; // 赤（うすい）
-const BEAT_COLOR = "rgba(37, 99, 235, 0.35)"; // 青（うすい）
+// （後で直す候補の手直し：うすくて見えにくかったので、こさを 0.45 → 0.6、0.35 → 0.5 に上げた）
+const STRONG_COLOR = "rgba(220, 38, 38, 0.6)"; // 赤（少しうすい）
+const BEAT_COLOR = "rgba(37, 99, 235, 0.5)"; // 青（少しうすい）
 const LINE_WIDTH = 2;
 
 // 線を五線の上下に、どれだけはみ出させるか（ピクセル）
