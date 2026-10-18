@@ -5,6 +5,7 @@
   // （ステップ7-2：一覧を作った）
   // （ステップ7-3：［＋ 新しい楽譜］で楽器の数を選んで作る）
   // （ステップ8-3：［MusicXML を読み込む］で、ファイルから新しい楽譜を作る）
+  // （ステップ23：いちばん下に、姉妹アプリ「バイオリン音程チェック」の紹介を追加）
   // ==========================================================
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
@@ -257,6 +258,15 @@
     <!-- Q&A のページへのリンク（ステップ17-5） -->
     <p class="help-link"><a href="/help">くわしい使い方・困ったときは Q&A（よくある質問）へ →</a></p>
   </section>
+
+  <!-- 姉妹アプリの紹介（ステップ23） -->
+  <!-- target="_blank"：新しいタブで開く（楽譜作成アプリのタブはそのまま残す） -->
+  <!-- rel="noopener"：開いた先のページから、このページを動かせないようにする（新しいタブで開くときの決まりごと） -->
+  <section class="sister-app">
+    <p class="sister-title">🎻 バイオリンの音程練習に</p>
+    <p class="sister-text">弾いた音の高さが合っているかを判定するアプリです。チューナー・指板の図・メトロノームもあります（スマホ向け）。</p>
+    <a class="sister-link" href="https://violin-pitch.vercel.app/" target="_blank" rel="noopener">バイオリン音程チェックを開く →</a>
+  </section>
 </main>
 
 <!-- 新しい楽譜を作る窓（showNewDialog が true のときだけ出す） -->
@@ -440,6 +450,39 @@
     text-decoration: none;
   }
   .help-link a:hover {
+    text-decoration: underline;
+  }
+  /* ---------- 姉妹アプリの紹介（ステップ23） ---------- */
+  /* うすい青の枠（使い方の注意の黄色い枠と区別する） */
+  .sister-app {
+    margin-top: 32px;
+    padding: 12px 16px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .sister-app p {
+    margin: 0;
+  }
+  /* 「.sister-app p」の margin: 0 より強くするため、.sister-app を前に付ける */
+  .sister-app .sister-title {
+    font-weight: bold;
+    font-size: 15px;
+    margin-bottom: 4px; /* 見出しと説明の間を少し空ける */
+  }
+  .sister-text {
+    color: #333;
+  }
+  .sister-link {
+    display: inline-block; /* 上に余白を付けられるようにする */
+    margin-top: 8px;
+    color: #2563eb;
+    font-weight: bold;
+    text-decoration: none;
+  }
+  .sister-link:hover {
     text-decoration: underline;
   }
   /* 幅の狭い画面では、見出しを説明の上に出す（見出しの幅で説明が細くならないように） */
