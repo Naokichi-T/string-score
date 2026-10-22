@@ -10,6 +10,8 @@
 // （ステップ14-6b：2音トレモロ。2つの <note> の組にして、<tremolo type="start">・<tremolo type="stop"> を書く）
 // （ステップ15-3：アウフタクト。1小節目を <measure number="0" implicit="yes"> にして、次の小節から 1, 2, 3… と数える）
 //   implicit="yes" … 「小節番号として数えない小節」という MusicXML の決まり
+// （途中の短い小節：途中の続きの小節（後ろの部分だけの小節）にも implicit="yes" を付ける。
+//   番号は MuseScore と同じく "X1"・"X2"… にする（ほかの小節の番号がずれないように））
 // （ステップ16-2：松葉に番号（number）を付けて、同じ音符での「＜の終わり → ＞の始まり」と、1つの音符の下だけの松葉を書く）
 // （ステップ19-2：連桁を <beam> で書く。画面と同じつなぎ方（手で変えた所も）がほかのアプリでも同じになるように）
 //   番号が 1 のときは書かない（書かなければ 1 という決まり。今までの楽譜の書き出しは変わらない）
@@ -56,6 +58,7 @@ import {
   isAlternate,
   hasPickup,
   measureNumber,
+  isContinuation, // 続きの小節か（途中の短い小節）
   measureOffset,
 } from "./model.js";
 import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつなぎ方（ステップ19-2）
@@ -985,11 +988,22 @@ function partXml(score, p, divisions) {
   let prevKey = null;
   let prevClef = null;
 
+  let continuationCount = 0; // ここまでに書いた、途中の続きの小節の数（"X1"・"X2"… の番号に使う）（途中の短い小節）
+
   part.measures.forEach((measure, i) => {
     const isFirst = i === 0;
     // 小節番号は、画面と同じ番号（アウフタクトがあれば、アウフタクトは 0 で、数えない小節の印 implicit="yes" を付ける）（ステップ15-3）
-    const implicit = isFirst && hasPickup(score) ? ` implicit="yes"` : "";
-    lines.push(`    <measure number="${measureNumber(score, i)}"${implicit}>`);
+    // （途中の短い小節：途中の続きの小節は、"X1"・"X2"… の番号で、数えない小節の印 implicit="yes" を付ける）
+    let number = String(measureNumber(score, i));
+    let implicit = "";
+    if (isFirst && hasPickup(score)) {
+      implicit = ` implicit="yes"`;
+    } else if (isContinuation(score, i)) {
+      continuationCount = continuationCount + 1;
+      number = `X${continuationCount}`;
+      implicit = ` implicit="yes"`;
+    }
+    lines.push(`    <measure number="${number}"${implicit}>`);
     // くり返しの始まり（‖:）は、小節のいちばん頭に書く（ステップ11-7a）
     // （ステップ11-7b：1番・2番かっこの始まりも、同じ所に書く）
     lines.push(...leftBarlineXml(score.measures[i]));

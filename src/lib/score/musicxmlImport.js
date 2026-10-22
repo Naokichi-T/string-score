@@ -25,6 +25,13 @@
 //   ・文字と点線の始まり（<dashes type="start">）のある音から、同じ番号の点線の終わり（<dashes type="stop">）の
 //     前の音までを、cresc. なら＜、dim. なら＞の松葉にする（全部のパートで読む）
 //   ・rit.・accel. の点線は、同じ番号の点線の終わりでだけ閉じるようにした（cresc. の点線の終わりで閉じないように）
+// （途中の短い小節：曲の途中で、どのパートも拍子より短い小節を、短い小節として読むようにした）
+//   ・前は、何も知らせずに後ろを休符で埋めて、拍子どおりの小節にしていた
+//   ・続き（pickup。小節の後ろの部分・番号に数えない）にするもの
+//       <measure implicit="yes">（番号に数えない小節の印）がある
+//       または、前の小節が「前の部分」で、2つ足すとちょうど1小節になる（印を書かないアプリのファイルのため）
+//   ・それ以外は、前の部分（short。小節の頭から・番号に数える）にする
+//   ・長さが拍の単位で割り切れないときは、アウフタクトと同じく切り上げて知らせる
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -80,6 +87,7 @@ import {
   hasDiamond,
   ALTERNATE_DURATIONS,
   upgradeWedgeNotes,
+  measureNumberLabel, // 小節番号の文字（続きの小節は "(8)"）（途中の短い小節）
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners, cleanAlternates } from "./edit.js";
@@ -1342,7 +1350,7 @@ function applyPending(note, state, counter) {
 //   counter     … 使えなかった記号を数える表（ステップ8-4a）
 //   skipped     … 使わなかった音を数える表（ステップ8-4b）
 // 戻り値：{
-//   measures: [{ notes, clef?, time?, key?, readable }]（小節ごと）
+//   measures: [{ notes, clef?, time?, key?, readable, implicit }]（小節ごと。implicit は番号に数えない小節の印があるか（途中の短い小節））
 //   firstClef: 最初の音部記号
 //   problems:  読めなかった小節の番号（1 から）の配列
 // }
@@ -1373,6 +1381,8 @@ function readPart(partElement, counter, skipped) {
 
   childElements(partElement, "measure").forEach((measureElement, index) => {
     const measure = { notes: [], ticks: 0, readable: true };
+    // 番号に数えない小節の印（<measure implicit="yes">）があるか（途中の短い小節）
+    measure.implicit = measureElement.getAttribute("implicit") === "yes";
 
     for (const element of Array.from(measureElement.childNodes)) {
       if (element.nodeType !== 1) continue;
@@ -1782,6 +1792,7 @@ function isMeasureRestOnly(read) {
 //                 （0 のときは、アウフタクトでも拍子どおりの長さにして、前を休符で埋める（前と同じ））
 //   endTicks    … 短い最後の小節の長さ（ティック）（ステップ20）
 //                 0 より大きいときは、小節の長さをこの長さにする（足りない分は、ふつうの小節と同じく後ろを埋める）
+// （途中の短い小節：続きの小節は isPickup・pickupTicks に、前の部分の小節は endTicks に、その長さを渡して使う）
 // 戻り値：{ notes: 音符・休符の配列, ok: そのまま使えたか }
 // ----------------------------------------------------------
 function fitMeasure(read, time, isPickup = false, pickupTicks = 0, endTicks = 0) {
@@ -1949,6 +1960,47 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     }
   }
 
+  // ⑤-3 途中の短い小節か調べる（途中の短い小節）
+  // 1小節目・最後の小節以外で、どのパートも拍子より短い小節を、短い小節にする
+  // （アウフタクトと同じく、全休符だけのパートは数えない。全部のパートが全休符だけなら、全部で調べる。長さは拍の単位で切り上げる）
+  //   frontTicks[i] … 前の部分（short）の長さ（ティック）。違うときは 0（最後の小節の endTicks もここに入れる）
+  //   backTicks[i]  … 続き（pickup）の長さ（ティック）。違うときは 0（1小節目の pickupTicks もここに入れる）
+  const frontTicks = Array(measureCount).fill(0);
+  const backTicks = Array(measureCount).fill(0);
+  backTicks[0] = pickupTicks;
+  frontTicks[lastIndex] = endTicks;
+  const roundedMeasures = []; // 拍の単位に切り上げた途中の短い小節の番号（0 から）（知らせるため）
+  for (let i = 1; i < lastIndex; i++) {
+    const total = measureTicks(times[i]);
+    const reads = readParts.map((read) => read.measures[i]).filter((read) => read);
+    if (reads.length === 0) continue;
+    const countedMid = reads.some((read) => !isMeasureRestOnly(read)) ? reads.filter((read) => !isMeasureRestOnly(read)) : reads;
+    // 読めない音のある小節は、拍子どおりの長さとみなす（短い小節にはしない）
+    const longest = Math.max(0, ...countedMid.map((read) => (read.readable ? read.ticks : total)));
+    if (longest <= 0 || longest >= total) continue;
+    const unit = total / times[i].beats; // 拍子の下の数字の音符1つ分
+    const count = Math.ceil(longest / unit);
+    if (count >= times[i].beats) continue; // 切り上げると1小節になる：今までどおり拍子どおりの小節にする
+    const length = count * unit;
+    // 続きにするか：番号に数えない小節の印があるか、前の小節が「前の部分」で、足すとちょうど1小節になるか
+    const implicit = readParts[0].measures[i]?.implicit === true;
+    const pairsWithPrev = frontTicks[i - 1] > 0 && frontTicks[i - 1] + length === total;
+    if (implicit || pairsWithPrev) {
+      measures[i].pickup = count;
+      backTicks[i] = length;
+    } else {
+      measures[i].short = count;
+      frontTicks[i] = length;
+    }
+    if (length !== longest) roundedMeasures.push(i);
+  }
+  if (roundedMeasures.length > 0) {
+    // 画面と同じ小節番号で書く（続きの小節は "(8)" のように）
+    const labels = roundedMeasures.map((i) => measureNumberLabel({ measures: measures }, i));
+    const shown = labels.slice(0, 5).join("・") + (labels.length > 5 ? " 小節目 …" : " 小節目");
+    warnings.push(`途中の短い小節で、長さが拍の単位で割り切れないので、切り上げて休符で埋めた小節：${roundedMeasures.length}か所（${shown}）`);
+  }
+
   // ⑥ パートのデータを作る
   const problemMeasures = new Set(); // 休符にした小節の番号（0 から数えたデータの順番。同じ小節は1回だけ）（ステップ8-4c。ステップ15-3：1 からの番号から変えた）
   const parts = readParts.map((read, p) => {
@@ -1969,7 +2021,10 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     for (let i = 0; i < measureCount; i++) {
       const readMeasure = read.measures[i] ?? { notes: [], ticks: 0, readable: true };
       // （ステップ20：短い最後の小節は、その長さに合わせる）
-      const fitted = fitMeasure(readMeasure, times[i], i === 0 && isPickup, pickupTicks, i === lastIndex ? endTicks : 0);
+      // （途中の短い小節：続きの小節はアウフタクトと同じく前を、前の部分の小節は短い最後の小節と同じく後ろを埋める）
+      //   1小節目は、アウフタクトにならなかった（切り上げて1小節になった）ときも、今までどおり前を埋める
+      const isBack = (i === 0 && isPickup) || backTicks[i] > 0;
+      const fitted = fitMeasure(readMeasure, times[i], isBack, backTicks[i], frontTicks[i]);
       if (!fitted.ok) problemMeasures.add(i);
 
       const measure = { notes: fitted.notes };
@@ -1987,7 +2042,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     //   ・アウフタクトの小節は、拍子どおりの小節の後ろの部分として区切る（画面と同じ）
     partMeasures.forEach((measure, i) => {
       if (read.hasBeams) {
-        const offset = i === 0 && pickupTicks > 0 ? measureTicks(times[0]) - pickupTicks : 0;
+        // （途中の短い小節：続きの小節も、アウフタクトと同じく後ろの部分として区切る）
+        const offset = backTicks[i] > 0 ? measureTicks(times[i]) - backTicks[i] : 0;
         marksFromFile(measure.notes, times[i], offset);
       } else {
         measure.notes.forEach((note) => delete note.beamXml);
@@ -2000,7 +2056,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     let nowClef = INSTRUMENTS[instrument].clef;
     partMeasures.forEach((measure, i) => {
       if (measure.clef) nowClef = measure.clef;
-      const offset = i === 0 && pickupTicks > 0 ? measureTicks(times[0]) - pickupTicks : 0;
+      // （途中の短い小節：続きの小節も、アウフタクトと同じく後ろの部分として計算する）
+      const offset = backTicks[i] > 0 ? measureTicks(times[i]) - backTicks[i] : 0;
       stemsFromFile(measure.notes, nowClef, times[i], offset);
     });
 
@@ -2044,7 +2101,8 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   if (problemMeasures.size > 0) {
     const numbers = [...problemMeasures].sort((a, b) => a - b);
     // 画面と同じ小節番号で書く（アウフタクトがあれば、アウフタクトは「アウフタクト」、次の小節から 1, 2…）（ステップ15-3）
-    const labels = numbers.map((i) => (pickupTicks > 0 ? (i === 0 ? "アウフタクト" : String(i)) : String(i + 1)));
+    // （途中の短い小節：続きの小節を数えない番号にする。続きの小節は "(8)" のように書く）
+    const labels = numbers.map((i) => (i === 0 && pickupTicks > 0 ? "アウフタクト" : measureNumberLabel({ measures: measures }, i)));
     const shown = labels.slice(0, 5).join("・") + (labels.length > 5 ? " 小節目 …" : " 小節目");
     warnings.push(`連符などの読めない音があったので、休符にした小節：${numbers.length}か所（${shown}）`);
   }
