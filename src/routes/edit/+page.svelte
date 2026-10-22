@@ -2166,6 +2166,10 @@
     keyboardOctave = Math.min(6, Math.max(1, keyboardOctave + delta));
   }
 
+  // 押されたら、ボタンの選択を外すキー（handleKeydown で使う）
+  // （矢印キーで音符を動かしたときに、直前に押したボタンへ選んでいる印の枠が出ないようにする）
+  const SHORTCUT_KEYS_BLUR = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Delete", "Backspace"];
+
   // ----------------------------------------------------------
   // 関数：handleKeydown
   // キーボードが押されたときの処理（ページ全体で受け取る）
@@ -2191,6 +2195,11 @@
     // 文字を入力する欄で押されたときは何もしない（後のステップで入力欄を作るため）
     const tag = event.target.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    // ボタンを押したあとは、そのボタンが選ばれたままになっている。
+    // そのまま矢印キーや Delete を押すと、ブラウザが「選んでいる印」の枠をボタンに出してしまうので、ボタンの選択を外す
+    // （矢印キーなどは音符を動かすためのキーで、ボタンを操作するつもりではないため）（Space は下で同じように外している）
+    if (tag === "BUTTON" && SHORTCUT_KEYS_BLUR.includes(event.key)) event.target.blur();
 
     if (command && (event.key === "z" || event.key === "Z")) {
       // Ctrl＋Z：元に戻す、Ctrl＋Shift＋Z：やり直し

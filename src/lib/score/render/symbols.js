@@ -25,6 +25,9 @@ export function addSymbols(VF, staveNote, note) {
   const ABOVE = VF.Modifier.Position.ABOVE; // 上に付ける
   const BELOW = VF.Modifier.Position.BELOW; // 下に付ける
 
+  // ⓪ 全音符のような符尾のない音符では、見えない符尾の長さを 0 として数えさせる（記号が五線の中に入らないように）
+  fixStemlessHeight(staveNote);
+
   // ① アーティキュレーション（スタッカートなど）
   //    符尾が上向きの音符は玉の下に、下向きの音符は玉の上に付ける
   const stemUp = staveNote.getStemDirection() === VF.Stem.UP;
@@ -40,6 +43,8 @@ export function addSymbols(VF, staveNote, note) {
   if (note.bowing && BOWINGS[note.bowing]) {
     const bowing = new VF.Articulation(BOWINGS[note.bowing].vf);
     bowing.setPosition(ABOVE);
+    // アップボウ（V）は縦に長いので、ダウンボウと同じ高さにそろえる
+    if (note.bowing === "up") fitUpBow(VF, bowing);
     staveNote.addModifier(bowing, 0);
   }
 
@@ -58,6 +63,8 @@ export function addSymbols(VF, staveNote, note) {
   if (note.ornament && ORNAMENTS[note.ornament]) {
     const ornament = new VF.Ornament(ORNAMENTS[note.ornament].vf);
     ornament.setPosition(ABOVE);
+    // tr などが五線のいちばん上の線に乗ってしまうときは、少し上へずらす
+    keepOffTopLine(ornament, staveNote);
     staveNote.addModifier(ornament, 0);
   }
 
@@ -72,6 +79,8 @@ export function addSymbols(VF, staveNote, note) {
     const fingering = new VF.Annotation(String(number));
     fingering.setFont("Academico", 11);
     fingering.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
+    // 弓・アクセント・トリルなどに近すぎるときは、上へずらす
+    keepAboveMarks(VF, fingering, staveNote);
     staveNote.addModifier(fingering, 0);
   }
 
@@ -81,6 +90,8 @@ export function addSymbols(VF, staveNote, note) {
     const technique = new VF.Annotation(TECHNIQUES[name].text);
     technique.setFont("Academico", 13, "normal", "italic");
     technique.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
+    // 弓・アクセント・トリルなどに近すぎるときは、上へずらす（指番号をずらしたら、同じだけずらす）
+    keepAboveMarks(VF, technique, staveNote);
     staveNote.addModifier(technique, 0);
   }
 
@@ -101,8 +112,131 @@ export function addSymbols(VF, staveNote, note) {
     fermata.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
     // 文字として置くと、五線より高い音では玉に近すぎるので、少し上に持ち上げる
     fermata.setYShift(FERMATA_LIFT);
+    // 指番号などをずらしたら、同じだけずらす
+    keepAboveMarks(VF, fermata, staveNote);
     staveNote.addModifier(fermata, 0);
   }
+}
+
+// ----------------------------------------------------------
+// 関数：fixStemlessHeight
+// 全音符のような符尾のない音符で、見えない符尾の長さを 0 にする
+// 【なぜ】VexFlow の音符は、全音符でも見えない符尾のデータを持っている。
+//   記号（指番号・弓など）をどの高さに積むかを決めるとき、VexFlow はその見えない符尾の長さまで数えてしまう。
+//   いっぽう、実際に描くときは玉の位置から測るので、記号が五線の中に入ってしまっていた
+//   → 符尾のない音符では、符尾の長さを聞かれたら 0 と答えるようにする
+//   （符尾の長さ（getHeight）は、記号の高さを決めるところでしか使われない。符尾は描かれないので見た目は変わらない）
+//   staveNote … VexFlow の音符
+// ----------------------------------------------------------
+function fixStemlessHeight(staveNote) {
+  if (staveNote.hasStem()) return; // 符尾がある音符はそのまま
+  const stem = staveNote.getStem();
+  if (stem) stem.getHeight = () => 0;
+}
+
+// 指番号などの文字の下端と、その下の記号（弓・アクセント・トリルなど）の上端の間に、最低これだけ空ける（ピクセル）
+const MARK_GAP = 4;
+
+// ----------------------------------------------------------
+// 関数：keepAboveMarks
+// 五線の上に書く文字（指番号・奏法の文字・フェルマータ）が、その下の記号（弓・アクセント・トリルなど）に
+// 近すぎるとき（重なるとき）は、上へずらす
+// 【なぜ】VexFlow は、アクセントなどを五線の線の間に収まるように少し動かす。
+//   その動かした分は、文字の高さを決めるときに数えられていないので、文字がくっついてしまうことがあった
+// 【しくみ】VexFlow は、付けた順に記号を描く（弓などの記号 → 文字）。
+//   そこで、文字を描く直前（renderText）に、もう描き終わった記号の上端を調べて、足りない分だけ上へずらす。
+//   1つの音符で文字をずらしたら、その上に積む文字も同じだけずらす（積んだ並びがくずれないように）
+//   VF         … VexFlow の部品一式
+//   annotation … 文字（VF.Annotation）
+//   staveNote  … その文字を付ける VexFlow の音符
+// ----------------------------------------------------------
+function keepAboveMarks(VF, annotation, staveNote) {
+  const originalRenderText = annotation.renderText.bind(annotation);
+  annotation.renderText = (context, x, y) => {
+    // もう描き終わった、上に付く記号（弓・アクセントなど・トリルなど）の、いちばん上の高さ
+    let marksTop = Infinity;
+    staveNote.getModifiers().forEach((modifier) => {
+      const category = modifier.getCategory();
+      if (category !== "Articulation" && category !== "Ornament") return;
+      if (!modifier.isRendered()) return; // まだ描いていないものは、位置が分からないので使わない
+      if (modifier.getPosition() !== VF.Modifier.Position.ABOVE) return; // 玉の下に付いたものは関係ない
+      marksTop = Math.min(marksTop, modifier.getBoundingBox().getY());
+    });
+
+    // 文字の下端（数字には下にはみ出す部分がないので、文字の基準線を下端とする）
+    const bottom = annotation.y + annotation.getYShift();
+    // 足りない分（この音符で前の文字をずらしていれば、少なくともそれと同じだけ）
+    const needed = marksTop === Infinity ? 0 : bottom - (marksTop - MARK_GAP);
+    const lift = Math.max(staveNote.liftAboveMarks ?? 0, needed);
+    if (lift > 0) {
+      staveNote.liftAboveMarks = lift; // この音符で次に描く文字にも使う
+      annotation.setYShift(annotation.getYShift() - lift); // 上へずらす（マイナスが上）
+    }
+    originalRenderText(context, x, y);
+  };
+}
+
+// トリルなどの装飾の下端と、五線のいちばん上の線の間に、最低これだけ空ける（ピクセル）
+const LINE_GAP = 3;
+
+// ----------------------------------------------------------
+// 関数：keepOffTopLine
+// トリルなどの装飾（tr など）が五線のいちばん上の線にかかるときは、線から離れる所まで上へずらす
+// （VexFlow のままだと、五線の中の音では tr が上の線に乗ってしまう）
+// トリルの波線は、ずらしたあとの tr の位置から描くので、いっしょに上がる（drawTrillLine）
+//   ornament  … 装飾（VF.Ornament）
+//   staveNote … その装飾を付ける VexFlow の音符
+// ----------------------------------------------------------
+function keepOffTopLine(ornament, staveNote) {
+  const originalRenderText = ornament.renderText.bind(ornament);
+  ornament.renderText = (context, x, y) => {
+    const topLineY = staveNote.checkStave().getYForLine(0); // 五線のいちばん上の線の高さ
+    const box = ornament.getBoundingBox();
+    const over = box.getY() + box.getH() - (topLineY - LINE_GAP); // 線に近すぎる分
+    if (over > 0) ornament.setYShift(ornament.getYShift() - over); // 上へずらす（マイナスが上）
+    originalRenderText(context, x, y);
+  };
+}
+
+// アップボウ（V）の線の太さ（ピクセル）
+const UP_BOW_LINE_WIDTH = 1.3;
+
+// ----------------------------------------------------------
+// 関数：fitUpBow
+// アップボウ（V）の高さを、ダウンボウ（⊓）と同じにする（幅は今のまま）
+// 【なぜ】楽譜用フォントの V はダウンボウより縦に長い（約20px と約13px）ので、
+//   その上に付ける指番号が高くなり、楽譜が縦に長くなってしまう
+// 【しくみ】
+//   ① 文字の大きさを小さくして、VexFlow が記号を積むときの高さをダウンボウと同じにする
+//   ② 描くときは、小さくした文字のかわりに、元の V の幅で2本の線を描く
+//      （文字を縦だけ縮めることはできないため。線で描けば、パートの間の自動調整でも大きさを正しく測れる）
+//   VF     … VexFlow の部品一式
+//   bowing … アップボウの記号（VF.Articulation）
+// ----------------------------------------------------------
+function fitUpBow(VF, bowing) {
+  const width = bowing.getWidth(); // 元の V の幅
+  const downHeight = new VF.Articulation(BOWINGS.down.vf).getHeight(); // ダウンボウの高さ
+
+  // ① 高さがダウンボウと同じになるように、文字の大きさを小さくする
+  bowing.setFontSize(bowing.fontInfo.size * (downHeight / bowing.getHeight()));
+
+  // ② 文字のかわりに、V の形の2本の線を描く
+  bowing.renderText = (context) => {
+    // 小さくした文字を囲む四角（VexFlow が決めた位置）
+    const box = bowing.getBoundingBox();
+    const centerX = box.getX() + box.getW() / 2; // 横のまん中
+    const top = box.getY(); // V の上の端
+    const bottom = box.getY() + box.getH(); // V の下の先
+
+    context.save();
+    context.setLineWidth(UP_BOW_LINE_WIDTH);
+    context.beginPath();
+    context.moveTo(centerX - width / 2, top); // 左上
+    context.lineTo(centerX, bottom); // 下の先
+    context.lineTo(centerX + width / 2, top); // 右上
+    context.stroke();
+    context.restore();
+  };
 }
 
 // ----------------------------------------------------------

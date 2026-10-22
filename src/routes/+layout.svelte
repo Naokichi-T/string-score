@@ -65,4 +65,11 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
+  /* Tab キーでボタンを選んだときの枠を、ボタンの四角だけを囲む形にする
+     （ブラウザのふつうの枠は、ボタンの中の楽譜用フォントの文字が持つ縦長の透明な箱まで囲んでしまい、
+     ボタンの上下に細長い枠が飛び出して見えていたため） */
+  :global(button:focus-visible) {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+  }
 </style>
