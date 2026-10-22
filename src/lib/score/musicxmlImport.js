@@ -80,6 +80,8 @@ import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, D
 import { cleanSpanners, cleanAlternates } from "./edit.js";
 import { marksFromFile } from "./beams.js"; // 連桁の印（ステップ19-2）
 import { stemsFromFile } from "./stems.js"; // 符尾の向き（ステップ22）
+// 文字から、テンポの変化の意味を当てる関数と、このアプリで書き出した rit.・自由な文字の印（id の始まり）（自由な文字のテンポの指示）
+import { tempoWordKind, GRADUAL_ID_PREFIX } from "./tempoWords.js";
 
 // ----------------------------------------------------------
 // 16分音符いくつ分か → 音の長さの名前と付点の数の表
@@ -768,29 +770,12 @@ function addTechnique(list, name) {
   return [...others, name];
 }
 
-// 文字の指示（normalizeWords したもの） → テンポの印の種類 の表（ステップ11-6c）
-//   "rit" … rit.（だんだん遅く）、"accel" … accel.（だんだん速く）、"aTempo" … a tempo（元の速さに戻す）
-const TEMPO_WORDS = {
-  rit: "rit",
-  ritard: "rit",
-  ritardando: "rit",
-  rall: "rit",
-  rallentando: "rit",
-  accel: "accel",
-  accelerando: "accel",
-  "a tempo": "aTempo",
-  "tempo i": "aTempo",
-  "tempo primo": "aTempo",
-};
+// （自由な文字のテンポの指示：テンポの印の言葉の表 TEMPO_WORDS と、それを使う関数 tempoWordKind は、
+//   音程チェックアプリと同じものを使えるように tempoWords.js へ移した。rall.・allarg.・stringendo なども足し、
+//   「poco rit.」のように前に言葉が付いていても当たるようにした）
 
-// ----------------------------------------------------------
-// 関数：tempoWordKind
-// 文字の指示が、テンポの印（rit.・accel.・a tempo）なら、その種類を返す（ステップ11-6c）
-// 例："ritard." → "rit"、"A tempo" → "aTempo"、"dolce" → null
-// ----------------------------------------------------------
-function tempoWordKind(text) {
-  return TEMPO_WORDS[normalizeWords(text)] ?? null;
-}
+// rit.・accel. のボタンで付けたときと同じ文字（読み込んだ文字がこれなら、自由な文字としては持たない）（自由な文字のテンポの指示）
+const GRADUAL_BUTTON_TEXTS = { rit: "rit.", accel: "accel." };
 
 // 文字の指示（空白と「.」を取って小文字にしたもの） → D.C.・D.S.・Fine・To Coda の種類 の表（ステップ11-7c）
 //   "dc" などは小節の情報の jump に入れる種類（model.js の JUMP_TEXTS）、"fine"・"toCoda" はその印
@@ -919,8 +904,13 @@ function readJumpMarks(measureElements, score) {
 //   ・♩＝○○（<metronome> か <sound tempo>）… その小節のテンポ変更（今と同じテンポなら付けない）
 //                                            文字が a tempo なら、a tempo にする
 //   ・文字が rit.・accel.・a tempo など       … その印
+//       （自由な文字のテンポの指示：rall.・allargando なども、言葉の表（tempoWords.js）で見分けて、
+//         元の文字のまま自由な文字（gradualText）として持つ。再生での扱いは、表で当たった種類にする）
+//   ・表にない文字でも、点線の始まりが付いているもの … 「再生では変えない」自由な文字（gradual: "none"）
+//       （点線が付いているのは、テンポの変化の可能性が高いため。表にない、点線のない文字は、今までどおり読まずに数える）
 //   ・rit.・accel. の範囲の終わり             … <dashes type="stop">（点線の終わり）の小節
 //       点線がない rit.・accel. は、その小節だけの範囲にする
+//       （自由な文字のテンポの指示：点線がないものは、点線を引かない印 gradualDashes: false も付ける）
 //       点線の終わりが来ないうちに、次の rit.・テンポ変更などが来たら、その前の小節で終わりにする
 //   measureElements … 一番上のパートの <measure> の並び
 //   score           … 作った楽譜データ（measures に書き足す）
@@ -939,11 +929,12 @@ function readTempoMarks(measureElements, score) {
   }
 
   measureElements.forEach((measureElement, i) => {
-    if (i === 0 || i >= score.measures.length) return; // 1小節目は readTempo で読んである
+    // （自由な文字のテンポの指示：1小節目から始まる rit.・自由な文字も読むように、1小節目は ① だけ飛ばすようにした）
+    if (i >= score.measures.length) return;
     const info = score.measures[i];
 
-    // ① テンポ変更（文字が a tempo なら a tempo）
-    const { tempo, tempoText } = readTempo(measureElement);
+    // ① テンポ変更（文字が a tempo なら a tempo）（1小節目のテンポは readTempo で読んであるので、飛ばす）
+    const { tempo, tempoText } = i > 0 ? readTempo(measureElement) : { tempo: null, tempoText: "" };
     if (tempo !== null) {
       closeOpen(i - 1); // テンポが変わる所で、rit.・accel. は終わる
       if (tempoWordKind(tempoText) === "aTempo") {
@@ -963,17 +954,30 @@ function readTempoMarks(measureElements, score) {
       const types = childElements(direction, "direction-type");
       // 点線の始まりがあるか（あれば、終わりの印が来るまで範囲が続く）
       const hasDashes = types.some((type) => childElements(type, "dashes").some((d) => d.getAttribute("type") === "start"));
+      // このアプリで書き出したものなら、id に書いた再生での扱い（自由な文字のテンポの指示）
+      const typeFromId = gradualTypeFromId(direction);
       types.forEach((type) => {
         childElements(type, "words").forEach((words) => {
-          const kind = tempoWordKind(words.textContent);
+          const text = words.textContent.trim();
+          if (text === "") return;
+          // このアプリで書き出したものは id の扱いを、ほかのアプリのものは言葉の表で当てた扱いを使う
+          const kind = typeFromId ?? tempoWordKind(text);
           if (kind === "aTempo") {
+            if (i === 0) return; // 1小節目の a tempo は意味がないので読まない
             closeOpen(i - 1);
             info.aTempo = true;
-          } else if (kind === "rit" || kind === "accel") {
+          } else if (kind === "rit" || kind === "accel" || kind === "none" || (kind === null && hasDashes && !jumpWordKind(text))) {
+            // テンポの印の言葉か、表にない言葉でも点線が付いているもの（D.C.・Fine などは除く）
             closeOpen(i - 1);
-            info.gradual = kind;
-            if (hasDashes) openFrom = i;
-            else info.gradualEnd = true; // 点線がない：この小節だけ
+            info.gradual = kind ?? "none"; // 表にない言葉は「再生では変えない」
+            // ボタンと同じ文字（rit.・accel.）でなければ、元の文字のまま自由な文字として持つ（自由な文字のテンポの指示）
+            if (text !== GRADUAL_BUTTON_TEXTS[kind]) info.gradualText = text;
+            if (hasDashes) {
+              openFrom = i;
+            } else {
+              info.gradualEnd = true; // 点線がない：この小節だけ
+              info.gradualDashes = false; // 点線も引かない（自由な文字のテンポの指示）
+            }
           }
         });
         childElements(type, "dashes").forEach((dashes) => {
@@ -1069,6 +1073,30 @@ function keyAtMeasures(measures, i) {
 }
 
 // ----------------------------------------------------------
+// 関数：gradualTypeFromId
+// このアプリで書き出した rit.・accel.・自由な文字の <direction> なら、id から再生での扱いを取り出す（自由な文字のテンポの指示）
+// 例：id="string-score-gradual-none-7" → "none"
+//   direction … <direction> の要素
+// 戻り値："rit"・"accel"・"none"（このアプリの印でなければ null）
+// ----------------------------------------------------------
+function gradualTypeFromId(direction) {
+  const id = direction.getAttribute("id") ?? "";
+  if (!id.startsWith(GRADUAL_ID_PREFIX)) return null;
+  const type = id.slice(GRADUAL_ID_PREFIX.length).split("-")[0];
+  return ["rit", "accel", "none"].includes(type) ? type : null;
+}
+
+// ----------------------------------------------------------
+// 関数：hasDashesStart
+// <direction> に、点線の始まり <dashes type="start"> があるかを調べる（自由な文字のテンポの指示）
+//   direction … <direction> の要素
+// 戻り値：あれば true
+// ----------------------------------------------------------
+function hasDashesStart(direction) {
+  return childElements(direction, "direction-type").some((type) => childElements(type, "dashes").some((dashes) => dashes.getAttribute("type") === "start"));
+}
+
+// ----------------------------------------------------------
 // 関数：readDirection
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
 //   direction … <direction>
@@ -1099,6 +1127,10 @@ function readDirection(direction, state, counter) {
       const text = normalizeWords(words.textContent);
       if (text === "") return;
       if (tempoWordKind(words.textContent)) return; // rit.・a tempo などは、楽譜全体の印として readTempoMarks で読む（ステップ11-6c）
+      // 点線の始まりが付いた文字も、テンポの指示として readTempoMarks で読む（いちばん上のパートだけ）（自由な文字のテンポの指示）
+      if (hasDashesStart(direction)) return;
+      // このアプリで書き出した rit.・自由な文字（id の印がある）も、readTempoMarks で読む（自由な文字のテンポの指示）
+      if (gradualTypeFromId(direction)) return;
       if (jumpWordKind(words.textContent)) return; // D.C.・Fine などは、楽譜全体の印として readJumpMarks で読む（ステップ11-7c）
       const name = WORDS_TO_TECHNIQUE[text];
       if (name) state.pending.techniques = addTechnique(state.pending.techniques, name);

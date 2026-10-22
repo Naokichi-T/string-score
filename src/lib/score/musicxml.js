@@ -62,6 +62,7 @@ import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつ�
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
 import { computeAccidentals, keyAlters } from "./accidentals.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
+import { GRADUAL_ID_PREFIX } from "./tempoWords.js"; // rit.・自由な文字の <direction> に付ける id の始まり（自由な文字のテンポの指示）
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -257,18 +258,23 @@ function attributesXml(isFirst, key, time, clef, divisions, soundOctaves = 0) {
 //   ・a tempo          … <words>a tempo</words>
 //   ・rit.・accel.     … <words>rit.</words> と、点線の始まり <dashes type="start"/>
 //                        （点線の終わりは、範囲の終わりの小節の最後に gradualEndXml で書く）
+//                        （自由な文字のテンポの指示：rall. などの自由な文字は、その文字をそのまま <words> に書く。
+//                          音1つに付けた（点線を引かない）ものは、点線の始まりを書かない）
 // rit.・accel. のだんだん変わる速さは、MusicXML に再生の速さとして書く決まった形がないので、文字と点線だけ書く
+// （自由な文字の「再生では：遅くする／速くする／変えない」も書く形がないので、文字だけになる。
+//   読み込むときは、言葉の表（tempoWords.js）で文字から当て直す）
 //   score … 楽譜データ
-//   i     … 何小節目か（0 から。1小節目は tempoXml で書くので、ここでは何も書かない）
+//   i     … 何小節目か（0 から。1小節目のテンポは tempoXml で書くので、ここではテンポ変更を書かない）
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // ----------------------------------------------------------
 function tempoMarksXml(score, i) {
   const lines = [];
-  if (i === 0) return lines;
   const info = score.measures[i];
 
-  // ① 途中のテンポ変更
-  if (info.tempo !== undefined) lines.push(...tempoXml(tempoAt(score, i)));
+  // ① 途中のテンポ変更（1小節目のテンポは tempoXml で書くので、ここでは書かない）
+  // （自由な文字のテンポの指示：1小節目から始まる rit.・accel.・自由な文字が書き出されていなかったので、
+  //   1小節目でも ② ③ は書くようにした）
+  if (i > 0 && info.tempo !== undefined) lines.push(...tempoXml(tempoAt(score, i)));
 
   // ② a tempo
   if (info.aTempo) {
@@ -280,15 +286,21 @@ function tempoMarksXml(score, i) {
   }
 
   // ③ rit.・accel. の始まり（文字と、点線の始まり）
+  // （自由な文字のテンポの指示：自由な文字があればその文字を書く。点線を引かないものは、点線の始まりを書かない）
+  // （自由な文字のテンポの指示：<direction> に id（例：string-score-gradual-rit-7）を付けて、再生での扱いを書いておく。
+  //   ほかのアプリは id を気にしないので、ふつうの文字として読む。このアプリと音程チェックアプリは id を見て、
+  //   言葉の表にない文字（dolce など）や、自分で選んだ扱い（allargando を「速くする」など）もそのまま読み直せる）
   if (info.gradual) {
-    const text = info.gradual === "rit" ? "rit." : "accel.";
-    lines.push(`      <direction placement="above">`);
+    const text = info.gradualText ?? (info.gradual === "rit" ? "rit." : "accel.");
+    lines.push(`      <direction placement="above" id="${GRADUAL_ID_PREFIX}${info.gradual}-${i + 1}">`);
     lines.push("        <direction-type>");
-    lines.push(`          <words font-style="italic">${text}</words>`);
+    lines.push(`          <words font-style="italic">${escapeXml(text)}</words>`);
     lines.push("        </direction-type>");
-    lines.push("        <direction-type>");
-    lines.push(`          <dashes type="start" number="1"/>`);
-    lines.push("        </direction-type>");
+    if (info.gradualDashes !== false) {
+      lines.push("        <direction-type>");
+      lines.push(`          <dashes type="start" number="1"/>`);
+      lines.push("        </direction-type>");
+    }
     lines.push("      </direction>");
   }
   return lines;
@@ -301,6 +313,23 @@ function tempoMarksXml(score, i) {
 // ----------------------------------------------------------
 function gradualEndXml() {
   return ["      <direction>", "        <direction-type>", `          <dashes type="stop" number="1"/>`, "        </direction-type>", "      </direction>"];
+}
+
+// ----------------------------------------------------------
+// 関数：gradualHasDashes
+// i 小節目で終わる rit.・accel.・自由な文字の範囲が、点線を引くものかを調べる（自由な文字のテンポの指示）
+// i 小節目から前へさかのぼって、範囲の始まり（gradual のある小節）を探し、その小節の gradualDashes を見る
+// （点線を引かないもの（音1つに付けた自由な文字）では、点線の終わりも書かない）
+//   score … 楽譜データ
+//   i     … 範囲の終わりの小節（gradualEnd のある小節）
+// 戻り値：点線を引くなら true
+// ----------------------------------------------------------
+function gradualHasDashes(score, i) {
+  for (let k = i; k >= 0; k--) {
+    const info = score.measures[k];
+    if (info.gradual) return info.gradualDashes !== false;
+  }
+  return true;
 }
 
 // ----------------------------------------------------------
@@ -1056,7 +1085,8 @@ function partXml(score, p, divisions) {
     tiedInNote = prevTiedNote; // 次の小節の臨時記号・タイのために引き継ぐ（ステップ14-1）
 
     // rit.・accel. の範囲の終わりの小節なら、最後の音のあとに点線の終わりを書く（一番上のパートだけ）（ステップ11-6c）
-    if (p === 0 && score.measures[i].gradualEnd) lines.push(...gradualEndXml());
+    // （自由な文字のテンポの指示：点線を引かないものは、終わりも書かない）
+    if (p === 0 && score.measures[i].gradualEnd && gradualHasDashes(score, i)) lines.push(...gradualEndXml());
     // To Coda・Fine・D.C.・D.S. は、一番上のパートの、最後の音のあとに書く（ステップ11-7c）
     if (p === 0) lines.push(...jumpEndXml(score.measures[i]));
 
