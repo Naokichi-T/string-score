@@ -793,7 +793,8 @@ function makeTempoWarp(score, startMeasure, order) {
       while (to < score.measures.length - 1 && !score.measures[to].gradualEnd) to = to + 1;
       let rangeLength = 0;
       for (let k = i; k <= to; k++) rangeLength = rangeLength + measureLength(score, k); // アウフタクトなら短い長さ（ステップ15-2）
-      const toRate = rate * (info.gradual === "rit" ? RIT_RATE : ACCEL_RATE);
+      // （自由な文字のテンポの指示："none"（再生では変えない）のときは、速さを変えない（1倍））
+      const toRate = rate * (info.gradual === "rit" ? RIT_RATE : info.gradual === "accel" ? ACCEL_RATE : 1);
       gradual = { startTick: tick, length: rangeLength, fromRate: rate, toRate: toRate, to: to };
     }
 

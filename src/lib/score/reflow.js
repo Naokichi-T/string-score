@@ -29,7 +29,7 @@ import { splitTicks, plainNote } from "./clipboard.js";
 //   END_MARKS  … 小節の「終わり」に付くもの（元の小節の終わりにあった音が入った小節へ移す）
 // time（拍子）と pickup（アウフタクト）は、ここでは移さない（流し直しの中で決め直す）
 // ----------------------------------------------------------
-const HEAD_MARKS = ["key", "tempo", "tempoText", "gradual", "aTempo", "repeatStart", "ending", "segno", "coda", "rehearsal"];
+const HEAD_MARKS = ["key", "tempo", "tempoText", "gradual", "gradualText", "gradualDashes", "aTempo", "repeatStart", "ending", "segno", "coda", "rehearsal"];
 const END_MARKS = ["barline", "repeatEnd", "endingEnd", "gradualEnd", "jump", "toCoda", "fine"];
 
 // ----------------------------------------------------------

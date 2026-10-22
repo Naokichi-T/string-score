@@ -90,6 +90,8 @@
     setTempoChange,
     removeTempoChange,
     toggleGradual,
+    setGradualText,
+    removeGradual,
     toggleATempo,
     setBarline,
     toggleRepeatStart,
@@ -1749,20 +1751,40 @@
 
   // 「小節」タブの rit.・accel.・a tempo のボタンを青くするための情報（ステップ11-6b）
   //   { gradual: その小節から始まる rit.・accel.（なければ null）, aTempo: a tempo が付いているか }（何も選んでいなければ null）
-  let currentGradual = $derived(tempoMeasure === null ? null : { gradual: score.measures[tempoMeasure].gradual ?? null, aTempo: !!score.measures[tempoMeasure].aTempo });
+  // （自由な文字のテンポの指示：text（その小節から始まる自由な文字。なければ null）も入れた。［文字…］の欄に出すのに使う）
+  let currentGradual = $derived(
+    tempoMeasure === null
+      ? null
+      : {
+          gradual: score.measures[tempoMeasure].gradual ?? null,
+          text: score.measures[tempoMeasure].gradualText ?? null,
+          aTempo: !!score.measures[tempoMeasure].aTempo,
+        },
+  );
 
   // ----------------------------------------------------------
   // 関数：handleGradual
   // 「小節」タブの［rit.］［accel.］が押されたとき（ステップ11-6b）
   //   type … "rit" か "accel"
   // 範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける（同じものが始まっている小節なら外す）
+  // （自由な文字のテンポの指示：［文字…］の欄の［付ける］［外す］でも、この関数を使う）
+  //   text … 自由な文字（rall. など）。省略したら（null）、［rit.］［accel.］のボタン
+  //          空の文字（""）なら、その小節から始まる範囲を外す（［外す］）
+  //          自由な文字のときの type は、再生での扱い（"rit"・"accel"・"none"）
+  //          範囲を選んでいれば範囲の終わりまで点線を引き、音1つなら文字だけ書く
   // ----------------------------------------------------------
-  function handleGradual(type) {
+  function handleGradual(type, text = null) {
     if (tempoMeasure === null) return;
     message = "";
     const to = range ? range.end.measure : tempoMeasure; // 範囲の終わりの小節
     const end = rangeEnd;
-    commit(toggleGradual(score, tempoMeasure, to, type));
+    if (text === null) {
+      commit(toggleGradual(score, tempoMeasure, to, type));
+    } else if (text.trim() === "") {
+      commit(removeGradual(score, tempoMeasure));
+    } else {
+      commit(setGradualText(score, tempoMeasure, to, text, type, range !== null));
+    }
     rangeEnd = end;
   }
 

@@ -1482,17 +1482,20 @@ export function removeTempoChange(score, i) {
 // rit.・accel. の範囲を、小節の情報から探して並べる（ステップ11-6b）
 // 「ここから」（gradual: "rit" / "accel"）と「ここまで」（gradualEnd: true）の組を、前から順に探す
 // （1小節だけの範囲は、同じ小節に両方の印がある）
+// （自由な文字のテンポの指示：gradual に "none"（再生では変えない）も入るようにした。
+//   書く文字 gradualText と、点線を引かない印 gradualDashes: false も、範囲といっしょに覚える）
 //   measures … 楽譜全体の小節の情報（score.measures）
-// 戻り値：[{ from: 始まりの小節, to: 終わりの小節, type: "rit" か "accel" }, ...]
+// 戻り値：[{ from: 始まりの小節, to: 終わりの小節, type: "rit"・"accel"・"none", text: 書く文字（なければ null）, dashes: 点線を引くか }, ...]
 //         （「ここまで」がない「ここから」・「ここから」がない「ここまで」は入れない）
 // ----------------------------------------------------------
 export function gradualRanges(measures) {
   const ranges = [];
   let open = null; // 「ここから」があって、まだ「ここまで」が来ていない範囲
   measures.forEach((info, i) => {
-    if (info.gradual) open = { from: i, type: info.gradual }; // 新しい「ここから」（前に開いていたものは捨てる）
+    // 新しい「ここから」（前に開いていたものは捨てる）
+    if (info.gradual) open = { from: i, type: info.gradual, text: info.gradualText ?? null, dashes: info.gradualDashes !== false };
     if (info.gradualEnd && open) {
-      ranges.push({ from: open.from, to: i, type: open.type });
+      ranges.push({ from: open.from, to: i, type: open.type, text: open.text, dashes: open.dashes });
       open = null;
     }
   });
@@ -1502,17 +1505,24 @@ export function gradualRanges(measures) {
 // ----------------------------------------------------------
 // 関数：setGradualMarks
 // 小節の情報の rit.・accel. の印を、全部消してから、ranges のとおりに付け直す（ステップ11-6b）
+// （自由な文字のテンポの指示：書く文字 gradualText と、点線を引かない印 gradualDashes も付け直す）
 //   measures … 楽譜全体の小節の情報（コピーしたものを渡す。中身を書き換える）
-//   ranges   … [{ from, to, type }, ...]
+//   ranges   … [{ from, to, type, text, dashes }, ...]（text・dashes は、なくてもよい）
 // ----------------------------------------------------------
 function setGradualMarks(measures, ranges) {
   measures.forEach((info) => {
     delete info.gradual;
     delete info.gradualEnd;
+    delete info.gradualText;
+    delete info.gradualDashes;
   });
   ranges.forEach((range) => {
     measures[range.from].gradual = range.type;
     measures[range.to].gradualEnd = true;
+    // 自由な文字のときだけ、書く文字を持つ（rit.・accel. のボタンで付けたものは持たない）
+    if (range.text) measures[range.from].gradualText = range.text;
+    // 点線を引かないときだけ、印を持つ（ないときは今までどおり点線を引く）
+    if (range.dashes === false) measures[range.from].gradualDashes = false;
   });
 }
 
@@ -1521,6 +1531,7 @@ function setGradualMarks(measures, ranges) {
 // from 小節目から to 小節目までに、rit.（だんだん遅く）か accel.（だんだん速く）を付ける（ステップ11-6b）
 // from 小節目でもう同じ種類が始まっていたら、その範囲を外す
 // 付けるときは、範囲に重なっていた rit.・accel. を外す（重ならないようにする）
+// （自由な文字のテンポの指示：同じ種類でも、自由な文字（rall. など）が付いているときは外さずに、rit.・accel. に入れ替える）
 //   type … "rit" か "accel"
 // 戻り値：新しい楽譜データ
 // ----------------------------------------------------------
@@ -1528,14 +1539,47 @@ export function toggleGradual(score, from, to, type) {
   const newScore = cloneScore(score);
   const ranges = gradualRanges(newScore.measures);
   let next;
-  if (newScore.measures[from].gradual === type) {
-    // 同じ種類がここから始まっている：その範囲を外す
+  if (newScore.measures[from].gradual === type && !newScore.measures[from].gradualText) {
+    // 同じ種類（ボタンで付けたもの）がここから始まっている：その範囲を外す
     next = ranges.filter((range) => range.from !== from);
   } else {
     // 重なる範囲を外して、新しい範囲を足す
     next = ranges.filter((range) => range.to < from || range.from > to);
-    next.push({ from: from, to: to, type: type });
+    next.push({ from: from, to: to, type: type, text: null, dashes: true });
   }
+  setGradualMarks(newScore.measures, next);
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：setGradualText
+// from 小節目から to 小節目までに、自由な文字のテンポの指示（rall.・allargando など）を付ける（自由な文字のテンポの指示）
+// 範囲に重なっていた rit.・accel.・自由な文字は外す（toggleGradual と同じく、重ならないようにする）
+//   text   … 楽譜に書く文字（前後の空白は取る）
+//   type   … 再生での扱い："rit"（遅くする）・"accel"（速くする）・"none"（変えない）
+//   dashes … 文字のあとに、範囲の終わりまで点線を引くか（音1つを選んで付けたときは false）
+// 戻り値：新しい楽譜データ（文字が空なら、何も変えない楽譜データ）
+// ----------------------------------------------------------
+export function setGradualText(score, from, to, text, type, dashes) {
+  const newScore = cloneScore(score);
+  const trimmed = String(text ?? "").trim();
+  if (trimmed === "") return newScore;
+  const ranges = gradualRanges(newScore.measures);
+  const next = ranges.filter((range) => range.to < from || range.from > to);
+  next.push({ from: from, to: to, type: type, text: trimmed, dashes: dashes });
+  setGradualMarks(newScore.measures, next);
+  return newScore;
+}
+
+// ----------------------------------------------------------
+// 関数：removeGradual
+// from 小節目から始まっている rit.・accel.・自由な文字の範囲を外す（自由な文字のテンポの指示）
+// （［文字…］の欄の［外す］で使う）
+// 戻り値：新しい楽譜データ
+// ----------------------------------------------------------
+export function removeGradual(score, from) {
+  const newScore = cloneScore(score);
+  const next = gradualRanges(newScore.measures).filter((range) => range.from !== from);
   setGradualMarks(newScore.measures, next);
   return newScore;
 }

@@ -738,6 +738,7 @@ function drawEndings(context, lineEndings) {
 //   ・途中のテンポ変更 … 「Andante ♩ = 60」
 //   ・a tempo          … 「a tempo」
 //   ・rit.・accel.     … 「rit.」のあと、範囲の終わりの小節の終わりまで点線（段をまたぐときは、次の段の頭から続ける）
+//                        （自由な文字のテンポの指示：rall. などの自由な文字も同じ。音1つに付けたものは文字だけ）
 // 同じ小節にいくつかあるときは、この順に左から並べる
 // （ステップ11-7c：D.C.・D.S. で使う印も、同じ高さに描く）
 //   ・𝄋・𝄌（小節の頭）           … テンポの指示より左（小節のいちばん左）
@@ -795,9 +796,13 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   const endMarksLeft = drawEndJumpMarks(context, info, measureEnd - 6, y);
 
   // ③ rit.・accel. の始まり：文字を書いて、そのすぐ右から点線を始める
+  // （自由な文字のテンポの指示：gradualText（rall. など）があれば、その文字を書く。
+  //   gradualDashes が false（音1つを選んで付けたもの）なら、文字だけ書いて点線は引かない）
   let dashFrom;
   if (info.gradual) {
-    dashFrom = drawTempoWords(context, GRADUAL_TEXTS[info.gradual] ?? info.gradual, x, y) + GRADUAL_DASH_GAP;
+    const text = info.gradualText ?? GRADUAL_TEXTS[info.gradual] ?? info.gradual;
+    dashFrom = drawTempoWords(context, text, x, y) + GRADUAL_DASH_GAP;
+    if (info.gradualDashes === false) return null;
   } else if (gradualLine) {
     // 前の小節から続いている：同じ段なら前の続きから、新しい段なら段の頭から
     dashFrom = gradualLine.line === l ? gradualLine.x : x;

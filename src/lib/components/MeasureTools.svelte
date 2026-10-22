@@ -10,8 +10,10 @@
   // （ステップ11-6a：途中のテンポ変更を追加）
   // （ステップ15-1：アウフタクトを追加）
   // （ステップ17-1：調の一覧を model.js の KEY_CHOICES から読むようにした）
+  // （自由な文字のテンポの指示：［文字…］のボタンと、文字を入れる欄を追加）
   // ==========================================================
   import { KEY_CHOICES } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）
+  import { tempoWordKind } from "#lib/score/tempoWords.js"; // 文字から、テンポの変化の意味を当てる（自由な文字のテンポの指示）
 
   // 親から受け取るもの
   //   canDelete   … 小節を消せるか（何も選んでいない・小節が1つしか残らないときは false）
@@ -32,7 +34,11 @@
   //   currentGradual … 選んでいる小節（範囲なら最初の小節）の rit.・accel.・a tempo（ボタンを青くするのに使う）（ステップ11-6b）
   //                    { gradual: その小節から始まる "rit" か "accel"（なければ null）, aTempo: a tempo が付いているか }
   //                    何も選んでいないときは null
+  //                    （自由な文字のテンポの指示：text（その小節から始まる自由な文字。なければ null）も入る。
+  //                      gradual には "none"（再生では変えない）も入る）
   //   ongradual      … ［rit.］［accel.］が押されたときに呼ぶ関数（"rit" か "accel" を渡す）（ステップ11-6b）
+  //                    （自由な文字のテンポの指示：［文字…］の欄の［付ける］では (再生での扱い, 文字) を、
+  //                      ［外す］では (null, "") を渡す）
   //   onatempo       … ［a tempo］が押されたときに呼ぶ関数（ステップ11-6b）
   let {
     canDelete = false,
@@ -64,6 +70,115 @@
     tempoNumber = currentTempo ? String(currentTempo.tempo) : "";
     tempoWord = currentTempo ? currentTempo.tempoText : "";
   });
+
+  // ===== 自由な文字のテンポの指示（rall.・allargando など） =====
+
+  // 文字の候補（入力欄に文字を入れると、前が同じ候補が出る）
+  const GRADUAL_WORDS = ["rall.", "allarg.", "allargando", "ritenuto", "poco rit.", "molto rit.", "poco a poco rit.", "calando", "morendo", "smorzando", "stringendo", "poco a poco accel."];
+
+  // 再生での扱いのボタン（type は、楽譜データの gradual に入れるもの）
+  const GRADUAL_EFFECTS = [
+    { type: "rit", name: "遅くする", title: "再生では、rit. と同じように、だんだん遅くする" },
+    { type: "accel", name: "速くする", title: "再生では、accel. と同じように、だんだん速くする" },
+    { type: "none", name: "変えない", title: "再生では、速さを変えない（文字を書くだけ）" },
+  ];
+
+  // 文字を入れる欄を開いているか
+  let textPanelOpen = $state(false);
+
+  // 欄に入っている文字と、選んでいる再生での扱い
+  let gradualText = $state("");
+  let gradualEffect = $state("none");
+
+  // 再生での扱いを、自分でボタンを押して選んだか（選んだら、そのあとは文字を打っても自動では変えない）
+  let effectChosen = $state(false);
+
+  // 入れた文字が「a tempo」などのときは、［a tempo］ボタンを使うように案内する
+  let isATempoText = $derived(tempoWordKind(gradualText) === "aTempo");
+
+  // 欄を開いているときに、選んでいる小節が変わったら（付けた・外したあとも）、欄の中身をその小節のものにする
+  $effect(() => {
+    const current = currentGradual; // 選んでいる小節の rit.・accel.・自由な文字
+    if (!textPanelOpen) return;
+    fillTextPanel(current);
+  });
+
+  // ----------------------------------------------------------
+  // 関数：fillTextPanel
+  // 文字を入れる欄に、その小節の今の自由な文字と、再生での扱いを入れる
+  // （自由な文字がない小節なら、欄を空にして「変えない」にしておく）
+  //   current … currentGradual（選んでいる小節の rit.・accel.・自由な文字）
+  // ----------------------------------------------------------
+  function fillTextPanel(current) {
+    if (current?.text) {
+      gradualText = current.text;
+      gradualEffect = current.gradual ?? "none";
+      effectChosen = true; // 付けたときの扱いを、そのまま残す
+    } else {
+      gradualText = "";
+      gradualEffect = "none";
+      effectChosen = false;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 関数：toggleTextPanel
+  // ［文字…］が押されたとき：文字を入れる欄を開く・閉じる
+  // ----------------------------------------------------------
+  function toggleTextPanel() {
+    textPanelOpen = !textPanelOpen;
+    if (textPanelOpen) fillTextPanel(currentGradual);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleGradualInput
+  // 文字を打つたびに呼ぶ：自分で扱いを選んでいなければ、言葉の表から再生での扱いを自動で選ぶ
+  // （表にない言葉は「変えない」）
+  // ----------------------------------------------------------
+  function handleGradualInput() {
+    if (effectChosen) return;
+    const kind = tempoWordKind(gradualText);
+    gradualEffect = kind === "rit" || kind === "accel" ? kind : "none";
+  }
+
+  // ----------------------------------------------------------
+  // 関数：chooseEffect
+  // 再生での扱いのボタンが押されたとき：その扱いにして、あとは自動で変えないようにする
+  //   type … "rit"・"accel"・"none"
+  // ----------------------------------------------------------
+  function chooseEffect(type) {
+    gradualEffect = type;
+    effectChosen = true;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：applyGradualText
+  // ［付ける］が押されたとき（欄で Enter を押したときも）：文字と再生での扱いを、親に渡して付けてもらい、欄を閉じる
+  // ----------------------------------------------------------
+  function applyGradualText() {
+    if (gradualText.trim() === "" || isATempoText) return;
+    ongradual(gradualEffect, gradualText);
+    textPanelOpen = false;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：removeGradualText
+  // ［外す］が押されたとき：その小節から始まる文字（rit.・accel. も）を外して、欄を閉じる
+  // ----------------------------------------------------------
+  function removeGradualText() {
+    ongradual(null, "");
+    textPanelOpen = false;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleGradualKeydown
+  // 文字の欄で Enter が押されたら［付ける］、Esc が押されたら欄を閉じる
+  // （日本語の変換を決めるための Enter では動かないようにする）
+  // ----------------------------------------------------------
+  function handleGradualKeydown(event) {
+    if (event.key === "Enter" && !event.isComposing) applyGradualText();
+    if (event.key === "Escape") textPanelOpen = false;
+  }
 
   // ----------------------------------------------------------
   // 関数：handleTempoKeydown
@@ -264,9 +379,10 @@
     <!-- rit.・accel.・a tempo（ステップ11-6b） -->
     <!-- rit.・accel. は、範囲を選んでいれば範囲にかかる小節、音1つならその小節に付ける。ここから始まっている所でもう一度押すと外れる -->
     <div class="group">
+      <!-- （自由な文字のテンポの指示：自由な文字が付いているときは、［rit.］［accel.］は青くしない（［文字…］を青くする）） -->
       <button
         class="words"
-        class:active={currentGradual?.gradual === "rit"}
+        class:active={currentGradual?.gradual === "rit" && !currentGradual?.text}
         disabled={!currentGradual}
         onclick={() => ongradual("rit")}
         title="リタルダンド（だんだん遅く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん遅くする"
@@ -275,7 +391,7 @@
       </button>
       <button
         class="words"
-        class:active={currentGradual?.gradual === "accel"}
+        class:active={currentGradual?.gradual === "accel" && !currentGradual?.text}
         disabled={!currentGradual}
         onclick={() => ongradual("accel")}
         title="アッチェレランド（だんだん速く）：範囲を選んでいるときは、範囲にかかる小節の間でだんだん速くする"
@@ -291,8 +407,66 @@
       >
         a tempo
       </button>
+      <!-- 自由な文字（rall.・allargando など）：押すと、下に文字を入れる欄が開く（自由な文字のテンポの指示） -->
+      <button
+        class="words-free"
+        class:active={!!currentGradual?.text}
+        class:open={textPanelOpen}
+        disabled={!currentGradual}
+        onclick={toggleTextPanel}
+        title="自由な文字（rall.・allargando など）：範囲を選んでいるときは、範囲にかかる小節の終わりまで点線を引く。音1つのときは文字だけ"
+      >
+        文字…
+      </button>
     </div>
   </div>
+
+  <!-- 3行目：自由な文字を入れる欄（［文字…］を押したときだけ出す）（自由な文字のテンポの指示） -->
+  {#if textPanelOpen && currentGradual}
+    <div class="row text-panel">
+      <div class="group">
+        <span class="label">文字</span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          class="gradual-text"
+          type="text"
+          list="measure-gradual-words"
+          placeholder="rall. など"
+          bind:value={gradualText}
+          oninput={handleGradualInput}
+          onkeydown={handleGradualKeydown}
+          autofocus
+          title="楽譜に書く文字（rall.・allargando など）"
+        />
+        <datalist id="measure-gradual-words">
+          {#each GRADUAL_WORDS as word}
+            <option value={word}></option>
+          {/each}
+        </datalist>
+      </div>
+
+      <!-- 再生での扱い：文字を打つと、言葉の表で自動で選ぶ（自分で押したら、そのあとは自動で変えない） -->
+      <div class="group">
+        <span class="label">再生では</span>
+        {#each GRADUAL_EFFECTS as effect (effect.type)}
+          <button class:active={gradualEffect === effect.type} onclick={() => chooseEffect(effect.type)} title={effect.title}>
+            {effect.name}
+          </button>
+        {/each}
+      </div>
+
+      <div class="group">
+        <button disabled={gradualText.trim() === "" || isATempoText} onclick={applyGradualText} title="選んでいる小節（範囲を選んでいるときは、範囲にかかる小節）に付ける"> 付ける </button>
+        <button disabled={!currentGradual.gradual} onclick={removeGradualText} title="選んでいる小節から始まる文字（rit.・accel. も）を外す"> 外す </button>
+        <button onclick={() => (textPanelOpen = false)} title="欄を閉じる（Esc キーでも閉じる）"> 閉じる </button>
+      </div>
+
+      <!-- 「a tempo」などは、自由な文字ではなく［a tempo］ボタンで付ける（再生で元の速さに戻すため） -->
+      {#if isATempoText}
+        <p class="text-note">「a tempo」は、上の［a tempo］ボタンで付けてください。</p>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -416,5 +590,26 @@
   button.words {
     font-style: italic;
     padding: 0 10px;
+  }
+  /* ［文字…］のボタン：欄を開いているときは、うすい青の枠にする（自由な文字のテンポの指示） */
+  button.words-free.open:not(.active) {
+    border-color: #2563eb;
+    color: #2563eb;
+  }
+  /* 自由な文字を入れる欄の行：上にうすい線を引いて、2行目と分ける（自由な文字のテンポの指示） */
+  .text-panel {
+    padding-top: 10px;
+    border-top: 1px dashed #ddd;
+  }
+  /* 文字の入力欄：楽譜と同じく斜めの文字で見せる */
+  .gradual-text {
+    width: 160px;
+    font-style: italic;
+  }
+  /* 「a tempo は［a tempo］ボタンで」の案内 */
+  .text-note {
+    margin: 0;
+    font-size: 13px;
+    color: #b45309;
   }
 </style>
