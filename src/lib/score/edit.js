@@ -2120,6 +2120,7 @@ export function timeRangeEnd(score, from, to) {
 //   ・アウフタクトの長さ（ティック）はそのままにして、新しい拍子の拍の数に数え直す
 //   ・新しい拍子の拍の数で割り切れない・新しい1小節より短くならないときは、何も変えずに知らせる
 //     例：4/4 で4分音符1つ分 → 6/8 なら8分音符2つ分（OK）、2/2 なら半分の拍になる（変えられない）
+// （途中の短い小節：範囲の中の、続きの小節・前の部分の小節・短い最後の小節も、アウフタクトと同じ決まりで数え直す）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文, overflow: 入りきらない音があったか }
 //   （何も変わらないとき・入りきらないときは、元の楽譜データのまま）
 //   （ステップ18-4：入りきらないときは overflow を true にする。編集ページが「後ろへ流し直すか」をたずねるのに使う）
@@ -2131,34 +2132,30 @@ export function changeTime(score, from, to, time) {
   //    （ステップ18-4：timeRangeEnd に分けた）
   const last = timeRangeEnd(score, from, to);
 
-  // ①-2 アウフタクトの拍の数を、新しい拍子で数え直す（1小節目を変えるときだけ）（ステップ15-1）
+  // ①-2 範囲の中の短い小節（アウフタクト・続き・前の部分・短い最後の小節）の拍の数を、新しい拍子で数え直す
+  // （ステップ15-1：アウフタクト、ステップ20：短い最後の小節）
+  // （途中の短い小節：どの小節の short・pickup も、同じ決まりで数え直すようにまとめた）
+  //   ・長さ（ティック）はそのままにして、新しい拍子の拍の数に数え直す
+  //   ・割り切れない・1小節と同じか長くなるときは、何も変えずに知らせる
+  //     例：4/4 で4分音符1つ分 → 6/8 なら8分音符2つ分（OK）、2/2 なら半分の拍になる（変えられない）
   const full = measureTicks(time); // 新しい拍子の1小節の長さ
-  let newPickup = null; // 新しい拍子でのアウフタクトの拍の数（変えないときは null）
-  if (from === 0 && hasPickup(score)) {
-    const unit = full / time.beats; // 新しい拍子の、下の数字の音符1つ分
-    const pickupCount = measureLength(score, 0) / unit;
-    if (!Number.isInteger(pickupCount) || pickupCount >= time.beats) {
-      return { score: score, error: "アウフタクトの長さが新しい拍子に合わないので、拍子を変えられません（先にアウフタクトの長さを変えてください）" };
+  const unit = full / time.beats; // 新しい拍子の、下の数字の音符1つ分
+  const newCounts = new Map(); // 小節の番号 → { kind: "short" か "pickup", count: 新しい拍の数 }
+  for (let m = from; m <= last; m++) {
+    const now = measureLengthKind(score, m);
+    if (now.kind === "normal") continue;
+    const newCount = measureLength(score, m) / unit;
+    if (!Number.isInteger(newCount) || newCount >= time.beats) {
+      return { score: score, error: `${measureName(score, m)}の長さが新しい拍子に合わないので、拍子を変えられません（先に「小節」タブで、その小節の長さを「拍子どおり」にしてください）` };
     }
-    newPickup = pickupCount;
-  }
-
-  // ①-3 短い最後の小節の拍の数を、新しい拍子で数え直す（最後の小節を変えるときだけ）（ステップ20）
-  const lastIndex = count - 1;
-  let newShort = null; // 新しい拍子での、短い最後の小節の拍の数（変えないときは null）
-  if (last === lastIndex && isShortEnd(score, lastIndex) && !(lastIndex === 0 && newPickup !== null)) {
-    const unit = full / time.beats;
-    const shortCount = measureLength(score, lastIndex) / unit;
-    if (!Number.isInteger(shortCount) || shortCount >= time.beats) {
-      return { score: score, error: "最後の小節の長さが新しい拍子に合わないので、拍子を変えられません（先に「楽譜の設定」タブで最後の小節の長さを変えてください）" };
-    }
-    newShort = shortCount;
+    newCounts.set(m, { kind: now.kind, count: newCount });
   }
 
   // ② 入りきらない音がないか、全パート・全小節を先に調べる
   // （アウフタクトの小節は、アウフタクトの長さで調べる（ステップ15-1））
   // （ステップ20：短い最後の小節は、その長さで調べる）
-  const totalAt = (m) => (m === 0 && newPickup !== null ? measureLength(score, 0) : m === lastIndex && newShort !== null ? measureLength(score, lastIndex) : full);
+  // （途中の短い小節：短い小節は、どれもその長さで調べる）
+  const totalAt = (m) => (newCounts.has(m) ? measureLength(score, m) : full);
   for (const part of score.parts) {
     for (let m = from; m <= last; m++) {
       const notes = part.measures[m].notes;
@@ -2194,10 +2191,11 @@ export function changeTime(score, from, to, time) {
   newScore.measures[from].time = { beats: time.beats, beatType: time.beatType };
   // コモンタイム・カットタイムなら、その印も書く（ステップ8-1b）
   if (time.symbol) newScore.measures[from].time.symbol = time.symbol;
-  // アウフタクトの拍の数を、新しい拍子で数え直したものにする（ステップ15-1）
-  if (newPickup !== null) newScore.measures[0].pickup = newPickup;
-  // 短い最後の小節の拍の数も、新しい拍子で数え直したものにする（ステップ20）
-  if (newShort !== null) newScore.measures[lastIndex].short = newShort;
+  // 短い小節（アウフタクト・続き・前の部分・短い最後の小節）の拍の数を、新しい拍子で数え直したものにする
+  // （ステップ15-1・ステップ20。途中の短い小節：どの小節も同じ決まりにまとめた）
+  newCounts.forEach(({ kind, count: newCount }, m) => {
+    newScore.measures[m][kind] = newCount;
+  });
   // 範囲の中にあった、ほかの拍子の変化は消す
   for (let m = from + 1; m <= last; m++) {
     delete newScore.measures[m].time;
@@ -2298,36 +2296,20 @@ export function pickupChoices(time) {
 //   count … アウフタクトの拍の数（拍子の下の数字の音符がいくつ分か）。0 ならアウフタクトをやめる
 // 全パートの1小節目を、resizeFromFront で新しい長さにする
 // 短くするときに、取りのぞく所に音符があるパートが1つでもあれば、何も変えずに知らせる
+// （途中の短い小節：「小節」タブの「長さ」の欄と同じ setMeasureLength を使うようにした。
+//   1小節目を「前の部分」にしてあっても、short と pickup が両方残らないようにするため）
+//   ・アウフタクトにする・長さを変える → 1小節目を「続き（後ろの部分）」にする（1小節目の続き＝アウフタクト）
+//   ・やめる（0）→ 1小節目がアウフタクトのときだけ、拍子どおりに戻す
+//                  （1小節目が「前の部分」のときは、アウフタクトではないので何もしない）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
 //   （長さが変わらないとき・変えられないときは、元の楽譜データのまま）
 // ----------------------------------------------------------
 export function setPickup(score, count) {
-  const time = timeAt(score, 0);
-  // 選べない数（1小節より長い・小数など）なら何もしない（ボタンからは来ないはず）
-  if (count !== 0 && !pickupChoices(time).includes(count)) return { score: score, error: "" };
-
-  const full = measureTicks(time); // 拍子どおりの1小節の長さ
-  const oldLength = measureLength(score, 0); // 今の1小節目の長さ
-  const newLength = count === 0 ? full : (full / time.beats) * count; // 新しい1小節目の長さ
-  if (newLength === oldLength) return { score: score, error: "" };
-
-  const newScore = cloneScore(score);
-  // パートごとに、1小節目の長さを変える
-  for (const part of newScore.parts) {
-    const resized = resizeFromFront(part.measures[0].notes, oldLength, newLength, time);
-    if (!resized) {
-      return { score: score, error: `${part.name} の1小節目の前のほうに音があるので、アウフタクトをこの長さにできません` };
-    }
-    part.measures[0].notes = resized;
-  }
-
-  // 1小節目の情報に、拍の数を書く（やめるときは消す）
   if (count === 0) {
-    delete newScore.measures[0].pickup;
-  } else {
-    newScore.measures[0].pickup = count;
+    if (!isContinuation(score, 0)) return { score: score, error: "" };
+    return setMeasureLength(score, 0, "normal", 0);
   }
-  return { score: newScore, error: "" };
+  return setMeasureLength(score, 0, "pickup", count);
 }
 
 // ----------------------------------------------------------
@@ -2346,39 +2328,22 @@ export function canShortEnd(score) {
 //   count … 最後の小節の拍の数（拍子の下の数字の音符がいくつ分か）。0 ならふつうの長さに戻す
 // 全パートの最後の小節を、resizeFromBack で新しい長さにする（後ろの休符を消す・足す）
 // 短くするときに、取りのぞく所に音符があるパートが1つでもあれば、何も変えずに知らせる
+// （途中の短い小節：「小節」タブの「長さ」の欄と同じ setMeasureLength を使うようにした）
+//   ・短くする・長さを変える → 最後の小節を「前の部分」にする
+//   ・ふつうの長さに戻す（0）→ 最後の小節が「前の部分」のときだけ、拍子どおりに戻す
+//                              （最後の小節が「続き」のときは、短い最後の小節ではないので何もしない）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
 //   （長さが変わらないとき・変えられないときは、元の楽譜データのまま）
 // ----------------------------------------------------------
 export function setShortEnd(score, count) {
   const last = score.measures.length - 1;
-  const time = timeAt(score, last);
-  // 選べない数・短くできない楽譜なら何もしない（欄からは来ないはず）
+  // 短くできない楽譜なら何もしない（欄からは来ないはず）
   if (!canShortEnd(score)) return { score: score, error: "" };
-  if (count !== 0 && !pickupChoices(time).includes(count)) return { score: score, error: "" };
-
-  const full = measureTicks(time); // 拍子どおりの1小節の長さ
-  const oldLength = measureLength(score, last); // 今の最後の小節の長さ
-  const newLength = count === 0 ? full : (full / time.beats) * count; // 新しい長さ
-  if (newLength === oldLength) return { score: score, error: "" };
-
-  const newScore = cloneScore(score);
-  // パートごとに、最後の小節の長さを変える
-  for (const part of newScore.parts) {
-    const resized = resizeFromBack(part.measures[last].notes, newLength, time);
-    if (!resized) {
-      return { score: score, error: `${part.name} の最後の小節の後ろのほうに音があるので、最後の小節をこの長さにできません` };
-    }
-    part.measures[last].notes = resized;
-    cleanSpanners(part); // 消えた休符に付いていた印などを整える
-  }
-
-  // 最後の小節の情報に、拍の数を書く（戻すときは消す）
   if (count === 0) {
-    delete newScore.measures[last].short;
-  } else {
-    newScore.measures[last].short = count;
+    if (!isShortMeasure(score, last)) return { score: score, error: "" };
+    return setMeasureLength(score, last, "normal", 0);
   }
-  return { score: newScore, error: "" };
+  return setMeasureLength(score, last, "short", count);
 }
 
 // ==========================================================
