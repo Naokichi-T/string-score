@@ -16,7 +16,8 @@
 //   render/alternate.js … 2音トレモロの2つ目の音符と連桁を描く（ステップ14-6a）
 // ==========================================================
 
-import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, measureNumber, measureLength } from "./model.js";
+// （途中の短い小節：段の頭の小節番号の文字を作る measureNumberLabel を足した（続きの小節は "(8)" と書く））
+import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, measureNumberLabel, measureLength } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
 import { createNote, vexStemDirection } from "./render/notes.js";
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
@@ -321,9 +322,10 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
     // 2段目からは、段の頭の小節番号を書く（ステップ13-2）
     // 下書きでも描く（下書きで測ったはみ出しに入るので、上の段と重ならないように間があく）
     // （ステップ15-1：アウフタクトがあるときは、アウフタクトを数えない番号（measureNumber）にする）
+    // （途中の短い小節：段の頭が続きの小節なら、かっこ付きの番号（例："(8)"）にする）
     if (l > 0) {
       const topY = staveYs[l][0]; // いちばん上のパートの五線を置く高さ
-      drawMeasureNumber(VF, context, measureNumber(score, line.measures[0]), otherLeft, topY);
+      drawMeasureNumber(VF, context, measureNumberLabel(score, line.measures[0]), otherLeft, topY);
     }
 
     line.measures.forEach((i, m) => {

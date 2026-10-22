@@ -11,7 +11,9 @@
   // （ステップ15-1：アウフタクトを追加）
   // （ステップ17-1：調の一覧を model.js の KEY_CHOICES から読むようにした）
   // （自由な文字のテンポの指示：［文字…］のボタンと、文字を入れる欄を追加）
+  // （途中の短い小節：選んでいる小節の「長さ」の欄を追加（前の部分・続き））
   // ==========================================================
+  import { tick } from "svelte"; // 親が楽譜を変えるのを待つ（途中の短い小節）
   import { KEY_CHOICES } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）
   import { tempoWordKind } from "#lib/score/tempoWords.js"; // 文字から、テンポの変化の意味を当てる（自由な文字のテンポの指示）
 
@@ -40,6 +42,10 @@
   //                    （自由な文字のテンポの指示：［文字…］の欄の［付ける］では (再生での扱い, 文字) を、
   //                      ［外す］では (null, "") を渡す）
   //   onatempo       … ［a tempo］が押されたときに呼ぶ関数（ステップ11-6b）
+  //   currentLength  … 選んでいる小節（範囲なら最初の小節）の長さ（途中の短い小節）
+  //                    { time: その小節の拍子, kind: "normal"・"short"・"pickup", count: 拍の数, first: 1小節目か }
+  //                    何も選んでいないときは null
+  //   onlength       … 「長さ」の欄で選んだときに呼ぶ関数（kind と count を渡す）（途中の短い小節）
   let {
     canDelete = false,
     onmeasure = () => {},
@@ -55,7 +61,53 @@
     currentGradual = null,
     ongradual = () => {},
     onatempo = () => {},
+    currentLength = null,
+    onlength = () => {},
   } = $props();
+
+  // ===== 小節の長さ（途中の短い小節） =====
+
+  // 選べる拍の数（1拍から「1小節の拍の数 − 1」拍まで。edit.js の pickupChoices と同じ決まり）
+  // 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]
+  let lengthCounts = $derived(currentLength ? Array.from({ length: Math.max(0, currentLength.time.beats - 1) }, (_, k) => k + 1) : []);
+
+  // 欄に出す今の値（"normal"・"short:3"・"pickup:1" のような文字）
+  let lengthValue = $derived(currentLength ? lengthKey(currentLength.kind, currentLength.count) : "normal");
+
+  // ----------------------------------------------------------
+  // 関数：lengthKey
+  // 長さの種類と拍の数を、選ぶ欄の値の文字にする（途中の短い小節）
+  // 例：("short", 3) → "short:3"、("normal", 0) → "normal"
+  // ----------------------------------------------------------
+  function lengthKey(kind, count) {
+    return kind === "normal" ? "normal" : `${kind}:${count}`;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：lengthLabel
+  // 選ぶ欄に出す長さの文字を返す（途中の短い小節）
+  // 欄を閉じているときにも、前の部分か続きかが分かるように、種類の名前を前に付ける
+  //   kind  … "short"（前の部分）か "pickup"（続き。1小節目ならアウフタクト）
+  //   count … 拍の数
+  // 例：4/4 で ("short", 3) → "前の部分：4分音符3つ"、("pickup", 1) → "続き：4分音符1つ"
+  // ----------------------------------------------------------
+  function lengthLabel(kind, count) {
+    const name = kind === "short" ? "前の部分" : currentLength.first ? "アウフタクト" : "続き";
+    return `${name}：${currentLength.time.beatType}分音符${count}つ`;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：pickLength
+  // 「長さ」の欄で選んだとき：親に種類と拍の数を渡す（途中の短い小節）
+  // 変えられなかったとき（詰める所に音があるときなど）は、欄の表示を今の長さに戻す
+  //   select … 選ぶ欄の要素
+  // ----------------------------------------------------------
+  async function pickLength(select) {
+    const [kind, count] = select.value.split(":");
+    onlength(kind, Number(count ?? 0));
+    await tick(); // 親が楽譜を変えて、新しい値が届くのを待つ
+    select.value = lengthValue;
+  }
 
   // 速度記号の候補（「楽譜の設定」タブと同じもの）（ステップ11-6a）
   // 入力欄に文字を入れると、前が同じ候補が出る（datalist というしくみ）
@@ -334,7 +386,8 @@
     </div>
   </div>
 
-  <!-- 2行目：調、テンポ、rit.・accel.・a tempo -->
+  <!-- 2行目：調、長さ、テンポ、rit.・accel.・a tempo -->
+  <!-- （途中の短い小節：調の右に「長さ」の欄を足した） -->
   <!-- （ステップ20：アウフタクトの欄は「楽譜の設定」タブへ移した） -->
   <div class="row">
     <!-- 調：選んだらすぐ変わる（今の小節の調が選ばれた状態で出る） -->
@@ -349,6 +402,33 @@
         {#each KEYS as item}
           <option value={item.key}>{item.name}</option>
         {/each}
+      </select>
+    </div>
+
+    <!-- 小節の長さ（途中の短い小節） -->
+    <!-- くり返し記号の前で終わる小節（前の部分）と、くり返し記号のあとの続きの小節（続き）を作る -->
+    <div class="group">
+      <span class="label">長さ</span>
+      <select
+        value={lengthValue}
+        disabled={!currentLength || lengthCounts.length === 0}
+        onchange={(event) => pickLength(event.currentTarget)}
+        title="選んでいる小節を、拍子より短い小節にする。前の部分：小節の頭から（小節番号に数える。くり返し記号の前で終わる小節など）。続き：小節の後ろの部分（小節番号に数えない。くり返し記号のあとの、前の小節の続きなど）"
+      >
+        <option value="normal">拍子どおり</option>
+        {#if currentLength}
+          <optgroup label="前の部分（番号に数える）">
+            {#each lengthCounts as count}
+              <option value={lengthKey("short", count)}>{lengthLabel("short", count)}</option>
+            {/each}
+          </optgroup>
+          <!-- 1小節目の続きはアウフタクトなので、名前を変えて出す -->
+          <optgroup label={currentLength.first ? "アウフタクト（番号に数えない）" : "続き（番号に数えない）"}>
+            {#each lengthCounts as count}
+              <option value={lengthKey("pickup", count)}>{lengthLabel("pickup", count)}</option>
+            {/each}
+          </optgroup>
+        {/if}
       </select>
     </div>
 

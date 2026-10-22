@@ -4,7 +4,8 @@
 // 小節の頭に付ける記号（音部記号・調号・拍子記号）を扱う
 // ==========================================================
 
-import { CLEFS, hasPickup, measureOffset, isShortEnd } from "../model.js";
+// （途中の短い小節：hasPickup・isShortEnd のかわりに、どの小節でも使える isContinuation・isShortMeasure を使うようにした）
+import { CLEFS, measureOffset, isContinuation, isShortMeasure } from "../model.js";
 import { timeToSignature, keyToVexKey } from "./helpers.js";
 
 // 2段目からの段の頭で、音部記号・調号と最初の音符の間に空けるすき間（ピクセル）
@@ -26,6 +27,8 @@ export const LINE_START_PADDING = 12;
 //               ふつうは拍子と同じ。アウフタクトの小節では、アウフタクトの拍の数（例：4/4 で1拍なら { beats: 1, beatType: 4 }）
 //   offset    … 小節の頭が、拍子どおりの1小節の中のどの位置にあたるか（ティック。model.js の measureOffset）
 //               アウフタクトの小節だけ 0 より大きい（拍の線・連桁のつなぎ方を、拍子どおりの位置にそろえるのに使う）
+//   （途中の短い小節：続きの小節（途中の pickup）もアウフタクトと同じ、前の部分だけの小節（途中の short）も
+//     短い最後の小節と同じように、その長さで声部を作る）
 // ----------------------------------------------------------
 export function buildStates(score) {
   const states = [];
@@ -55,9 +58,11 @@ export function buildStates(score) {
     });
 
     // 声部に渡す長さと、小節の頭の位置（ステップ15-1）
-    const isPickup = i === 0 && hasPickup(score);
+    // （途中の短い小節：アウフタクトだけでなく、続きの小節（pickup）も「後ろの部分」の小節として扱う）
+    const isPickup = isContinuation(score, i);
     // 短い最後の小節も、その長さで声部を作る（ステップ20）
-    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : isShortEnd(score, i) ? { beats: info.short, beatType: time.beatType } : time;
+    // （途中の短い小節：最後の小節だけでなく、どの小節の short も見る）
+    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : isShortMeasure(score, i) ? { beats: info.short, beatType: time.beatType } : time;
 
     states.push({
       time: time,

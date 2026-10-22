@@ -76,6 +76,8 @@
   //   currentGradual … 選んでいる小節の rit.・accel.・a tempo（「小節」タブで使う）（ステップ11-6b）
   //   ongradual    … ［rit.］［accel.］が押されたときに呼ぶ関数（「小節」タブで使う）（ステップ11-6b）
   //   onatempo     … ［a tempo］が押されたときに呼ぶ関数（「小節」タブで使う）（ステップ11-6b）
+  //   currentLength … 選んでいる小節の長さ { time, kind, count, first }（何も選んでいないときは null。「小節」タブで使う）（途中の短い小節）
+  //   onlength     … 「長さ」の欄で選んだときに呼ぶ関数（kind と count を渡す。「小節」タブで使う）（途中の短い小節）
   //   onkey        … 調を選んだときに呼ぶ関数（新しい調の数字を渡す。「小節」タブで使う）
   //   currentClef  … 選んでいるパート・小節の音部記号（何も選んでいないときは null。「小節」タブで使う）
   //   onclef       … 音部記号のボタンが押されたときに呼ぶ関数（「小節」タブで使う）
@@ -178,6 +180,8 @@
     currentGradual = null,
     ongradual = () => {},
     onatempo = () => {},
+    currentLength = null,
+    onlength = () => {},
     onkey = () => {},
     currentClef = null,
     onclef = () => {},
@@ -488,6 +492,8 @@
         {currentGradual}
         {ongradual}
         {onatempo}
+        {currentLength}
+        {onlength}
       />
     {:else if activeTab === "barline"}
       <BarlineTools current={currentBarline} {onbarline} {onrepeatmark} {onending} {onjumpmark} {onjump} />

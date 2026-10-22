@@ -80,6 +80,8 @@
     setPickup,
     setShortEnd, // 最後の小節を短くする（ステップ20）
     canShortEnd,
+    measureLengthKind, // 小節の今の長さの種類（途中の短い小節）
+    setMeasureLength, // どの小節でも長さを変える（途中の短い小節）
     changeKey,
     changeClef,
     clefAt,
@@ -1681,6 +1683,33 @@
     commit(result.score, newSelection);
   }
 
+  // 「小節」タブの「長さ」の欄に出す、選んでいる小節（範囲なら最初の小節）の長さ（途中の短い小節）
+  //   { time: その小節の拍子, kind: "normal"・"short"・"pickup", count: 拍の数, first: 1小節目か }（何も選んでいなければ null）
+  let lengthMeasure = $derived(range ? range.start.measure : selection ? selection.measure : null);
+  let currentLength = $derived(lengthMeasure === null ? null : { time: timeAt(score, lengthMeasure), ...measureLengthKind(score, lengthMeasure), first: lengthMeasure === 0 });
+
+  // ----------------------------------------------------------
+  // 関数：handleMeasureLength
+  // 「小節」タブの「長さ」の欄で選んだとき（途中の短い小節）
+  //   kind  … "normal"（拍子どおり）・"short"（前の部分）・"pickup"（続き）
+  //   count … 拍の数
+  // 選んでいる小節（範囲なら最初の小節）に効く
+  // 詰める所に音があって変えられないときは、知らせて終わり（楽譜は変えない）
+  // 小節の中の音の数が変わるので、その小節の最初の音を選び直す（範囲は外す）
+  // ----------------------------------------------------------
+  function handleMeasureLength(kind, count) {
+    if (lengthMeasure === null) return;
+    message = "";
+    const m = lengthMeasure;
+    const result = setMeasureLength(score, m, kind, count);
+    if (result.error) {
+      message = result.error;
+      return;
+    }
+    // （範囲は、選んでいる音（selection）から作るので、範囲があるときも selection はある）
+    commit(result.score, { part: selection.part, measure: m, note: 0 });
+  }
+
   // 選んでいる小節の調（「小節」タブの調の選ぶ欄に出す。何も選んでいないときは1小節目）
   let currentKey = $derived(keyAt(score, selection ? selection.measure : 0));
 
@@ -2423,6 +2452,8 @@
       {currentGradual}
       ongradual={handleGradual}
       onatempo={handleATempo}
+      {currentLength}
+      onlength={handleMeasureLength}
       {currentBarline}
       onbarline={handleBarline}
       onrepeatmark={handleRepeatMark}

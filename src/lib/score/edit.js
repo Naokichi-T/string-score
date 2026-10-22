@@ -36,6 +36,8 @@ import {
   hasDiamond,
   canAlternate,
   isAlternate,
+  isContinuation, // 続きの小節（後ろの部分だけの小節）か（途中の短い小節）
+  isShortMeasure, // 前の部分だけの小節か（途中の短い小節）
 } from "./model.js";
 import { ARTICULATIONS, STRING_MARKS, TECHNIQUES, ALTERNATE_TREMOLO } from "./symbols.js";
 import { positionsInRange, selectedHead } from "./selection.js";
@@ -2376,6 +2378,97 @@ export function setShortEnd(score, count) {
   } else {
     newScore.measures[last].short = count;
   }
+  return { score: newScore, error: "" };
+}
+
+// ==========================================================
+// ここから下は、どの小節でも長さを変える関数（途中の短い小節）
+// 「小節」タブの「長さ」の欄で使う
+//   ・前の部分（short）… 小節の頭から決めた拍の数まで。小節番号に数える（くり返し記号の前で終わる小節など）
+//   ・続き（pickup）   … 小節の後ろの部分だけ。小節番号に数えない（くり返し記号のあとの、前の小節の続きなど）
+//                        1小節目の続きは、アウフタクトと同じもの
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：measureLengthKind
+// i 小節目の今の長さの種類と拍の数を返す（途中の短い小節）
+// 戻り値：{ kind: "normal"（拍子どおり）・"short"（前の部分）・"pickup"（続き）, count: 拍の数（拍子どおりなら 0） }
+// ----------------------------------------------------------
+export function measureLengthKind(score, i) {
+  if (isContinuation(score, i)) return { kind: "pickup", count: score.measures[i].pickup };
+  if (isShortMeasure(score, i)) return { kind: "short", count: score.measures[i].short };
+  return { kind: "normal", count: 0 };
+}
+
+// ----------------------------------------------------------
+// 関数：setMeasureLength
+// i 小節目の長さを変える（全パートいっしょに）（途中の短い小節）
+//   i     … 何小節目か（0 から）
+//   kind  … "normal"（拍子どおりに戻す）・"short"（前の部分）・"pickup"（続き）
+//   count … 拍の数（拍子の下の数字の音符がいくつ分か）。"normal" のときは使わない
+// 流れ
+//   ① 今の形から、いったん拍子どおりの長さに戻す
+//        前の部分だった → 後ろに休符を足す（resizeFromBack）
+//        続きだった     → 前に休符を足す（resizeFromFront）
+//   ② 新しい形にする
+//        前の部分にする → 後ろの側を詰める（resizeFromBack。短い最後の小節と同じやり方）
+//        続きにする     → 前の側を詰める（resizeFromFront。アウフタクトと同じやり方）
+//   詰める所に音符があるパートが1つでもあれば、何も変えずに知らせる
+// 1小節目を続きにすればアウフタクト、最後の小節を前の部分にすれば短い最後の小節になる
+// （「楽譜の設定」タブの欄と同じデータなので、どちらで変えても同じになる）
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+//   （長さが変わらないとき・変えられないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setMeasureLength(score, i, kind, count) {
+  const time = timeAt(score, i);
+  // 選べない数（1小節と同じか長い・小数など）なら何もしない（欄からは来ないはず）
+  if (kind !== "normal" && !pickupChoices(time).includes(count)) return { score: score, error: "" };
+
+  // 今と同じなら何もしない
+  const now = measureLengthKind(score, i);
+  if (now.kind === kind && (kind === "normal" || now.count === count)) return { score: score, error: "" };
+
+  const full = measureTicks(time); // 拍子どおりの1小節の長さ
+  const oldLength = measureLength(score, i); // 今の長さ
+  const newLength = kind === "normal" ? full : (full / time.beats) * count; // 新しい長さ
+  const name = measureName(score, i); // 知らせる文に使う小節の名前（変える前の名前）
+
+  const newScore = cloneScore(score);
+  for (const part of newScore.parts) {
+    let notes = part.measures[i].notes;
+
+    // ① いったん拍子どおりの長さに戻す
+    if (now.kind === "short") notes = resizeFromBack(notes, full, time);
+    if (now.kind === "pickup") notes = resizeFromFront(notes, oldLength, full, time);
+    if (!notes) {
+      // 長くするだけなので、ふつうは起きない（念のため）
+      return { score: score, error: `${part.name} の${name}の長さを変えられませんでした` };
+    }
+
+    // ② 新しい形にする
+    if (kind === "short") {
+      notes = resizeFromBack(notes, newLength, time);
+      if (!notes) {
+        return { score: score, error: `${part.name} の${name}の後ろのほうに音があるので、この長さにできません` };
+      }
+    }
+    if (kind === "pickup") {
+      notes = resizeFromFront(notes, full, newLength, time);
+      if (!notes) {
+        return { score: score, error: `${part.name} の${name}の前のほうに音があるので、この長さにできません` };
+      }
+    }
+
+    part.measures[i].notes = notes;
+    cleanSpanners(part); // 消えた休符に付いていた印などを整える
+  }
+
+  // 小節の情報に、長さを書く（1つの小節には short か pickup のどちらか1つだけ）
+  const info = newScore.measures[i];
+  delete info.short;
+  delete info.pickup;
+  if (kind === "short") info.short = count;
+  if (kind === "pickup") info.pickup = count;
   return { score: newScore, error: "" };
 }
 

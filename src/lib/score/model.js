@@ -14,6 +14,13 @@
 //     {}                                           // 変更なしの小節は空
 //     // 1小節目がアウフタクト（短い小節）なら、1小節目に pickup（拍の数）を書く（ステップ15-1）
 //     // 例：{ time: { beats: 4, beatType: 4 }, key: 0, pickup: 1 } … 4分音符1つ分のアウフタクト
+//     // （途中の短い小節：pickup・short は、どの小節にも書けるようにした）
+//     //   short: 拍の数  … 小節の「前の部分」だけの短い小節（小節番号に数える）
+//     //                     例：くり返し記号の前で終わる、3拍だけの小節 → { short: 3 }
+//     //   pickup: 拍の数 … 小節の「後ろの部分」だけの短い小節（小節番号に数えない＝前の小節の続き）
+//     //                     1小節目ならアウフタクト、途中なら「続きの小節」（くり返し記号のあとの1拍など）
+//     //                     例：{ pickup: 1 } … 前の小節の続きの、4分音符1つ分の小節
+//     //   1つの小節に両方は書かない（書いてあったら pickup を使う）
 //   ],
 //   parts: [                         // パート（楽器）ごとの情報
 //     {
@@ -508,35 +515,61 @@ export function hasPickup(score) {
 }
 
 // ----------------------------------------------------------
+// 関数：isContinuation
+// i 小節目が「後ろの部分」だけの短い小節（pickup のある小節）か調べる（途中の短い小節）
+//   ・1小節目ならアウフタクト、途中なら「前の小節の続きの小節」（くり返し記号のあとの1拍など）
+//   ・小節番号には数えない
+// 戻り値：true か false
+// ----------------------------------------------------------
+export function isContinuation(score, i) {
+  return !!score.measures[i]?.pickup;
+}
+
+// ----------------------------------------------------------
+// 関数：isShortMeasure
+// i 小節目が「前の部分」だけの短い小節（short のある小節）か調べる（途中の短い小節）
+//   ・くり返し記号の前で終わる小節・短い最後の小節など
+//   ・小節番号には数える
+//   ・pickup も書いてある小節は、pickup のほうを使う（ここでは false）
+// 戻り値：true か false
+// ----------------------------------------------------------
+export function isShortMeasure(score, i) {
+  return !!score.measures[i]?.short && !isContinuation(score, i);
+}
+
+// ----------------------------------------------------------
 // 関数：isShortEnd
 // i 小節目が「短い最後の小節」か調べる（ステップ20）
 // 短い最後の小節は、楽譜全体の小節の情報の最後の小節（score.measures[最後]）に
 //   short: 拍の数（拍子の下の数字の音符がいくつ分か）
 // として持つ（例：4分の4拍子で、最後の小節が付点2分音符だけ → short: 3）
 // 小節が1つだけで、それがアウフタクトのときは、アウフタクトのほうを使う（short は使わない）
+// （途中の短い小節：short はどの小節にも書けるようになったので、「最後の小節で、short のある小節」と決め直した。
+//   最後の小節に小節を足すときに「短い」を新しい最後の小節へ移す、などの決まりで使う）
 // 戻り値：true か false
 // ----------------------------------------------------------
 export function isShortEnd(score, i) {
   const last = score.measures.length - 1;
-  if (i !== last || !score.measures[i]?.short) return false;
-  return !(i === 0 && hasPickup(score));
+  return i === last && isShortMeasure(score, i);
 }
 
 // ----------------------------------------------------------
 // 関数：measureLength
 // i 小節目（0 から数える）の長さ（ティック）を返す（ステップ15-1）
-//   ・1小節目がアウフタクトなら … アウフタクトの長さ（拍の数 × 拍子の下の数字の音符1つ分）
-//   ・短い最後の小節なら     … その長さ（拍の数 × 拍子の下の数字の音符1つ分）（ステップ20）
+//   ・pickup のある小節なら … その長さ（拍の数 × 拍子の下の数字の音符1つ分）
+//                             （1小節目ならアウフタクト、途中なら続きの小節）
+//   ・short のある小節なら  … その長さ（拍の数 × 拍子の下の数字の音符1つ分）（ステップ20）
 //   ・それ以外             … 拍子どおりの1小節の長さ（measureTicks と同じ）
+// （途中の短い小節：1小節目・最後の小節だけでなく、どの小節の pickup・short も見るようにした）
 // 小節の中に入る音の長さを調べるときは、measureTicks(timeAt(...)) ではなく、いつもこれを使う
-// 例：4分の4拍子で pickup: 1 → 1小節目は 4分音符1つ分、2小節目からは 4分音符4つ分
+// 例：4分の4拍子で pickup: 1 → その小節は 4分音符1つ分、ほかの小節は 4分音符4つ分
 // ----------------------------------------------------------
 export function measureLength(score, i) {
   const time = timeAt(score, i);
-  if (i === 0 && hasPickup(score)) {
-    return (score.measures[0].pickup * 16 * TICKS_PER_16TH) / time.beatType;
+  if (isContinuation(score, i)) {
+    return (score.measures[i].pickup * 16 * TICKS_PER_16TH) / time.beatType;
   }
-  if (isShortEnd(score, i)) {
+  if (isShortMeasure(score, i)) {
     return (score.measures[i].short * 16 * TICKS_PER_16TH) / time.beatType;
   }
   return measureTicks(time);
@@ -545,35 +578,54 @@ export function measureLength(score, i) {
 // ----------------------------------------------------------
 // 関数：measureOffset
 // i 小節目の頭が、拍子どおりの1小節の中の、どの位置にあたるか（ティック）を返す（ステップ15-1）
-//   ・アウフタクトの小節 … 拍子どおりの1小節の長さ − アウフタクトの長さ
-//                         （アウフタクトは小節の後ろの部分なので。4/4 で1拍のアウフタクトなら、4拍目から始まる）
-//   ・それ以外         … 0
+//   ・pickup のある小節（アウフタクト・続きの小節）… 拍子どおりの1小節の長さ − その小節の長さ
+//                         （小節の後ろの部分なので。4/4 で1拍なら、4拍目から始まる）
+//   ・それ以外（short のある小節も）… 0
 //   （ステップ20：短い最後の小節は、小節の「前の部分」なので 0（拍の線・メトロノームは小節の頭からそろう））
 // 拍の線・連桁のつなぎ方・メトロノームを、拍子どおりの位置にそろえるのに使う
 // ----------------------------------------------------------
 export function measureOffset(score, i) {
-  if (isShortEnd(score, i)) return 0;
+  if (!isContinuation(score, i)) return 0;
   return measureTicks(timeAt(score, i)) - measureLength(score, i);
 }
 
 // ----------------------------------------------------------
 // 関数：measureNumber
 // i 小節目（0 から数える）の、楽譜に書く小節番号を返す（ステップ15-1）
-//   ・アウフタクトがある … アウフタクトは数えないので、i をそのまま使う（アウフタクトは 0、その次が 1）
-//   ・アウフタクトがない … i + 1
+//   1小節目から i 小節目までの、pickup のない小節の数を数える（途中の短い小節）
+//   ・アウフタクト（1小節目の pickup）は数えないので 0、その次が 1
+//   ・続きの小節（途中の pickup）は数えないので、前の小節と同じ番号（例：8小節目の続きは 8）
+//   ・pickup がどこにもなければ i + 1（今までと同じ）
 // ----------------------------------------------------------
 export function measureNumber(score, i) {
-  return hasPickup(score) ? i : i + 1;
+  let number = 0;
+  for (let k = 0; k <= i; k++) {
+    if (!isContinuation(score, k)) number = number + 1;
+  }
+  return number;
 }
 
 // ----------------------------------------------------------
 // 関数：measureName
 // i 小節目を、画面に出す文字にする（ステップ15-1）
 //   例："3小節目"、アウフタクトなら "アウフタクト"
+//   （途中の短い小節：続きの小節なら "8小節目（続き）"）
 // ----------------------------------------------------------
 export function measureName(score, i) {
   if (i === 0 && hasPickup(score)) return "アウフタクト";
+  if (isContinuation(score, i)) return `${measureNumber(score, i)}小節目（続き）`;
   return `${measureNumber(score, i)}小節目`;
+}
+
+// ----------------------------------------------------------
+// 関数：measureNumberLabel
+// 段の頭に書く小節番号の文字を返す（途中の短い小節）
+//   ・続きの小節なら、かっこを付ける（例："(8)"。「8小節目の続き」という意味。市販の楽譜と同じ書き方）
+//   ・それ以外は番号だけ（例："9"）
+// ----------------------------------------------------------
+export function measureNumberLabel(score, i) {
+  const number = measureNumber(score, i);
+  return isContinuation(score, i) ? `(${number})` : String(number);
 }
 
 // ----------------------------------------------------------
