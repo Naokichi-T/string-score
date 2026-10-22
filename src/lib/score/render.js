@@ -142,6 +142,11 @@ export function renderScore(VF, container, score, width, selection = null, range
     // 𝄋・𝄌・To Coda・Fine・D.C.・D.S. があれば、記号が小節に入りきる幅を確保する（ステップ11-7c）
     const markWidth = jumpMarksWidth(score.measures[i]);
     if (markWidth > 0) maxNotes = Math.max(maxNotes, MEASURE_BASE_WIDTH + markWidth);
+    // 小節の頭に書くテンポの文字（途中のテンポ変更・a tempo・rit.・自由な文字）が、小節に入りきる幅を確保する
+    // （allargando のような長い文字が、次の小節まではみ出して、次の小節の文字と重ならないように）（長い文字の手直し）
+    // 練習番号・𝄋・𝄌 も同じ高さで左に並ぶので、その幅も足す
+    const wordsWidth = tempoWordsWidth(score, i);
+    if (wordsWidth > 0) maxNotes = Math.max(maxNotes, markWidth + wordsWidth + TEMPO_WORDS_ROOM);
     noteWidths.push(maxNotes);
 
     // 記号の幅（段の頭のときと、途中のときの2通り）
@@ -828,6 +833,51 @@ function drawTempoMarks(context, stave, tickables, score, i, l, gradualLine, end
   // 範囲の終わりなら点線はここまで。そうでなければ、次の小節へ続ける
   if (info.gradualEnd) return null;
   return { line: l, y: y, x: measureEnd };
+}
+
+// 小節の頭に書くテンポの文字のあとに、小節の終わりまで空けておく幅（ピクセル）（長い文字の手直し）
+// （rit. の点線が少しは見えるように、また次の小節の文字とくっつかないように）
+const TEMPO_WORDS_ROOM = 16;
+
+// 文字の幅を測るための canvas（画面には出さない。初めて使うときに作る）（長い文字の手直し）
+let wordsMeasureContext = null;
+
+// ----------------------------------------------------------
+// 関数：tempoWordsWidth
+// その小節の頭に書くテンポの文字（途中のテンポ変更・a tempo・rit.・accel.・自由な文字）の幅を測る（長い文字の手直し）
+// 描くとき（drawTempoMarks）と同じ大きさ・字の形で測り、並べるときの間（TEMPO_MARK_SPACE）も足す
+// （小節の幅を決めるときに使う。この時は、まだ描く先がないので、画面に出さない canvas で測る）
+//   score … 楽譜データ
+//   i     … 何小節目か
+// 戻り値：幅（ピクセル）。書く文字がなければ 0
+// ----------------------------------------------------------
+function tempoWordsWidth(score, i) {
+  const info = score.measures[i];
+  const texts = []; // [文字, 字の形] の並び
+  // 途中のテンポ変更（1小節目は楽譜のいちばん上に書くので数えない）：「Allegro」（太字）と「♩ = 120」
+  if (i > 0 && info.tempo !== undefined) {
+    const tempo = tempoAt(score, i);
+    if (tempo.tempoText) texts.push([tempo.tempoText, "bold 15px Academico"]);
+    texts.push([`♩ = ${tempo.tempo}`, "15px Academico"]);
+  }
+  if (info.aTempo) texts.push(["a tempo", "italic 15px Academico"]);
+  if (info.gradual) texts.push([info.gradualText ?? GRADUAL_TEXTS[info.gradual] ?? info.gradual, "italic 15px Academico"]);
+  if (texts.length === 0) return 0;
+
+  // 画面に出さない canvas を作って、文字の幅を測る（作れないときは、1文字 8px のめやすにする）
+  if (wordsMeasureContext === null && typeof document !== "undefined") {
+    wordsMeasureContext = document.createElement("canvas").getContext("2d");
+  }
+  let width = 0;
+  texts.forEach(([text, font]) => {
+    if (wordsMeasureContext) {
+      wordsMeasureContext.font = font;
+      width = width + wordsMeasureContext.measureText(text).width;
+    } else {
+      width = width + text.length * 8;
+    }
+  });
+  return width + TEMPO_MARK_SPACE * (texts.length - 1);
 }
 
 // ----------------------------------------------------------
