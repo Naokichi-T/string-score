@@ -20,6 +20,11 @@
 // （ステップ19-2：連桁（<beam number="1">）を読んで、自動のつなぎ方と違う所に連桁の印（join・break）を付けるようにした）
 // （ステップ20：全部のパートの最後の小節が拍子より短ければ、短い最後の小節（short）として読むようにした）
 // （ステップ22：符尾の向き（<stem>）を読んで、自動の向きと違う所にだけ、決めた向き（stem）を残すようにした）
+// （点線付きの cresc.・dim.：「cresc. - - -」のように点線の付いた cresc.・dim. を、松葉（＜・＞）として読むようにした）
+//   ・前は、一番上のパートでテンポの自由な文字（再生では変えない rit. の仲間）になってしまっていた（不具合）
+//   ・文字と点線の始まり（<dashes type="start">）のある音から、同じ番号の点線の終わり（<dashes type="stop">）の
+//     前の音までを、cresc. なら＜、dim. なら＞の松葉にする（全部のパートで読む）
+//   ・rit.・accel. の点線は、同じ番号の点線の終わりでだけ閉じるようにした（cresc. の点線の終わりで閉じないように）
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -808,6 +813,55 @@ function jumpWordKind(text) {
 }
 
 // ----------------------------------------------------------
+// cresc.・dim. の言葉の表（点線付きの cresc.・dim.）
+//   ・DYNAMIC_WORDS … 言葉（normalizeWords したもの。「.」はもう取れている） → 松葉の種類
+//   ・DYNAMIC_MODIFIERS … いっしょに書いてあってもよい飾りの言葉（poco a poco cresc. の poco・a など）
+// 飾り以外の言葉が入っているもの（"cresc e accel" など）は、cresc.・dim. とはみなさない（今までどおりに読む）
+// ----------------------------------------------------------
+const DYNAMIC_WORDS = {
+  cres: "crescendo",
+  cresc: "crescendo",
+  crescendo: "crescendo",
+  dim: "diminuendo",
+  dimin: "diminuendo",
+  diminuendo: "diminuendo",
+  decres: "diminuendo",
+  decresc: "diminuendo",
+  decrescendo: "diminuendo",
+};
+// （"non"（〜しない）は入れない。"non dim." は「小さくしない」なので、松葉にしてはいけないため）
+const DYNAMIC_MODIFIERS = ["poco", "a", "molto", "sempre", "più", "piu", "un", "il", "ancora", "assai", "sub", "subito", "e", "ed", "ma", "très", "tres"];
+
+// ----------------------------------------------------------
+// 関数：dynamicWordKind
+// 文字の指示が cresc.・dim. の仲間なら、松葉の種類を返す（点線付きの cresc.・dim.）
+//   text … <words> の文字
+// 例："cresc." → "crescendo"、"sempre poco a poco cresc." → "crescendo"、"molto dim." → "diminuendo"
+//     "dolce" → null、"cresc. e accel." → null（飾りではない言葉が入っているので）
+// 戻り値："crescendo"（＜）・"diminuendo"（＞）・null（cresc.・dim. ではない）
+// ----------------------------------------------------------
+function dynamicWordKind(text) {
+  const tokens = normalizeWords(text)
+    .split(" ")
+    .filter((token) => token !== "");
+  let kind = null;
+  for (const token of tokens) {
+    if (DYNAMIC_WORDS[token]) {
+      // cresc. と dim. の両方が書いてあるもの（"cresc. dim." など）は、どちらとも決められないので使わない
+      if (kind !== null && kind !== DYNAMIC_WORDS[token]) return null;
+      kind = DYNAMIC_WORDS[token];
+    } else if (!DYNAMIC_MODIFIERS.includes(token)) {
+      return null; // 飾りではない言葉が入っている
+    }
+  }
+  return kind;
+}
+
+// 点線付きの cresc.・dim. から作る松葉の番号の始まり（点線付きの cresc.・dim.）
+// （ふつうの松葉（<wedge>）の番号 "1" などと分けるため、"dashes-1" のようにする）
+const DASHES_WEDGE_PREFIX = "dashes-";
+
+// ----------------------------------------------------------
 // 関数：readJumpMarks
 // D.C.・D.S.・Fine・To Coda・𝄋（Segno）・𝄌（Coda）・練習番号を読んで、楽譜全体の小節の情報（score.measures）に入れる（ステップ11-7c）
 // 一番上のパートの小節だけを見る（全パート共通の印なので）
@@ -917,6 +971,8 @@ function readJumpMarks(measureElements, score) {
 // ----------------------------------------------------------
 function readTempoMarks(measureElements, score) {
   let openFrom = null; // 点線の終わりを待っている rit.・accel. の始まりの小節（なければ null）
+  // 待っている rit.・accel. の点線の番号（同じ番号の点線の終わりでだけ閉じる）（点線付きの cresc.・dim.）
+  let openNumber = null;
 
   // ----------------------------------------------------------
   // 関数：closeOpen（readTempoMarks の中だけで使う）
@@ -926,6 +982,7 @@ function readTempoMarks(measureElements, score) {
     if (openFrom === null) return;
     score.measures[Math.max(openFrom, end)].gradualEnd = true;
     openFrom = null;
+    openNumber = null;
   }
 
   measureElements.forEach((measureElement, i) => {
@@ -960,6 +1017,9 @@ function readTempoMarks(measureElements, score) {
         childElements(type, "words").forEach((words) => {
           const text = words.textContent.trim();
           if (text === "") return;
+          // cresc.・dim. の仲間は、テンポの印にしない（点線付きなら、readDirection で松葉として読む）（点線付きの cresc.・dim.）
+          // （このアプリで書き出したもの（id の印がある）は、文字が何でもテンポの印なので、そのまま読む）
+          if (!typeFromId && dynamicWordKind(text)) return;
           // このアプリで書き出したものは id の扱いを、ほかのアプリのものは言葉の表で当てた扱いを使う
           const kind = typeFromId ?? tempoWordKind(text);
           if (kind === "aTempo") {
@@ -974,14 +1034,17 @@ function readTempoMarks(measureElements, score) {
             if (text !== GRADUAL_BUTTON_TEXTS[kind]) info.gradualText = text;
             if (hasDashes) {
               openFrom = i;
+              openNumber = dashesStartNumber(direction); // 点線の番号を覚える（点線付きの cresc.・dim.）
             } else {
               info.gradualEnd = true; // 点線がない：この小節だけ
               info.gradualDashes = false; // 点線も引かない（自由な文字のテンポの指示）
             }
           }
         });
+        // 点線の終わり：待っている rit.・accel. と同じ番号のときだけ閉じる
+        // （cresc.・dim. などの、ほかの点線の終わりで閉じないように）（点線付きの cresc.・dim.）
         childElements(type, "dashes").forEach((dashes) => {
-          if (dashes.getAttribute("type") === "stop") closeOpen(i);
+          if (dashes.getAttribute("type") === "stop" && (dashes.getAttribute("number") ?? "1") === openNumber) closeOpen(i);
         });
       });
     });
@@ -1097,8 +1160,24 @@ function hasDashesStart(direction) {
 }
 
 // ----------------------------------------------------------
+// 関数：dashesStartNumber
+// <direction> の中の、点線の始まり <dashes type="start"> の番号を返す（点線付きの cresc.・dim.）
+//   direction … <direction> の要素
+// 戻り値：番号の文字（書いていなければ "1"（MusicXML の決まり）。点線の始まりがなければ null）
+// ----------------------------------------------------------
+function dashesStartNumber(direction) {
+  for (const type of childElements(direction, "direction-type")) {
+    for (const dashes of childElements(type, "dashes")) {
+      if (dashes.getAttribute("type") === "start") return dashes.getAttribute("number") ?? "1";
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------
 // 関数：readDirection
 // 音符の前に書いてある <direction>（強弱・pizz./arco・松葉）を読む（ステップ8-4a）
+// （点線付きの cresc.・dim.：点線の付いた cresc.・dim. も松葉として読む。点線の終わりで閉じる）
 //   direction … <direction>
 //   state     … パートごとの読みかけの情報
 //                pending … 次の音符に付ける記号 { dynamic, techniques }（techniques は奏法の名前の並び。ステップ11-2）
@@ -1126,6 +1205,13 @@ function readDirection(direction, state, counter) {
     childElements(type, "words").forEach((words) => {
       const text = normalizeWords(words.textContent);
       if (text === "") return;
+      // 点線付きの cresc.・dim.：松葉の始まりとして読む（番号は "dashes-1" のように、ふつうの松葉と分ける）（点線付きの cresc.・dim.）
+      // （このアプリで書き出したテンポの印（id の印がある）は除く。点線のない cresc.・dim. は、今までどおり下で数える）
+      const dynamicKind = dynamicWordKind(words.textContent);
+      if (dynamicKind && hasDashesStart(direction) && !gradualTypeFromId(direction)) {
+        startWedge(dynamicKind, DASHES_WEDGE_PREFIX + dashesStartNumber(direction), state);
+        return;
+      }
       if (tempoWordKind(words.textContent)) return; // rit.・a tempo などは、楽譜全体の印として readTempoMarks で読む（ステップ11-6c）
       // 点線の始まりが付いた文字も、テンポの指示として readTempoMarks で読む（いちばん上のパートだけ）（自由な文字のテンポの指示）
       if (hasDashesStart(direction)) return;
@@ -1146,6 +1232,14 @@ function readDirection(direction, state, counter) {
       } else if (kind === "stop") {
         stopWedge(number, state, counter);
       }
+    });
+
+    // 点線の終わり：点線付きの cresc.・dim. で始めた松葉が、同じ番号で開いていれば閉じる（点線付きの cresc.・dim.）
+    // （開いていなければ、rit.・accel. などのほかの点線の終わりなので、何もしない（数えない））
+    childElements(type, "dashes").forEach((dashes) => {
+      if (dashes.getAttribute("type") !== "stop") return;
+      const number = DASHES_WEDGE_PREFIX + (dashes.getAttribute("number") ?? "1");
+      if (state.openWedges.some((open) => open.number === number)) stopWedge(number, state, counter);
     });
   });
 }
