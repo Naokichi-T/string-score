@@ -547,6 +547,11 @@ const ALTER_TO_XML = { "-2": "flat-flat", "-1": "flat", 0: "natural", 1: "sharp"
 //   ・<duration> は書かない（前打音は小節の長さに数えない決まり）
 //   ・主音とはスラーでつなぐ（ふつうのスラーと重ならないように、番号は 2）
 //   ・臨時記号は、調号と違う ♯♭ のときだけ書く（画面の表示と同じ）
+// （ステップ24-3）
+//   ・前打音が重音なら、低い音から高さごとに <note> を書き、2つ目からは <chord/> を付ける（主音の重音と同じ書き方）
+//     スラーの始まりは1つ目にだけ書く
+//   ・前打音の指番号は <technical> の中の <fingering> に書く
+//     数と高さの数が同じなら、下の音から1つずつ。ちがうときは全部いちばん下の音に書く（主音の重音と同じ決まり）
 //   note         … 主音のデータ（note.grace に前打音が入っている）
 //   keySignature … その小節の調号
 // 戻り値：XML の行の配列
@@ -557,27 +562,50 @@ function graceXml(note, keySignature) {
   // 小さな音符の形
   let type = "eighth";
   if (!isShort) type = (note.dots ?? 0) > 0 ? note.duration : (HALF_TYPE[note.duration] ?? "eighth");
-  const alter = grace.pitch.alter ?? 0;
+
+  // 前打音の高さ（低い順。前打音も { pitch, chord } の形なので notePitches が使える）
+  const pitches = notePitches(grace);
+  // 指番号を高さごとに分けるか
+  const fingerings = grace.fingerings ?? [];
+  const splitFingers = pitches.length > 1 && fingerings.length === pitches.length;
 
   const lines = [];
-  lines.push("      <note>");
-  lines.push(isShort ? `        <grace slash="yes"/>` : "        <grace/>");
-  lines.push("        <pitch>");
-  lines.push(`          <step>${grace.pitch.step}</step>`);
-  if (alter !== 0) lines.push(`          <alter>${alter}</alter>`);
-  lines.push(`          <octave>${grace.pitch.octave}</octave>`);
-  lines.push("        </pitch>");
-  lines.push("        <voice>1</voice>");
-  lines.push(`        <type>${type}</type>`);
-  // 臨時記号：調号どおりでなければ書く
-  if (alter !== keyAlters(keySignature)[grace.pitch.step]) {
-    lines.push(`        <accidental>${ALTER_TO_XML[alter] ?? "natural"}</accidental>`);
-  }
-  lines.push("        <stem>up</stem>"); // 前打音の符尾は上向き（画面と同じ）
-  lines.push("        <notations>");
-  lines.push(`          <slur type="start" number="2"/>`);
-  lines.push("        </notations>");
-  lines.push("      </note>");
+  pitches.forEach((pitch, h) => {
+    const alter = pitch.alter ?? 0;
+    // この高さに書く指番号
+    let fingers = [];
+    if (splitFingers) fingers = [fingerings[h]];
+    else if (h === 0) fingers = fingerings;
+
+    lines.push("      <note>");
+    lines.push(isShort ? `        <grace slash="yes"/>` : "        <grace/>");
+    if (h > 0) lines.push("        <chord/>"); // 重音の2つ目から（<grace> のすぐあとに書く決まり）
+    lines.push("        <pitch>");
+    lines.push(`          <step>${pitch.step}</step>`);
+    if (alter !== 0) lines.push(`          <alter>${alter}</alter>`);
+    lines.push(`          <octave>${pitch.octave}</octave>`);
+    lines.push("        </pitch>");
+    lines.push("        <voice>1</voice>");
+    lines.push(`        <type>${type}</type>`);
+    // 臨時記号：調号どおりでなければ書く
+    if (alter !== keyAlters(keySignature)[pitch.step]) {
+      lines.push(`        <accidental>${ALTER_TO_XML[alter] ?? "natural"}</accidental>`);
+    }
+    lines.push("        <stem>up</stem>"); // 前打音の符尾は上向き（画面と同じ）
+    if (h === 0 || fingers.length > 0) {
+      lines.push("        <notations>");
+      if (h === 0) lines.push(`          <slur type="start" number="2"/>`);
+      if (fingers.length > 0) {
+        lines.push("          <technical>");
+        fingers.forEach((finger) => {
+          lines.push(`            <fingering>${finger}</fingering>`);
+        });
+        lines.push("          </technical>");
+      }
+      lines.push("        </notations>");
+    }
+    lines.push("      </note>");
+  });
   return lines;
 }
 
@@ -1067,8 +1095,9 @@ function partXml(score, p, divisions) {
       lines.push(...directionsBeforeXml(note, wedgeNumber)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
       // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
-      // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）（重音には前打音を付けない決まり（ステップ14-1））
-      if (!note.rest && note.grace && !note.chord) lines.push(...graceXml(note, keyAt(score, i)));
+      // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
+      // （ステップ24-3：重音の主音にも書く。2音トレモロには前打音を付けない決まり（ステップ15-4）なので、ここには来ない）
+      if (!note.rest && note.grace) lines.push(...graceXml(note, keyAt(score, i)));
 
       if (note.rest) {
         // 休符：今までどおり（小節まるごとの休符なら、その印も渡す（ステップ13-3））

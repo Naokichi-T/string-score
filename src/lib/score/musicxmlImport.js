@@ -54,7 +54,9 @@
 //   （ステップ15-5：32分音符・付点16分音符は読めるようにした）
 //   重音 … 4音までは重音として読む（5音以上なら上の4音を残す）（ステップ14-3。前は一番上の音だけ残していた）
 //          ほかの音に付いていた記号は、重音全体の記号にまとめる
-//   2つ目の声部・装飾音 … 使わない
+//   2つ目の声部 … 使わない
+//   装飾音 … 前打音として、次の主音に付ける（ステップ11-8b。主音に近い1つだけ）
+//            重音の前打音・前打音の指番号も読む（ステップ24-3）
 //   アウフタクト（1小節目が拍子より短い）… アプリのアウフタクト（pickup）として読む（ステップ15-3。前は1小節目の前を休符で埋めていた）
 //     長さが「拍子の下の数字の音符◯つ」にならないときは、その単位に切り上げて前を休符で埋め、知らせる
 //   どれも、最後にまとめて知らせる
@@ -1344,6 +1346,56 @@ function applyPending(note, state, counter) {
 }
 
 // ----------------------------------------------------------
+// 関数：readGraceFingerings
+// 装飾音の <note> から、指番号（<technical> の中の <fingering>）を読む（ステップ24-3）
+// 0〜4 の数字だけを、書いてある順に返す（同じ数字は1つだけ）
+//   element … 装飾音の <note> 要素
+// 戻り値：指番号の配列（なければ空の配列）
+// ----------------------------------------------------------
+function readGraceFingerings(element) {
+  const fingers = [];
+  childElements(element, "notations").forEach((notations) => {
+    childElements(notations, "technical").forEach((technical) => {
+      childElements(technical, "fingering").forEach((fingering) => {
+        const finger = Number(fingering.textContent.trim());
+        if (Number.isInteger(finger) && finger >= 0 && finger <= 4 && !fingers.includes(finger)) fingers.push(finger);
+      });
+    });
+  });
+  return fingers;
+}
+
+// ----------------------------------------------------------
+// 関数：finishGrace
+// 読みためた前打音を、主音に付ける前打音のデータの形にする（ステップ24-3）
+//   pending … 読みためた前打音 { type, pitches: [高さ…], fingers: [指番号…] }
+//   skipped … 読まなかったものを数える入れ物（5音以上の重音の前打音を減らしたときに数える）
+// 決まり
+//   ・高さは低い順に並べる（いちばん低い音が pitch、残りが chord。主音の重音と同じ形）
+//   ・同じ高さ（鍵盤で同じ所）は1つにまとめる
+//   ・5音以上なら、上の MAX_CHORD_NOTES 音を残す（主音の重音と同じ）
+//   ・指番号があれば fingerings に入れる
+// 戻り値：{ type, pitch, chord?, fingerings? }
+// ----------------------------------------------------------
+function finishGrace(pending, skipped) {
+  // 同じ高さをまとめる
+  let pitches = [];
+  pending.pitches.forEach((pitch) => {
+    if (!pitches.some((other) => samePitch(other, pitch))) pitches.push(pitch);
+  });
+  // 5音以上なら、上の4音を残す
+  if (pitches.length > MAX_CHORD_NOTES) {
+    pitches = [...pitches].sort((a, b) => pitchNumber(a) - pitchNumber(b)).slice(pitches.length - MAX_CHORD_NOTES);
+    report(skipped, `5音以上の重音の前打音（上の${MAX_CHORD_NOTES}音を残した）`);
+  }
+  // 低い順に並べて、pitch と chord に分ける（setNotePitches は音符と同じ形にしてくれる）
+  const grace = { type: pending.type };
+  setNotePitches(grace, pitches);
+  if (pending.fingers.length > 0) grace.fingerings = [...pending.fingers];
+  return grace;
+}
+
+// ----------------------------------------------------------
 // 関数：readPart
 // <part> 1つ分の小節を読む
 //   partElement … <part>
@@ -1361,7 +1413,9 @@ function readPart(partElement, counter, skipped) {
   //   slurNumber … 開いているスラーの番号（開いていなければ null）
   //   pending    … <direction> で読んで、次の音符に付ける記号
   //   lastNote   … ここまでに読んだ最後の音符（松葉の終わりを付ける）
-  //   pendingGrace … 読んだ前打音で、次の主音に付けるもの { type, pitch }（なければ null）（ステップ11-8b）
+  //   pendingGrace … 読んだ前打音で、次の主音に付けるもの（なければ null）（ステップ11-8b）
+  //                  （ステップ24-3：重音の前打音のため、読んでいる途中は { type, pitches: [高さ…], fingers: [指番号…] } の形でためる。
+  //                    主音に付けるときに finishGrace で { type, pitch, chord, fingerings } の形にする）
   //   wedgeStopNext … 松葉の終わりを次の音符に付けるか（ステップ15-6）
   //   openWedges    … 開いている松葉の一覧（ステップ16-2）
   const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false, openWedges: [] };
@@ -1440,26 +1494,45 @@ function readPart(partElement, counter, skipped) {
         // （ステップ8-4b では使わずに数を知らせていた。今も、使えないものは数を知らせる）
         //   ・斜線（slash="yes"）があれば短前打音、なければ長前打音
         //   ・2つ以上並んでいたら、主音にいちばん近い（最後の）1つだけを使う
-        //   ・重音の前打音・2つ目の声部の前打音・高さのないものは使わない
+        //   ・2つ目の声部の前打音・高さのないものは使わない
         //   ・前打音と主音をつなぐスラーは読まない（このアプリでは、いつも自動で描く）
+        //   ・重音の前打音（<chord/> の付いた装飾音）は、1つ前の前打音に高さを足す（ステップ24-3）
+        //   ・前打音の指番号も読む（ステップ24-3）
         const graceElement = childElement(element, "grace");
         if (graceElement) {
           const graceVoice = childText(element, "voice") ?? "1";
           const pitchElement = childElement(element, "pitch");
-          const usable = !childElement(element, "chord") && (mainVoice === null || graceVoice === mainVoice) && pitchElement;
+          const usable = (mainVoice === null || graceVoice === mainVoice) && pitchElement;
           if (!usable) {
             report(skipped, "装飾音");
             continue;
           }
+          const gracePitch = {
+            step: childText(pitchElement, "step"),
+            alter: Math.round(Number(childText(pitchElement, "alter") ?? 0)),
+            octave: Number(childText(pitchElement, "octave")),
+          };
+          const graceFingers = readGraceFingerings(element);
+
+          // 重音の2つ目からの前打音：1つ前の前打音に高さを足す（1つ前がなければ使わない）（ステップ24-3）
+          if (childElement(element, "chord")) {
+            if (!state.pendingGrace) {
+              report(skipped, "装飾音");
+              continue;
+            }
+            state.pendingGrace.pitches.push(gracePitch);
+            graceFingers.forEach((finger) => {
+              if (!state.pendingGrace.fingers.includes(finger)) state.pendingGrace.fingers.push(finger);
+            });
+            continue;
+          }
+
           // 前に読んだ前打音がまだ主音に付いていなければ、それは使わない（近いほうを使う）
           if (state.pendingGrace) report(skipped, "装飾音");
           state.pendingGrace = {
             type: graceElement.getAttribute("slash") === "yes" ? "short" : "long",
-            pitch: {
-              step: childText(pitchElement, "step"),
-              alter: Math.round(Number(childText(pitchElement, "alter") ?? 0)),
-              octave: Number(childText(pitchElement, "octave")),
-            },
+            pitches: [gracePitch],
+            fingers: graceFingers,
           };
           continue;
         }
@@ -1518,7 +1591,8 @@ function readPart(partElement, counter, skipped) {
 
         // 前打音を、この音に付ける（休符や読めない音には付けられないので、数を知らせる）（ステップ11-8b）
         if (state.pendingGrace) {
-          if (note && !note.rest) note.grace = state.pendingGrace;
+          if (note && !note.rest)
+            note.grace = finishGrace(state.pendingGrace, skipped); // 前打音の形にして付ける（ステップ24-3）
           else report(skipped, "装飾音");
           state.pendingGrace = null;
         }
@@ -1752,10 +1826,7 @@ function finishChord(chord, skipped, counter) {
   if (!note.chord) return;
 
   // 重音に付けられない記号を外す
-  if (note.grace) {
-    delete note.grace;
-    report(skipped, "装飾音");
-  }
+  // （ステップ24-3：前打音は重音にも付けられるようになったので、外さない）
   if (note.ornament) {
     delete note.ornament;
     report(counter, "重音に付いたトリルなどの装飾");
