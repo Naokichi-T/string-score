@@ -74,7 +74,8 @@ const PLAYING_COLOR = "#16a34a";
 // 最後に測った「五線の上下のはみ出し」を覚えておく
 // 楽譜データと幅が前と同じなら測り直さない（選択の青や再生中の緑では、はみ出しは変わらないため）
 // （楽譜データは書き換えずに新しく作る決まりなので、「同じものか」は === で比べられる）
-let lastMeasured = { score: null, width: 0, extents: null };
+// （ステップ25：スラーの外に書く記号を持ち上げる量（slurLifts）も、いっしょに覚えておく）
+let lastMeasured = { score: null, width: 0, extents: null, slurLifts: new Map() };
 
 // ----------------------------------------------------------
 // 関数：renderScore
@@ -184,15 +185,30 @@ export function renderScore(VF, container, score, width, selection = null, range
   // ----- 5. 下書きを描いて、段ごと・パートごとに、五線の上下にどれだけはみ出すかを測る -----
   // （下書きでは、パートの間をとても広くとるので、となりのパートとは重ならない）
   // 楽譜データと幅が前回と同じなら、前回測った結果をそのまま使う
+  // （ステップ25：スラーの外に書く記号（弓・指番号など）を、スラーの上へ持ち上げる）
+  //   ① 1回目の下書きで、スラーの通り道と、記号を持ち上げる量（slurLifts）を測る
+  //   ② 持ち上げる記号があれば、持ち上げた形でもう一度下書きを描いて、はみ出しを測り直す
+  //      （持ち上げたぶん、五線の上にはみ出す量が増えるため）
+  //   ③ 本番でも、同じ量だけ持ち上げて描く
+  //   スラーの通り道は、玉・符尾とスラーの内側に書く記号だけで決めるので、持ち上げても変わらない
   let extents;
+  let slurLifts;
   if (lastMeasured.score === score && lastMeasured.width === totalWidth) {
     extents = lastMeasured.extents;
+    slurLifts = lastMeasured.slurLifts;
   } else {
+    slurLifts = new Map();
     extents = measureExtents(VF, lines.length, partCount, totalWidth, (draftContext, draftStaveYs) => {
-      drawSystems(VF, draftContext, drawInfo, draftStaveYs, true);
+      drawSystems(VF, draftContext, { ...drawInfo, slurLifts: new Map(), liftsOut: slurLifts }, draftStaveYs, true);
     });
-    lastMeasured = { score: score, width: totalWidth, extents: extents };
+    if (slurLifts.size > 0) {
+      extents = measureExtents(VF, lines.length, partCount, totalWidth, (draftContext, draftStaveYs) => {
+        drawSystems(VF, draftContext, { ...drawInfo, slurLifts: slurLifts }, draftStaveYs, true);
+      });
+    }
+    lastMeasured = { score: score, width: totalWidth, extents: extents, slurLifts: slurLifts };
   }
+  drawInfo.slurLifts = slurLifts; // 本番で使う
 
   // ----- 6. 測った結果から、五線を置く高さと全体の高さを決める -----
   const positions = computePositions(VF, extents, headerHeight);
@@ -292,6 +308,8 @@ export function renderScore(VF, container, score, width, selection = null, range
 //   context   … 描く先
 //   info      … 描くのに使うもの（score・lines・states・accidentalsList・firstLeft・otherLeft・
 //                selection・range・playingKeys）
+//                （ステップ25：slurLifts … スラーの外に書く記号を持ち上げる量（Map。キーは "パート-小節-音"）
+//                             liftsOut  … 持ち上げる量を集める入れ物（1回目の下書きのときだけ渡す））
 //   staveYs   … staveYs[l][p] = l 段目・p パート目の五線を置く高さ
 //   isDraft   … 下書きなら true
 //                （下書きでは、パートをまたぐ線（小節線のつなぎ・括弧）とパート名は描かない。
@@ -412,7 +430,9 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         const notes = measure.notes.map((note, j) => {
           // 調号は前打音の臨時記号に使う（ステップ11-8a）。小節まるごとの休符なら全休符で描く（ステップ13-3）
           // 符尾の向きを決めてあれば、その向きで作る（ステップ22）
-          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes), vexStemDirection(VF, stemDirs[j]));
+          // （ステップ25：スラーの外に書く記号を持ち上げる量（下書きで測ったもの）も渡す）
+          const slurLift = info.slurLifts?.get(`${p}-${i}-${j}`) ?? 0;
+          const staveNote = createNote(VF, note, state.clefs[p], accidentalsList[p][i][j], state.key, isMeasureRest(measure.notes), vexStemDirection(VF, stemDirs[j]), slurLift);
           // 鳴っている音なら緑（いちばん優先）、選択中の音なら青、範囲選択の中の音なら明るい青にする
           // （2音トレモロは、2つ目の音符と連桁も同じ色にする（setAlternateStyle）（ステップ14-6a））
           const playingStyle = { fillStyle: PLAYING_COLOR, strokeStyle: PLAYING_COLOR };
@@ -644,7 +664,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
   });
 
   // ----- スラーと松葉を描く -----
-  drawSpanners(VF, context, allNotes, lineBounds);
+  // （ステップ25：1回目の下書きでは、スラーの外に書く記号を持ち上げる量を info.liftsOut に集める）
+  drawSpanners(VF, context, allNotes, lineBounds, info.liftsOut ?? null);
 
   return allNotes;
 }

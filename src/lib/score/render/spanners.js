@@ -14,6 +14,7 @@ const SLUR_GAP = 5; // 音符とスラーのすき間
 const SLUR_MIN_HEIGHT = 8; // スラーの山の最低の高さ
 const SLUR_MAX_HEIGHT = 22; // スラーの山の最高の高さ
 const SLUR_THICKNESS = 2; // スラーのまん中の太さ
+const SLUR_MARK_GAP = 4; // スラーの外に書く記号（指番号・弓など）の下端と、スラーの間のすき間（ステップ25）
 const HAIRPIN_HALF = 5; // 松葉の開いた側の、まん中からの幅（上下それぞれ）
 const HAIRPIN_GAP = 6; // 松葉と強弱記号のすき間
 const HAIRPIN_SLUR_GAP = 4; // 松葉と、下側に描いたスラーのすき間
@@ -36,8 +37,11 @@ const GLISS_STEM_GAP = 3; // 「gliss.」の文字と、1つ目の音の上向�
 //   allNotes   … パートごとの音符の一覧（render.js で作ったもの）
 //                allNotes[p] の中身：{ staveNote, data, line }
 //   lineBounds … 段ごとの左右の端の位置 [{ startX, endX }, ...]
+//   liftsOut   … スラーの外に書く記号を持ち上げる量を入れる入れ物（Map。省略したら入れない）（ステップ25）
+//                キーは "パート-小節-音"（例："0-3-1"）、値は持ち上げる量（ピクセル）
+//                下書きのときに集めて、本番（とはみ出しを測り直す下書き）で音符を作るときに使う（render.js）
 // ----------------------------------------------------------
-export function drawSpanners(VF, context, allNotes, lineBounds) {
+export function drawSpanners(VF, context, allNotes, lineBounds, liftsOut = null) {
   allNotes.forEach((notesOfPart) => {
     // ① このパートのスラーと松葉を探す（どの音からどの音までか）
     const slurs = []; // スラーの音符の一覧の並び
@@ -91,7 +95,7 @@ export function drawSpanners(VF, context, allNotes, lineBounds) {
     // ② スラーを描く（下側に描いたスラーの位置を集めておく）
     const slurBelows = [];
     slurs.forEach((entries) => {
-      slurBelows.push(...drawSlurSpan(VF, context, entries, lineBounds));
+      slurBelows.push(...drawSlurSpan(VF, context, entries, lineBounds, liftsOut));
     });
 
     // ③ 松葉を描く（下側のスラーにぶつからないようにする）
@@ -117,6 +121,8 @@ function noteCenterX(staveNote) {
 //   Annotation   … 指番号・奏法の文字・フェルマータ
 //   Articulation … 弓・スタッカートなど・弦楽器の記号
 //   Ornament     … トリルなどの装飾
+// （ステップ25：スラーの外に書く記号（outsideSlur の印が付いたもの：弓・弦楽器の記号・指番号・奏法の文字・フェルマータ）はよけない。
+//   スラーは玉の近くを通り、その記号のほうをスラーの上へ持ち上げる。よけるのは、スタッカートなどとトリルなどの装飾だけ）
 const SLUR_AVOID_CATEGORIES = ["Annotation", "Articulation", "Ornament"];
 
 // ----------------------------------------------------------
@@ -162,6 +168,7 @@ function modifierBoxes(staveNote) {
   const boxes = [];
   staveNote.getModifiers().forEach((modifier) => {
     if (!SLUR_AVOID_CATEGORIES.includes(modifier.getCategory())) return;
+    if (modifier.outsideSlur) return; // スラーの外に書く記号はよけない（ステップ25）
     if (!modifier.isRendered()) return; // まだ描いていないものは、位置が分からないので使わない
     const box = modifier.getBoundingBox();
     if (box) boxes.push(box);
@@ -170,13 +177,40 @@ function modifierBoxes(staveNote) {
 }
 
 // ----------------------------------------------------------
+// 関数：outsideMarkBoxes
+// 音符に付いた「スラーの外に書く記号」（outsideSlur の印が付いたもの）のうち、描き終わったものの四角の一覧を返す（ステップ25）
+//   staveNote … VexFlow の音符（描いたあとのもの）
+// 戻り値：BoundingBox の配列（getY が上端、getH が高さ）
+// ----------------------------------------------------------
+function outsideMarkBoxes(staveNote) {
+  const boxes = [];
+  staveNote.getModifiers().forEach((modifier) => {
+    if (!modifier.outsideSlur || !modifier.isRendered()) return;
+    const box = modifier.getBoundingBox();
+    if (box) boxes.push(box);
+  });
+  return boxes;
+}
+
+// ----------------------------------------------------------
+// 関数：recordLift
+// 持ち上げる量を入れ物に入れる（同じ音符にいくつかのスラーがかかるときは、大きいほう）（ステップ25）
+// ----------------------------------------------------------
+function recordLift(liftsOut, entry, lift) {
+  const key = `${entry.part}-${entry.measure}-${entry.note}`;
+  liftsOut.set(key, Math.max(liftsOut.get(key) ?? 0, lift));
+}
+
+// ----------------------------------------------------------
 // 関数：drawSlurSpan
 // 1つのスラーを描く（段をまたぐときは段ごとに分けて描く）
 //   entries … スラーの始まりから終わりまでの音符の一覧
+//   liftsOut … スラーの外に書く記号を持ち上げる量を入れる入れ物（Map。null なら入れない）（ステップ25）
+//              上側に描いたスラーの中の音符で、記号の下端がスラーの外側の線より下に入るものの量を入れる
 // 戻り値：下側に描いたときの、段ごとの弧の位置 [{ line, x1, x2, bottom }, ...]
 //         （上側に描いたときは空の配列。松葉をずらすのに使う）
 // ----------------------------------------------------------
-function drawSlurSpan(VF, context, entries, lineBounds) {
+function drawSlurSpan(VF, context, entries, lineBounds, liftsOut = null) {
   const first = entries[0];
   const last = entries[entries.length - 1];
 
@@ -224,14 +258,28 @@ function drawSlurSpan(VF, context, entries, lineBounds) {
 
     drawCurve(context, x1, y1, x2, y2, below ? height : -height);
 
-    // 下側に描いたときは、弧の一番下の位置を覚えておく
-    // （この形の弧は、山のてっぺんが両端より「高さの 3/4」だけふくらむ）
-    if (below) {
-      belows.push({
-        line: group[0].line,
-        x1: x1,
-        x2: x2,
-        bottom: Math.max(y1, y2) + height * 0.75,
+    // 上側に描いたとき：スラーの外に書く記号が、スラーの下に入る音符を調べて、持ち上げる量を覚えておく（ステップ25）
+    //   横の位置 x でのスラーの外側の線の高さ ＝ 両端を結んだ線の高さ − 山の高さ × 3t(1−t)
+    //   （drawCurve の弧は、曲がり具合を決める2つの点を両端から山の高さだけずらしているので、この形になる）
+    //   記号の左の端・まん中・右の端の3か所で調べる（スラーの端の音では、スラーが斜めに上がっていくので、
+    //   記号のまん中だけで調べると、記号の右（左）の端がスラーにくっついてしまうため）
+    //   記号の下端が「スラーの高さ − すき間」より下なら、その差だけ持ち上げる（音符ごとに、いちばん大きい量）
+    if (!below && liftsOut) {
+      const slurTopAt = (x) => {
+        const t = Math.min(1, Math.max(0, (x - x1) / (x2 - x1 || 1))); // スラーの外は、端の高さで考える
+        return y1 + (y2 - y1) * t - height * 3 * t * (1 - t);
+      };
+      group.forEach((entry) => {
+        if (entry.data.rest) return;
+        let lift = 0;
+        outsideMarkBoxes(entry.staveNote).forEach((box) => {
+          const markBottom = box.getY() + box.getH();
+          const xs = [box.getX(), box.getX() + box.getW() / 2, box.getX() + box.getW()];
+          xs.forEach((x) => {
+            lift = Math.max(lift, markBottom - (slurTopAt(x) - SLUR_MARK_GAP));
+          });
+        });
+        if (lift > 0) recordLift(liftsOut, entry, lift);
       });
     }
   });
