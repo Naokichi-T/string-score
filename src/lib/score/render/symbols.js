@@ -32,6 +32,8 @@ const STEM_GAP = 22;
 // 音符に、五線の上や音符の近くに付く記号を付ける
 // （強弱は五線の下にそろえて描きたいので、ここでは付けずに drawDynamic で描く）
 // 付けた順番に、音符から近い順に積み重なる
+// （ステップ26：音符から近い順に「スタッカートなど → 弦楽器の記号 → トリルなど → 指番号 → 弓 → 奏法の文字 → フェルマータ」。
+//   VexFlow は記号（Articulation）を先に、文字（Annotation）をあとに積むので、弓を指番号より上にするため、弓は文字として付ける）
 //   VF        … VexFlow の部品一式
 //   staveNote … 記号を付ける VexFlow の音符
 //   note      … 音符1つ分のデータ
@@ -46,27 +48,20 @@ export function addSymbols(VF, staveNote, note, slurLift = 0) {
 
   // ① アーティキュレーション（スタッカートなど）
   //    符尾が上向きの音符は玉の下に、下向きの音符は玉の上に付ける
+  //    （ステップ26：連桁でつなぐと符尾の向きが変わることがあるので、followsStem の印を付けておき、
+  //      連桁を作ったあとで placeArticulations を呼んで、決まった符尾の向きで上下を決め直す）
   const stemUp = staveNote.getStemDirection() === VF.Stem.UP;
   for (const name of note.articulations ?? []) {
     const symbol = ARTICULATIONS[name];
     if (!symbol) continue; // 表にない名前は無視する
     const articulation = new VF.Articulation(symbol.vf);
     articulation.setPosition(stemUp ? BELOW : ABOVE);
+    articulation.followsStem = true; // 符尾の向きで上下が決まる記号（ステップ26）
     staveNote.addModifier(articulation, 0);
   }
 
-  // ② 弓の記号（いつも五線の上）
-  if (note.bowing && BOWINGS[note.bowing]) {
-    const bowing = new VF.Articulation(BOWINGS[note.bowing].vf);
-    bowing.setPosition(ABOVE);
-    // アップボウ（V）は縦に長いので、ダウンボウと同じ高さにそろえる
-    if (note.bowing === "up") fitUpBow(VF, bowing);
-    placeOutsideSlur(bowing, slurLift); // スラーの外に書く（ステップ25）
-    staveNote.addModifier(bowing, 0);
-  }
-
   // ②-2 弦楽器の記号（ハーモニクス・左手ピチカート・バルトーク・ピチカート）（ステップ11-1b）
-  //      弓の記号と同じく、いつも五線の上に付ける
+  //      いつも五線の上に付ける
   for (const name of note.stringMarks ?? []) {
     const symbol = STRING_MARKS[name];
     if (!symbol) continue; // 表にない名前は無視する
@@ -103,6 +98,21 @@ export function addSymbols(VF, staveNote, note, slurLift = 0) {
     staveNote.addModifier(fingering, 0);
   }
 
+  // ③-2 弓の記号（指番号の上に書く）（ステップ26。前は ② で、指番号の下に付けていた）
+  //      指番号のあとに積むため、記号（Articulation）ではなく、楽譜用フォントの文字（Annotation）として付ける
+  //      （フェルマータと同じやり方。文字の大きさは、記号として付けたときと同じにする）
+  if (note.bowing && BOWINGS[note.bowing]) {
+    const bowing = new VF.Annotation(BOWINGS[note.bowing].icon);
+    bowing.setFont("Bravura", bowFontSize(VF));
+    bowing.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
+    // アップボウ（V）は縦に長いので、ダウンボウと同じ高さにそろえる
+    if (note.bowing === "up") fitUpBow(VF, bowing);
+    // 弓・アクセント・トリルなどに近すぎるときは、上へずらす（指番号をずらしたら、同じだけずらす）
+    keepAboveMarks(VF, bowing, staveNote);
+    placeOutsideSlur(bowing, slurLift); // スラーの外に書く（ステップ25）
+    staveNote.addModifier(bowing, 0);
+  }
+
   // ④ 奏法の文字（pizz.・arco など。斜めの文字で上に書く。複数あれば積み重ねる）
   for (const name of note.techniques ?? []) {
     if (!TECHNIQUES[name]) continue; // 表にない名前は無視する
@@ -137,6 +147,33 @@ export function addSymbols(VF, staveNote, note, slurLift = 0) {
     placeOutsideSlur(fermata, slurLift); // スラーの外に書く（FERMATA_LIFT に足して持ち上げる）（ステップ25）
     staveNote.addModifier(fermata, 0);
   }
+}
+
+// ----------------------------------------------------------
+// 関数：bowFontSize
+// 弓の記号を文字（Annotation）として書くときの、文字の大きさ（ステップ26）
+// VexFlow が記号（Articulation）を書くときと同じ大きさにする（今までと同じ見た目にするため）
+// ----------------------------------------------------------
+function bowFontSize(VF) {
+  return new VF.Articulation(BOWINGS.down.vf).fontInfo.size;
+}
+
+// ----------------------------------------------------------
+// 関数：placeArticulations
+// スタッカート・テヌートなど（followsStem の印が付いた記号）の上下を、決まった符尾の向きで決め直す（ステップ26）
+// 【なぜ】記号は音符を作ったときの符尾の向きで上下を決めている。
+//   連桁でつなぐと、まとまり全体で符尾の向きがそろえられ、向きが変わることがある（例：ソ4 の符尾は上向きだが、
+//   高い音と連桁でつなぐと下向きになる）。そのままだと、符尾の側（連桁の側）に記号が付いてしまう
+//   → 連桁を作ったあと、記号の位置を決める（Formatter で並べる）前に呼んで、決め直す
+//   VF        … VexFlow の部品一式
+//   staveNote … VexFlow の音符（連桁を作ったあとのもの）
+// ----------------------------------------------------------
+export function placeArticulations(VF, staveNote) {
+  const stemUp = staveNote.getStemDirection() === VF.Stem.UP;
+  staveNote.getModifiers().forEach((modifier) => {
+    if (!modifier.followsStem) return;
+    modifier.setPosition(stemUp ? VF.Modifier.Position.BELOW : VF.Modifier.Position.ABOVE);
+  });
 }
 
 // ----------------------------------------------------------
@@ -232,22 +269,23 @@ const UP_BOW_LINE_WIDTH = 1.3;
 //   ② 描くときは、小さくした文字のかわりに、元の V の幅で2本の線を描く
 //      （文字を縦だけ縮めることはできないため。線で描けば、パートの間の自動調整でも大きさを正しく測れる）
 //   VF     … VexFlow の部品一式
-//   bowing … アップボウの記号（VF.Articulation）
+//   bowing … アップボウの記号（VF.Annotation。ステップ26で、記号（VF.Articulation）から文字に変えた）
 // ----------------------------------------------------------
 function fitUpBow(VF, bowing) {
   const width = bowing.getWidth(); // 元の V の幅
-  const downHeight = new VF.Articulation(BOWINGS.down.vf).getHeight(); // ダウンボウの高さ
+  const downHeight = new VF.Articulation(BOWINGS.down.vf).getHeight(); // ダウンボウの高さ（文字として書いても同じ高さ）
 
   // ① 高さがダウンボウと同じになるように、文字の大きさを小さくする
   bowing.setFontSize(bowing.fontInfo.size * (downHeight / bowing.getHeight()));
 
   // ② 文字のかわりに、V の形の2本の線を描く
+  //    （ステップ26：弓の記号を文字（Annotation）として書くようにしたので、位置は文字の基準線から決める。
+  //      楽譜用フォントの弓の記号は、基準線から上に描かれるので、基準線が V の下の先、そこからダウンボウの高さだけ上が上の端）
   bowing.renderText = (context) => {
-    // 小さくした文字を囲む四角（VexFlow が決めた位置）
-    const box = bowing.getBoundingBox();
-    const centerX = box.getX() + box.getW() / 2; // 横のまん中
-    const top = box.getY(); // V の上の端
-    const bottom = box.getY() + box.getH(); // V の下の先
+    const smallWidth = bowing.getWidth(); // 小さくした文字の幅（VexFlow はこの幅で、音符のまん中にそろえている）
+    const centerX = bowing.x + bowing.getXShift() + smallWidth / 2; // 横のまん中
+    const bottom = bowing.y + bowing.getYShift(); // V の下の先（文字の基準線）
+    const top = bottom - downHeight; // V の上の端
 
     context.save();
     context.setLineWidth(UP_BOW_LINE_WIDTH);

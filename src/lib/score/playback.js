@@ -124,11 +124,15 @@ function applyDynamic(dynamic, current) {
 //   legato … スラーの中で、次の音とつなげるか
 // 優先する順：スタッカーティシモ → スタッカート → テヌート → スラー → ふつう
 // （スラーの中でもスタッカートが付いていれば短く切る）
+// （ステップ26：テヌートとスラーの中の音が、ほかの音と同じ長さ（GATE_NORMAL）になっていたので、
+//   いっぱいに鳴らして次の音とつなげる形に戻した）
 // ----------------------------------------------------------
 function noteGate(note, legato) {
   const articulations = note.articulations ?? [];
   if (articulations.includes("staccatissimo")) return GATE_STACCATISSIMO;
   if (articulations.includes("staccato")) return GATE_STACCATO;
+  if (articulations.includes("tenuto")) return GATE_TENUTO;
+  if (legato) return GATE_SLUR;
   return GATE_NORMAL;
 }
 

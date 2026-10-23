@@ -21,7 +21,7 @@ import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePi
 import { computeAccidentals } from "./accidentals.js";
 import { createNote, vexStemDirection, graceOf } from "./render/notes.js"; // graceOf：前打音の小さな音符（ステップ24-1）
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
-import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
+import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo, placeArticulations } from "./render/symbols.js"; // placeArticulations：スタッカートなどの上下を決め直す（ステップ26）
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
@@ -495,6 +495,8 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
         beamsList.push(beams);
         // 2音トレモロの符尾の向きを、連桁を作る前の向きに戻す（連桁を作る処理が決め直してしまうため）（ステップ14-6a）
         notes.forEach((staveNote) => restoreAlternateStem(staveNote));
+        // スタッカート・テヌートなどの上下を、連桁で決まった符尾の向きで決め直す（ステップ26）
+        notes.forEach((staveNote) => placeArticulations(VF, staveNote));
 
         // 連符の数字を置く側と括弧を決める（連桁ができてから決める）（ステップ10-2）
         placeTuplets(VF, tuplets);
