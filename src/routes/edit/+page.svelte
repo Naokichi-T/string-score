@@ -20,6 +20,7 @@
   // （ステップ14-2：重音の中の1つの玉を選んで、▲▼・♯♭♮・削除をその玉だけに効かせる）
   // （ステップ14-5a：ハーモニクス（ひし形の玉のある音符）の音を確かめるときは、聞こえる音を鳴らす）
   // （ステップ17-1：「楽譜の設定」タブの［移調する］で、楽譜全体を移調する）
+  // （ステップ24-1：前打音を1つの音として選べるようにする（クリック・← →）。選んだ前打音の高さ・♯♭♮・削除）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -48,7 +49,8 @@
     NO_DOT_DURATIONS,
     upgradeWedges,
   } from "#lib/score/model.js";
-  import { moveSelection, getSelectedNote, makeRange, selectedHead } from "#lib/score/selection.js";
+  // stepSelection：← → で、前打音にも止まりながら動く／isGraceSelected：前打音を選んでいるか／mainPlace：主音の場所（ステップ24-1）
+  import { moveSelection, stepSelection, getSelectedNote, makeRange, selectedHead, isGraceSelected, mainPlace, withTopHead, selectedPitches } from "#lib/score/selection.js";
   import {
     canFit,
     replaceAt,
@@ -64,6 +66,10 @@
     resizeAt,
     toggleNoteSymbol,
     setGracePitch,
+    transposeGrace, // 選んだ前打音の高さを変える（ステップ24-1）
+    setGraceAccidental, // 選んだ前打音の ♯♭♮（ステップ24-1）
+    removeGrace, // 選んだ前打音を消す（ステップ24-1）
+    gracePitchForLetter, // 前打音を選んでいるときに、音名キーで入れる高さ（ステップ24-1）
     canSpan,
     getSpanState,
     toggleSpanner,
@@ -150,12 +156,17 @@
   // 選んでいる範囲 { part, start, end }（範囲を選んでいないときは null）
   let range = $derived(makeRange(selection, rangeEnd));
 
+  // 前打音を選んでいるか（ステップ24-1）
+  // 前打音を選んでいる間は、高さ（鍵盤・音名キー・▲▼）・♯♭♮・削除・前打音のボタンだけが効く
+  // （長さ・休符・タイ・連符・記号などは、主音のためのものなので押せないようにする）
+  let graceSelected = $derived(isGraceSelected(score, selection));
+
   // 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
   let canSpanRange = $derived(canSpan(score, range));
 
   // 音符を1つだけ選んでいて、その音符の下だけに松葉を付けられるか（ステップ16-1）
   // （範囲にスラー・松葉を付けられるときは、範囲のほうを使う）
-  let canWedgeNote = $derived(!canSpanRange && canWedgeInside(score, selection));
+  let canWedgeNote = $derived(!canSpanRange && !graceSelected && canWedgeInside(score, selection));
 
   // 範囲に付いているスラー・松葉（ボタンを青くするため）
   // （ステップ16-1：音符を1つだけ選んでいるときは、その音符の下だけの松葉）
@@ -169,12 +180,13 @@
   let glissandoAllowed = $derived(canGlissando(score, selection));
 
   // ［連桁にする］［連桁を解除］を押せるか（ステップ19-1）
-  let beamAllowed = $derived(canBeamTogether(score, range));
-  let unbeamAllowed = $derived(canUnbeam(score, selection, range));
+  // （前打音を選んでいるときは押せない）（ステップ24-1）
+  let beamAllowed = $derived(!graceSelected && canBeamTogether(score, range));
+  let unbeamAllowed = $derived(!graceSelected && canUnbeam(score, selection, range));
 
   // 選んでいる音（範囲）の、決めた符尾の向きと、［符尾↑］［符尾↓］を押せるか（ステップ22）
   let stemDir = $derived(stemState(score, selection, range));
-  let stemAllowed = $derived(canChangeStem(score, selection, range));
+  let stemAllowed = $derived(!graceSelected && canChangeStem(score, selection, range)); // 前打音を選んでいるときは押せない（ステップ24-1）
 
   // 範囲の中に音符が1つでもあるか（範囲をまとめて ▲ ▼・削除できるかどうかに使う）
   let rangeEditable = $derived(!!range && rangeHasNotes(score, range));
@@ -742,14 +754,16 @@
   });
 
   // 選んでいるのが音符（休符ではない）か（臨時記号などのボタンを押せるかどうかに使う）
+  // （ステップ24-1：前打音を選んでいるときは false。前打音のときは graceSelected を使う）
   let noteSelected = $derived.by(() => {
     const note = getSelectedNote(score, selection);
-    return !!note && !note.rest;
+    return !!note && !note.rest && !graceSelected;
   });
 
   // 選んでいる音符が重音か（ステップ14-1）
   // （ステップ14-2：重音でも、選んでいる玉の ♯♭♮ を変えられるようになった）
-  let chordSelected = $derived(!!getSelectedNote(score, selection)?.chord);
+  // （ステップ24-1：前打音を選んでいるときは、前打音が重音かどうか）
+  let chordSelected = $derived(selectedPitches(score, selection).length > 1);
 
   // ［重音］が入っているか（ステップ14-1）
   // 入のときは、鍵盤・音名キーで、選んでいる音に音を足す（次の音へは進まない）
@@ -838,6 +852,7 @@
   // ----------------------------------------------------------
   function canUse(d, dots) {
     if (!selection) return true;
+    if (graceSelected) return false; // 前打音の長さは変えられない（ステップ24-1）
     // 挿入モードでは「長さを変えて後ろをずらせるか」で調べる
     if (mode === "insert") return canResize(score, selection, d, dots);
     return canFit(score, selection, d, dots);
@@ -851,6 +866,7 @@
   // ----------------------------------------------------------
   function canPlace(d, dots) {
     if (!selection) return false;
+    if (graceSelected) return false; // 前打音を選んでいるときは、休符などを置かない（ステップ24-1）
     if (mode === "insert") return canInsert(score, selection, d, dots);
     return canFit(score, selection, d, dots);
   }
@@ -899,14 +915,17 @@
     message = "";
     // Shift を押していたとき、または［範囲］が入っているとき（タブレット用）は、範囲を作る（ステップ12-8b）
     if ((shift || rangeMode) && selection && newSelection && newSelection.part === selection.part) {
+      // 範囲は音符（主音）どうしで作るので、前打音を選んでいたら主音を選んだことにする（ステップ24-1）
+      if (selection.grace) selection = withTopHead(score, mainPlace(selection));
       // 範囲のもう一方の端にする（選んでいる音そのものをクリックしたら範囲をやめる）
-      rangeEnd = samePlace(newSelection, selection) ? null : newSelection;
+      rangeEnd = samePlace(newSelection, selection) ? null : mainPlace(newSelection);
       return;
     }
     // 選んでいる音をもう一度クリック（タップ）したら、選択を外す（範囲を選んでいないときだけ）
     // （タブレットで、1小節目から再生したいときなどに外しやすくするため。何もない所のクリック・Esc でも外れる）
     // 重音では、選んでいる玉をもう一度押したときだけ外す（別の玉なら、その玉を選び直す）
-    if (!rangeEnd && selection && newSelection && samePlace(newSelection, selection) && (newSelection.head ?? null) === (selection.head ?? null)) {
+    // 前打音と主音は別のものとして調べる（前打音を選んでいて主音を押したら、主音を選び直す）（ステップ24-1）
+    if (!rangeEnd && selection && newSelection && samePlace(newSelection, selection) && (newSelection.head ?? null) === (selection.head ?? null) && !!newSelection.grace === !!selection.grace) {
       selection = null;
       return;
     }
@@ -944,6 +963,8 @@
   // ----------------------------------------------------------
   function extendRange(direction) {
     if (!selection) return;
+    // 範囲は音符（主音）どうしで作るので、前打音を選んでいたら主音を選んだことにする（ステップ24-1）
+    if (selection.grace) selection = withTopHead(score, mainPlace(selection));
     // まだ範囲がなければ、選択中の場所から動かし始める
     const from = rangeEnd ?? selection;
     const to = moveSelection(score, from, direction);
@@ -965,7 +986,8 @@
       extendRange(direction);
       return;
     }
-    selection = moveSelection(score, selection, direction);
+    // 前打音にも止まりながら動く（ステップ24-1）
+    selection = stepSelection(score, selection, direction);
     rangeEnd = null;
     message = "";
   }
@@ -978,6 +1000,11 @@
   // ----------------------------------------------------------
   function handleDuration(d) {
     message = "";
+    // 前打音を選んでいるときは、長さを変えない（キーの 3〜7 で来たとき）（ステップ24-1）
+    if (graceSelected) {
+      message = "前打音の長さは変えられません（主音を選ぶと変えられます）";
+      return;
+    }
     // 連符の中の音を選んでいるときは、長さを変えない（ステップ10-3）
     if (selectedInTuplet) {
       message = "連符の中の音の長さは変えられません（［連符を解除］すると変えられます）";
@@ -1005,6 +1032,11 @@
   // ----------------------------------------------------------
   function handleDot() {
     message = "";
+    // 前打音を選んでいるときは、付点を付けない（キーの . で来たとき）（ステップ24-1）
+    if (graceSelected) {
+      message = "前打音には付点を付けられません";
+      return;
+    }
     const note = getSelectedNote(score, selection);
 
     if (!note) {
@@ -1046,6 +1078,11 @@
   function putNote(newNote) {
     if (!selection) {
       message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
+      return false;
+    }
+    // 前打音を選んでいるときは、休符にしない（キーの 0 で来たとき）（ステップ24-1）
+    if (graceSelected) {
+      message = "前打音を選んでいるときは、休符にできません（前打音を消すときは［削除］）";
       return false;
     }
     // 挿入モードでは、連符の中には入れられない（ステップ10-3）
@@ -1102,6 +1139,11 @@
       message = "先に、音を入れたい場所（休符など）をクリックして選んでください";
       return;
     }
+    // 前打音を選んでいるときは、主音にいちばん近い高さにする（ステップ24-1）
+    if (graceSelected) {
+      inputPitch(gracePitchForLetter(score, selection, step));
+      return;
+    }
     // ［重音］が入っていて音符を選んでいるときは、選んでいる重音のすぐ上の高さにする（ステップ14-1）
     inputPitch(chordMode ? chordPitchForLetter(score, selection, step) : pitchForLetter(score, selection, step));
   }
@@ -1113,11 +1155,11 @@
   //   pitch … 音の高さ { step, alter, octave }
   // ----------------------------------------------------------
   function inputPitch(pitch) {
-    // 「前打音の高さを入れる」状態なら、主音ではなく前打音の高さを変える（ステップ11-8a）
-    if (graceTarget) {
+    // 前打音を選んでいるなら、主音ではなく前打音の高さを入れ替える（次の音へは進まない。何回でも押せる）（ステップ24-1）
+    // （ステップ11-8a の「前打音を付けた直後に1回だけ鍵盤で高さを入れる」しくみは、これに置きかえた）
+    if (graceSelected) {
       const pizzAtGrace = isPizzAt(score, selection);
-      commit(setGracePitch(score, selection, pitch));
-      graceTarget = null;
+      commit(setGracePitch(score, selection, pitch), { ...mainPlace(selection), grace: true });
       message = "";
       playPitch(pitch, currentInstrument, 0.5, pizzAtGrace);
       return;
@@ -1189,13 +1231,29 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：graceWithHead
+  // 前打音を選んだ場所に、前打音の中の玉の番号（head）を付けたものを返す（ステップ24-1）
+  // 前打音が重音でないときは、head を付けない
+  //   newScore … 変えたあとの楽譜データ
+  //   place    … 選択中の場所
+  //   head     … 前打音の中の玉の番号（低い順。0 から）
+  // ----------------------------------------------------------
+  function graceWithHead(newScore, place, head) {
+    const graced = { ...mainPlace(place), grace: true };
+    const note = getSelectedNote(newScore, graced);
+    if (!note || note.rest || !note.grace?.chord) return graced;
+    return { ...graced, head: head };
+  }
+
+  // ----------------------------------------------------------
   // 関数：moveHead
   // 重音の中で、上か下の玉へ選択を移す（⌥（Alt）＋↑↓）（ステップ14-2）
   //   direction … 1 なら上の玉へ、-1 なら下の玉へ（端まで来ていたら動かない）
   // ----------------------------------------------------------
   function moveHead(direction) {
     if (!chordSelected) return;
-    const count = 1 + getSelectedNote(score, selection).chord.length;
+    // 前打音を選んでいるときは、前打音の中の玉の数（ステップ24-1）
+    const count = selectedPitches(score, selection).length;
     const head = Math.min(count - 1, Math.max(0, selectedHead(score, selection) + direction));
     selection = { ...selection, head: head };
     rangeEnd = null;
@@ -1212,7 +1270,7 @@
   }
 
   // ［全休符］を押せるか（音か休符を選んでいるとき）と、選んでいる小節がもう全休符か（ボタンを青くする）（ステップ13-3b）
-  let canMeasureRest = $derived(selection !== null);
+  let canMeasureRest = $derived(selection !== null && !graceSelected); // 前打音を選んでいるときは押せない（ステップ24-1）
   let measureRestActive = $derived(!!selection && isMeasureRest(score.parts[selection.part].measures[selection.measure].notes));
 
   // ----------------------------------------------------------
@@ -1231,7 +1289,7 @@
   }
 
   // 連符のボタンを押せるか（音か休符を1つ選んでいるとき）（ステップ10-2）
-  let canTuplet = $derived(selection !== null);
+  let canTuplet = $derived(selection !== null && !graceSelected); // 前打音を選んでいるときは押せない（ステップ24-1）
 
   // 選んでいる音が連符の中か（ステップ10-3）
   let selectedInTuplet = $derived(!!getSelectedNote(score, selection)?.tuplet);
@@ -1243,6 +1301,7 @@
   // 作ったあとも、連符の1つ目を選んだままにする（続けて鍵盤で入れられるように）
   // ----------------------------------------------------------
   function handleTuplet(actual) {
+    if (!canTuplet) return; // 前打音を選んでいるときなど（ステップ24-1）
     const error = tupletError(score, selection, actual);
     if (error) {
       message = error;
@@ -1275,6 +1334,13 @@
     if (!note || note.rest) return;
     // ピチカートの範囲なら、ピチカートで鳴らす
     const pizz = isPizzAt(score, selection);
+    // 前打音を選んでいるときは、前打音の音を鳴らす（重音なら全部、onlyHead なら選んでいる玉だけ）（ステップ24-1）
+    if (graceSelected) {
+      const gracePitches = selectedPitches(score, selection);
+      const graceTargets = onlyHead ? [gracePitches[selectedHead(score, selection)]] : gracePitches;
+      graceTargets.forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
+      return;
+    }
     if (hasDiamond(note)) {
       soundingPitches(note, currentInstrument).forEach((pitch) => playPitch(pitch, currentInstrument, 0.5, pizz));
       return;
@@ -1303,6 +1369,16 @@
       commit(newScore);
       rangeEnd = end;
       playSelected();
+      return;
+    }
+
+    // 前打音：前打音の高さを動かす（重音なら選んでいる玉だけ）（ステップ24-1）
+    if (graceSelected) {
+      const result = transposeGrace(score, selection, semitones);
+      message = result.error;
+      if (result.error) return;
+      commit(result.score, graceWithHead(result.score, selection, result.head));
+      playSelected(true);
       return;
     }
 
@@ -1336,6 +1412,16 @@
   //   alter … 1：♯、-1：♭、0：♮
   // ----------------------------------------------------------
   function handleAccidental(alter) {
+    // 前打音：前打音の ♯♭♮ を変える（重音なら選んでいる玉だけ）（ステップ24-1）
+    if (graceSelected) {
+      const result = setGraceAccidental(score, selection, alter);
+      message = result.error;
+      if (result.error) return;
+      commit(result.score, graceWithHead(result.score, selection, result.head));
+      playSelected(true);
+      return;
+    }
+
     if (!noteSelected) return;
     message = "";
 
@@ -1381,6 +1467,18 @@
       return;
     }
 
+    // 前打音：前打音を消す（重音なら選んでいる玉だけ。1音なら前打音ごと消して、主音を選ぶ）（ステップ24-1）
+    if (graceSelected) {
+      message = "";
+      const result = removeGrace(score, selection);
+      if (result.removed) {
+        commit(result.score, withTopHead(result.score, mainPlace(selection)));
+      } else {
+        commit(result.score, graceWithHead(result.score, selection, result.head));
+      }
+      return;
+    }
+
     if (!noteSelected) return;
     message = "";
 
@@ -1401,33 +1499,35 @@
   //   value … 記号の名前や数字
   // ----------------------------------------------------------
   function handleSymbol(kind, value) {
+    // 前打音を選んでいるとき：効くのは前打音のボタンだけ（ステップ24-1）
+    //   同じ種類のボタン … 前打音を外して、主音を選ぶ
+    //   違う種類のボタン … 高さはそのままで種類だけ入れ替え、前打音を選んだままにする
+    if (graceSelected) {
+      if (kind !== "grace") return;
+      message = "";
+      const main = mainPlace(selection);
+      const newScore = toggleNoteSymbol(score, main, kind, value);
+      const stillGrace = !!getSelectedNote(newScore, main)?.grace;
+      commit(newScore, stillGrace ? selection : withTopHead(newScore, main));
+      return;
+    }
+
     if (!noteSelected) return;
     message = "";
+    const hadGrace = !!getSelectedNote(score, selection)?.grace;
     commit(toggleNoteSymbol(score, selection, kind, value));
 
     // ハーモニクスのボタンのときは、聞こえる音を鳴らして確かめられるようにする（ステップ14-5a）
     if (kind === "artificialHarmonic" || kind === "diamond") playSelected();
 
-    // 前打音を付けた（種類を変えた）ときは、「前打音の高さを入れる」状態にする（ステップ11-8a）
-    // 外したときは、その状態をやめる
-    graceTarget = null;
+    // 前打音を付けた（種類を変えた）ときは、前打音を選んだ状態にする（ステップ24-1）
+    // （このあと鍵盤・音名キー・▲▼ で前打音の高さを変えられる。→ キーで主音に戻る）
+    // 外したときは、主音を選んだまま
     if (kind === "grace" && getSelectedNote(score, selection)?.grace) {
-      graceTarget = { ...selection };
-      showInfo("鍵盤（か音名のキー）で、前打音の高さを選んでください"); // 案内なので青い字（後で直す候補の手直し）
+      selection = withTopHead(score, { ...mainPlace(selection), grace: true });
+      if (!hadGrace) showInfo("鍵盤（か音名のキー）で、前打音の高さを選んでください（→ キーで主音に戻ります）"); // 案内なので青い字（後で直す候補の手直し）
     }
   }
-
-  // 「前打音の高さを入れる」状態の音の場所（その状態でなければ null）（ステップ11-8a）
-  // この音を選んでいる間に鍵盤を押すと、主音ではなく前打音の高さが変わる（1回押したら、ふつうに戻る）
-  let graceTarget = $state(null);
-
-  // ほかの音を選んだら、「前打音の高さを入れる」状態はやめる（ステップ11-8a）
-  $effect(() => {
-    const now = selection; // selection が変わったら、ここがもう一度動く
-    if (graceTarget && !(now && now.part === graceTarget.part && now.measure === graceTarget.measure && now.note === graceTarget.note)) {
-      graceTarget = null;
-    }
-  });
 
   // ----------------------------------------------------------
   // 関数：handleSpanner
@@ -2155,10 +2255,10 @@
   let clipboard = $state.raw(null);
 
   // コピー・切り取りができるか（音か範囲を選んでいるか）
-  let canCopy = $derived(!!selection);
+  let canCopy = $derived(!!selection && !graceSelected); // 前打音を選んでいるときは押せない（ステップ24-1）
 
   // 貼り付けができるか（コピーした音があって、場所を選んでいるか）
-  let canPaste = $derived(!!clipboard && !!selection);
+  let canPaste = $derived(!!clipboard && !!selection && !graceSelected); // 前打音を選んでいるときは押せない（ステップ24-1）
 
   // ----------------------------------------------------------
   // 関数：handleClipboard
@@ -2281,8 +2381,8 @@
         // Shift＋→：範囲を次の音まで広げる（縮める）
         extendRange(1);
       } else {
-        // → キー：次の音へ（範囲選択はやめる）
-        selection = moveSelection(score, selection, 1);
+        // → キー：次の音へ（範囲選択はやめる）（ステップ24-1：前打音にも止まる）
+        selection = stepSelection(score, selection, 1);
         rangeEnd = null;
         message = "";
       }
@@ -2292,8 +2392,8 @@
         // Shift＋←：範囲を前の音まで広げる（縮める）
         extendRange(-1);
       } else {
-        // ← キー：前の音へ（範囲選択はやめる）
-        selection = moveSelection(score, selection, -1);
+        // ← キー：前の音へ（範囲選択はやめる）（ステップ24-1：前打音にも止まる）
+        selection = stepSelection(score, selection, -1);
         rangeEnd = null;
         message = "";
       }
@@ -2427,7 +2527,8 @@
       ondelete={handleDelete}
       {mode}
       onmode={handleMode}
-      selectedNote={noteSelected ? getSelectedNote(score, selection) : null}
+      selectedNote={noteSelected || graceSelected ? getSelectedNote(score, selection) : null}
+      {graceSelected}
       onsymbol={handleSymbol}
       {spanState}
       {canSpanRange}

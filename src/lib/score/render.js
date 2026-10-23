@@ -19,7 +19,7 @@
 // （途中の短い小節：段の頭の小節番号の文字を作る measureNumberLabel を足した（続きの小節は "(8)" と書く））
 import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePitch, measureNumberLabel, measureLength } from "./model.js";
 import { computeAccidentals } from "./accidentals.js";
-import { createNote, vexStemDirection } from "./render/notes.js";
+import { createNote, vexStemDirection, graceOf } from "./render/notes.js"; // graceOf：前打音の小さな音符（ステップ24-1）
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
 import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo } from "./render/symbols.js";
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
@@ -253,6 +253,26 @@ export function renderScore(VF, container, score, width, selection = null, range
         lineBottom: positions.lineBottoms[entry.line],
         headYs: headYs,
       });
+      // 前打音：小さな音符にも、別の当たり判定の四角を作る（grace: true）（ステップ24-1）
+      // （主音の四角は前打音まで広がっているので、前打音の上をクリックすると、両方の四角に入る。
+      //   ScoreView では、四角のまん中がいちばん近いものを選ぶので、前打音の上なら前打音が選ばれる）
+      const graceNote = graceOf(entry.staveNote);
+      if (graceNote && graceNote.isRendered()) {
+        const graceBox = graceNote.getBoundingBox();
+        hitBoxes.push({
+          part: entry.part,
+          measure: entry.measure,
+          note: entry.note,
+          grace: true,
+          x: graceBox.getX(),
+          y: graceBox.getY(),
+          w: graceBox.getW(),
+          h: graceBox.getH(),
+          lineTop: positions.lineTops[entry.line],
+          lineBottom: positions.lineBottoms[entry.line],
+          headYs: graceNote.getYs(), // 前打音の玉ごとの高さ（前打音が重音のとき、クリックした玉を決める）
+        });
+      }
     });
   });
   return {
@@ -400,6 +420,18 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
           const rangeStyle = { fillStyle: RANGE_COLOR, strokeStyle: RANGE_COLOR };
           if (playingKeys.has(`${p}-${i}-${j}`)) {
             setAlternateStyle(staveNote, playingStyle);
+          } else if (selection && selection.part === p && selection.measure === i && selection.note === j && selection.grace && graceOf(staveNote)) {
+            // 前打音を選んでいる：前打音の小さな音符だけを青くする（主音は黒のまま）（ステップ24-1）
+            // 前打音が重音なら、全体を明るい青にして、選んでいる玉だけ濃い青にする（重音の主音と同じ）
+            const graceNote = graceOf(staveNote);
+            const graceCount = 1 + (note.grace.chord?.length ?? 0);
+            const graceHead = Number.isInteger(selection.head) && selection.head >= 0 && selection.head < graceCount ? selection.head : graceCount - 1;
+            if (graceCount > 1) {
+              graceNote.setStyle(rangeStyle);
+              graceNote.setKeyStyle(graceHead, selectedStyle);
+            } else {
+              graceNote.setStyle(selectedStyle);
+            }
           } else if (selection && selection.part === p && selection.measure === i && selection.note === j) {
             const headCount = note.rest ? 1 : 1 + (note.chord?.length ?? 0);
             // 選んでいる玉の番号は selection.js の selectedHead と同じ決め方。合わない番号ならいちばん上
@@ -415,6 +447,9 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
             } else {
               staveNote.setStyle(selectedStyle);
             }
+            // 主音を選んでいるときは、前打音は黒のままにする（前打音を選んでいるのか主音なのかを見分けやすくする）（ステップ24-1）
+            // （主音の色は、付いている前打音にもうつってしまうので、前打音だけ黒に戻す）
+            if (graceOf(staveNote)) graceOf(staveNote).setStyle({ fillStyle: "#000", strokeStyle: "#000" });
           } else if (isInRange(range, p, i, j)) {
             setAlternateStyle(staveNote, rangeStyle);
           }

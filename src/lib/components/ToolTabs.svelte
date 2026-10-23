@@ -20,6 +20,7 @@
   // （ステップ17-1：「楽譜の設定」タブに移調の欄を追加。ontranspose を ScoreSettings へ渡す）
   // （ステップ18-1：タブの名前の列の右端に［▲］を置いて、タブの中身をたたんで五線譜を広く見られるようにした）
   // （ステップ22：「音符」タブの2行目、連桁のボタンのとなりに［符尾↑］［符尾↓］を追加）
+  // （ステップ24-1：前打音を選んでいるときも、♯♭♮・▲▼・削除を押せるようにする。付点は押せない）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -117,6 +118,8 @@
   //   chordSelected … 選んでいる音符が重音か（ステップ14-1）
   //                   （ステップ14-2：重音でも ♯♭♮ を押せるようにした。説明の文だけ変える）
   //   selectedHead … 重音の中で選んでいる玉の番号（「記号」タブの［ひし形］で使う）（ステップ14-5a）
+  //   graceSelected … 前打音を選んでいるか（ステップ24-1）
+  //                   true のときは ♯♭♮・▲▼・削除が前打音に効く。「記号」タブは前打音のボタンだけ、「奏法」タブは押せない
   //   canBeam      … ［連桁にする］を押せるか（範囲に、となり合った短い音符があるか）（ステップ19-1）
   //   canUnbeam    … ［連桁を解除］を押せるか（選んでいる音に、連桁でつながっている音符があるか）（ステップ19-1）
   //   onbeam       … ［連桁にする］［連桁を解除］が押されたときに呼ぶ関数（"join" か "break" を渡す）（ステップ19-1）
@@ -135,6 +138,7 @@
     collapsed = false,
     ontoggle = () => {},
     selectedHead = 0,
+    graceSelected = false,
     chordMode = false,
     onchordmode = () => {},
     chordSelected = false,
@@ -327,7 +331,7 @@
 
         <!-- 付点 -->
         <div class="group">
-          <button class="tool" class:on={dotted} onclick={() => ondot()} title="付点（.）" aria-label="付点">
+          <button class="tool" class:on={dotted} disabled={graceSelected} onclick={() => ondot()} title="付点（.）" aria-label="付点">
             <span class="icon">{DOT_ICON}</span>
           </button>
         </div>
@@ -385,7 +389,7 @@
           {#each ACCIDENTALS as acc (acc.alter)}
             <button
               class="tool"
-              disabled={!noteSelected}
+              disabled={!noteSelected && !graceSelected}
               onclick={() => onaccidental(acc.alter)}
               title={chordSelected ? `${acc.name}（重音の中の、選んでいる音だけ。⌥（Alt）＋↑↓ で選ぶ音を変える）` : acc.name}
               aria-label={acc.name}
@@ -397,8 +401,8 @@
 
         <!-- 半音上げる・下げる -->
         <div class="group">
-          <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(1)} title="半音上げる（↑。⌘ / Ctrl＋↑ で1オクターブ）"> ▲ </button>
-          <button class="tool text" disabled={!noteSelected && !rangeEditable} onclick={() => onstep(-1)} title="半音下げる（↓。⌘ / Ctrl＋↓ で1オクターブ）"> ▼ </button>
+          <button class="tool text" disabled={!noteSelected && !graceSelected && !rangeEditable} onclick={() => onstep(1)} title="半音上げる（↑。⌘ / Ctrl＋↑ で1オクターブ）"> ▲ </button>
+          <button class="tool text" disabled={!noteSelected && !graceSelected && !rangeEditable} onclick={() => onstep(-1)} title="半音下げる（↓。⌘ / Ctrl＋↓ で1オクターブ）"> ▼ </button>
         </div>
       </div>
 
@@ -407,7 +411,12 @@
         <!-- タイ・削除 -->
         <div class="group">
           <button class="tool text wide" disabled={!noteSelected} onclick={() => ontie()} title="次の音とタイでつなぐ（T）"> タイ </button>
-          <button class="tool text wide" disabled={!noteSelected && !rangeEditable} onclick={() => ondelete()} title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする">
+          <button
+            class="tool text wide"
+            disabled={!noteSelected && !graceSelected && !rangeEditable}
+            onclick={() => ondelete()}
+            title="音符を休符にする（Delete）。範囲を選んでいるときは、範囲の中をぜんぶ休符にする。前打音を選んでいるときは、前打音を消す"
+          >
             削除
           </button>
         </div>
@@ -472,10 +481,12 @@
       </div>
     {:else if activeTab === "symbol"}
       <!-- head：［ひし形］のボタンを青くするための、選んでいる玉の番号（ステップ14-5a） -->
-      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {canWedgeNote} {onspanner} {canGlissando} head={selectedHead} />
+      <!-- graceSelected：前打音を選んでいるときは、前打音のボタンだけ押せる（ステップ24-1） -->
+      <SymbolTools note={selectedNote} {onsymbol} {spanState} {canSpanRange} {canWedgeNote} {onspanner} {canGlissando} head={selectedHead} {graceSelected} />
     {:else if activeTab === "technique"}
       <!-- 選んでいるパートの楽器を渡す（楽器にない弦の指定のボタンを押せないようにするため）（ステップ11-2） -->
-      <TechniqueTools note={selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />
+      <!-- 前打音を選んでいるときは、奏法のボタンを押せないようにする（note を渡さない）（ステップ24-1） -->
+      <TechniqueTools note={graceSelected ? null : selectedNote} instrument={selectedPart !== null ? score.parts[selectedPart].instrument : null} {onsymbol} />
     {:else if activeTab === "measure"}
       <MeasureTools
         canDelete={canDeleteMeasure}

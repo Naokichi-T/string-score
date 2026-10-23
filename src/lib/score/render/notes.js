@@ -258,4 +258,16 @@ function addGraceNote(VF, staveNote, note, clef, keySignature) {
   };
 
   staveNote.addModifier(group, 0);
+
+  // 主音に、前打音の小さな音符を覚えさせておく（ステップ24-1）
+  // （前打音を選んだときに青くする・クリックの当たり判定を作るのに、render.js で使う。graceOf で取り出す）
+  staveNote.graceNote = graceNote;
+}
+
+// ----------------------------------------------------------
+// 関数：graceOf
+// 主音（VexFlow の音符）に付けた、前打音の小さな音符を返す（前打音がなければ null）（ステップ24-1）
+// ----------------------------------------------------------
+export function graceOf(staveNote) {
+  return staveNote.graceNote ?? null;
 }

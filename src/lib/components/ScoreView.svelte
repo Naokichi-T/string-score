@@ -230,7 +230,10 @@
 
     if (hit) {
       const place = { part: hit.part, measure: hit.measure, note: hit.note };
+      // 前打音の四角なら、前打音を選ぶ（ステップ24-1）
+      if (hit.grace) place.grace = true;
       // 重音なら、クリックした高さにいちばん近い玉を選ぶ（head は低い順の番号）（ステップ14-2）
+      // （前打音が重音のときも同じ。head は前打音の中の玉の番号になる）（ステップ24-1）
       if (hit.headYs && hit.headYs.length > 1) {
         let head = 0;
         hit.headYs.forEach((headY, k) => {

@@ -4,6 +4,9 @@
 //   選択中の場所 = { part: パート番号, measure: 小節番号, note: 小節の中の音の番号, head: 重音の中の玉の番号 }
 //   head … 重音のときだけ使う。低い順に 0, 1, 2…（ステップ14-2）
 //           書いていない・合わない番号のときは、いちばん上の玉を選んでいることにする（selectedHead で決める）
+//   grace … 前打音を選んでいるときだけ true（ステップ24-1）
+//           このときの head は、前打音の中の玉の番号（前打音が重音のとき。低い順に 0, 1, 2…）
+//           前打音が付いていない音符で true になっているときは、主音を選んでいることにする
 //   何も選んでいないときは null
 //   番号はどれも 0 から数える（1小節目は measure: 0）
 // ==========================================================
@@ -30,6 +33,9 @@ const DURATION_NAMES = {
   "16th": "16分",
   "32nd": "32分", // ステップ15-5
 };
+
+// 前打音の種類を日本語で表すための表（ステップ24-1）
+const GRACE_NAMES = { short: "短前打音", long: "長前打音" };
 
 // ----------------------------------------------------------
 // 関数：moveSelection
@@ -67,9 +73,89 @@ export function moveSelection(score, selection, direction) {
 // 選択中の場所が重音なら、いちばん上の玉を選んだ形にして返す（重音でなければ head を付けない）（ステップ14-2）
 // ----------------------------------------------------------
 export function withTopHead(score, selection) {
-  const count = notePitches(getSelectedNote(score, selection)).length;
+  const count = selectedPitches(score, selection).length;
   if (count <= 1) return selection;
   return { ...selection, head: count - 1 };
+}
+
+// ----------------------------------------------------------
+// 関数：stepSelection
+// ← → キー・［◀ 前の音］［次の音 ▶］で、前打音にも止まりながら前後へ動く（ステップ24-1）
+//   score     … 楽譜データ
+//   selection … 今の選択中の場所
+//   direction … 1 なら次へ、-1 なら前へ
+// 動き方（Flat と同じ）
+//   前の音 ─ → ─▶ 前打音 ─ → ─▶ 主音 ─ → ─▶ 次の音
+//          ◀─ ← ─        ◀─ ← ─       ◀─ ← ─
+//   ・主音で ← → 前打音があれば、その前打音へ（なければ前の音へ）
+//   ・前打音で → → その主音へ
+//   ・前打音で ← → 前の音（の主音）へ
+//   ・→ で次の音へ移ったとき、次の音に前打音があれば、まず前打音で止まる
+// 移った先が重音（前打音の重音も）なら、いちばん上の玉を選ぶ
+// 戻り値：動かしたあとの選択中の場所（端まで来ていたら動かさずにそのまま返す）
+// （範囲を広げる Shift＋← → は、前打音には止まらない moveSelection を使う）
+// ----------------------------------------------------------
+export function stepSelection(score, selection, direction) {
+  if (!selection) return selection;
+  const main = mainPlace(selection); // 前打音の印・玉の番号を取りのぞいた場所（主音）
+  const onGrace = isGraceSelected(score, selection);
+
+  if (direction < 0) {
+    // 主音で、前打音がある → 前打音へ
+    if (!onGrace && getSelectedNote(score, main)?.grace) return withTopHead(score, { ...main, grace: true });
+    // それ以外 → 前の音（の主音）へ（いちばん前なら動かさない）
+    const prev = moveSelection(score, main, -1);
+    return samePosition(prev, main) ? selection : prev;
+  }
+
+  // 前打音 → その主音へ
+  if (onGrace) return withTopHead(score, main);
+  // 主音 → 次の音へ（次の音に前打音があれば、前打音で止まる）
+  const next = moveSelection(score, main, 1);
+  if (samePosition(next, main)) return selection; // いちばん後ろなら動かさない
+  if (getSelectedNote(score, next)?.grace) return withTopHead(score, { ...mainPlace(next), grace: true });
+  return next;
+}
+
+// ----------------------------------------------------------
+// 関数：mainPlace
+// 選択中の場所から、前打音の印（grace）と玉の番号（head）を取りのぞいた「主音の場所」を返す（ステップ24-1）
+// ----------------------------------------------------------
+export function mainPlace(selection) {
+  if (!selection) return selection;
+  return { part: selection.part, measure: selection.measure, note: selection.note };
+}
+
+// ----------------------------------------------------------
+// 関数：samePosition
+// 2つの場所が、同じパート・小節・音か調べる（前打音か・玉の番号は見ない）（ステップ24-1）
+// ----------------------------------------------------------
+function samePosition(a, b) {
+  return a.part === b.part && a.measure === b.measure && a.note === b.note;
+}
+
+// ----------------------------------------------------------
+// 関数：isGraceSelected
+// 前打音を選んでいるか調べる（ステップ24-1）
+// selection に grace の印があり、その音符に本当に前打音が付いているときだけ true
+// （前打音を外したあとなどに、印だけが残っていても、主音を選んでいることにする）
+// ----------------------------------------------------------
+export function isGraceSelected(score, selection) {
+  if (!selection || !selection.grace) return false;
+  const note = getSelectedNote(score, selection);
+  return !!note && !note.rest && !!note.grace;
+}
+
+// ----------------------------------------------------------
+// 関数：selectedPitches
+// 選んでいるもの（主音か前打音）の高さを、低い順の配列で返す（ステップ24-1）
+//   ・前打音を選んでいるとき … 前打音の高さ（前打音も { pitch, chord } の形なので notePitches が使える）
+//   ・それ以外 … 音符の高さ（重音なら全部。休符なら空の配列）
+// ----------------------------------------------------------
+export function selectedPitches(score, selection) {
+  const note = getSelectedNote(score, selection);
+  if (isGraceSelected(score, selection)) return notePitches(note.grace);
+  return notePitches(note);
 }
 
 // ----------------------------------------------------------
@@ -77,9 +163,10 @@ export function withTopHead(score, selection) {
 // 選んでいる音符の、何番目の玉（低い順。0 から）を選んでいるかを返す（ステップ14-2）
 //   ・重音でなければ 0
 //   ・head が書いていない・玉の数より大きいときは、いちばん上の玉
+//   ・前打音を選んでいるときは、前打音の中の玉の番号（ステップ24-1）
 // ----------------------------------------------------------
 export function selectedHead(score, selection) {
-  const count = notePitches(getSelectedNote(score, selection)).length;
+  const count = selectedPitches(score, selection).length;
   if (count <= 1) return 0;
   const head = selection.head;
   return Number.isInteger(head) && head >= 0 && head < count ? head : count - 1;
@@ -136,6 +223,8 @@ export function durationToJapanese(duration, dots, isRest) {
 // 例：'Violin I　1小節目　1つ目　ラ4＋［ミ5］（A4＋E5）・4分音符'
 // ひし形の玉（ハーモニクスで軽く触れる音）は、音名のうしろに「◇」を付ける（ステップ14-5a）
 // 例：'Violin I　1小節目　1つ目　ラ4＋［レ5◇］（A4＋D5◇）・4分音符'
+// 前打音を選んでいるときは、前打音の高さと種類を出す（ステップ24-1）
+// 例：'Violin I　12小節目　1つ目の前打音　レ4（D4）・短前打音'
 
 // ----------------------------------------------------------
 export function describeSelection(score, selection) {
@@ -152,6 +241,16 @@ export function describeSelection(score, selection) {
   if (note.rest) {
     return `${where}　${length}`;
   }
+
+  // 前打音を選んでいるとき：「○つ目の前打音」と、前打音の高さ・種類（ステップ24-1）
+  if (isGraceSelected(score, selection)) {
+    const gracePitches = selectedPitches(score, selection);
+    const graceHead = selectedHead(score, selection);
+    const graceJapanese = gracePitches.map((pitch, k) => (gracePitches.length > 1 && k === graceHead ? `［${pitchToJapanese(pitch)}］` : pitchToJapanese(pitch))).join("＋");
+    const graceEnglish = gracePitches.map((pitch) => pitchToEnglish(pitch)).join("＋");
+    return `${where}の前打音　${graceJapanese}（${graceEnglish}）・${GRACE_NAMES[note.grace.type] ?? "前打音"}`;
+  }
+
   // 日本語の音名のうしろに、英語の音名をかっこで付ける（ステップ12-1）
   const pitches = notePitches(note);
   const head = selectedHead(score, selection);

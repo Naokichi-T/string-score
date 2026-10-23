@@ -6,6 +6,7 @@
   // 選んでいる音にすでに付いている記号のボタンは青くなる
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // （ステップ14-6a：トレモロの斜線のボタンの右に、［2音トレモロ］のボタンを追加）
+  // （ステップ24-1：前打音を選んでいるときは、前打音のボタンだけを押せるようにする）
   // ==========================================================
   import {
     BOWINGS,
@@ -37,10 +38,25 @@
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（次の音が音符で、タイが付いていないか）（ステップ11-5a）
   //   head         … 重音の中で選んでいる玉の番号（低い順。0 から。［ひし形］のボタンを青くするのに使う）（ステップ14-5a）
-  let { note = null, onsymbol = () => {}, spanState = { slur: false, wedge: null }, canSpanRange = false, canWedgeNote = false, onspanner = () => {}, canGlissando = false, head = 0 } = $props();
+  //   graceSelected … 前打音を選んでいるか（true のときの note は、その主音のデータ）（ステップ24-1）
+  let {
+    note = null,
+    onsymbol = () => {},
+    spanState = { slur: false, wedge: null },
+    canSpanRange = false,
+    canWedgeNote = false,
+    onspanner = () => {},
+    canGlissando = false,
+    head = 0,
+    graceSelected = false,
+  } = $props();
 
   // 音符を選んでいないときは、ボタンを全部押せないようにする
-  let disabled = $derived(!note);
+  // 前打音を選んでいるときも、前打音のボタン以外は押せないようにする（ステップ24-1）
+  let disabled = $derived(!note || graceSelected);
+
+  // 前打音のボタンを押せないか（音符を選んでいないときだけ押せない。前打音を選んでいても押せる）（ステップ24-1）
+  let graceDisabled = $derived(!note);
 
   // 選んでいる音符が重音か（重音には、装飾・前打音を付けられない。もう付いているものは、外すために押せる）（ステップ14-1）
   let isChord = $derived(!!note?.chord);
@@ -225,13 +241,14 @@
     </div>
 
     <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
+    <!-- （ステップ24-1：押すと前打音を選んだ状態になる。前打音を選んでいるときも押せる：同じ種類なら外す・違う種類なら入れ替える） -->
     <div class="group">
       {#each Object.entries(GRACES) as [name, symbol] (name)}
         <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
         <button
           class="tool"
           class:on={note?.grace?.type === name}
-          disabled={disabled || (isChord && note?.grace?.type !== name)}
+          disabled={graceDisabled || (isChord && note?.grace?.type !== name)}
           onclick={() => onsymbol("grace", name)}
           title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
           aria-label={symbol.label}

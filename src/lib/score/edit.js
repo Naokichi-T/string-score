@@ -935,14 +935,150 @@ function shiftByFourth(pitch, direction) {
 // 選んでいる音の前打音の高さを変える（ステップ11-8a）
 // 前打音が付いていない音なら、何もしない
 //   pitch … 新しい高さ { step, alter, octave }
+// （ステップ24-1：前打音を選んで、鍵盤・音名キーを押したときに使う。前打音が重音でも、1つの高さに入れ替える）
 // 戻り値：新しい楽譜データ（前打音がなければ元の楽譜データのまま）
 // ----------------------------------------------------------
 export function setGracePitch(score, selection, pitch) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest || !note.grace) return score;
   return updateNote(score, selection, (n) => {
-    n.grace = { ...n.grace, pitch: { ...pitch } };
+    const { chord: _chord, ...rest } = n.grace; // 重音の上の音は取りのぞく
+    n.grace = { ...rest, pitch: { step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave } };
   });
+}
+
+// ==========================================================
+// ここから下は、選んだ前打音を直す関数（ステップ24-1）
+// 前打音のデータ { type, pitch, chord } は、音符の高さと同じ形（pitch がいちばん低い音、chord が上の音）なので、
+// 「前打音を、ふつうの音符に見立てた楽譜」を仮に作り、音符用の関数（transposeNote・重音の関数など）で直してから、
+// 直した高さだけを、本当の楽譜の前打音に書き戻す（editGrace）
+// 戻り値はどれも { score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字）, head: このあと選ぶ玉の番号 }
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：editGrace
+// 前打音を、音符用の関数で直す（下の関数の共通の中身）（ステップ24-1）
+//   score     … 楽譜データ
+//   selection … 選択中の場所（前打音を選んでいる。head は前打音の中の玉の番号）
+//   edit      … 仮の楽譜と仮の選択中の場所を受け取り、{ score, error, head } を返す関数
+//               （仮の楽譜では、選んでいる音符が「前打音を見立てた音符」に入れ替わっている）
+// ----------------------------------------------------------
+function editGrace(score, selection, edit) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest || !note.grace) return { score: score, error: "", head: 0 };
+
+  // 前打音を、ふつうの音符に見立てる（長さは使わないので、8分音符にしておく）
+  const temp = cloneScore(score);
+  temp.parts[selection.part].measures[selection.measure].notes[selection.note] = {
+    pitch: { ...note.grace.pitch },
+    ...(note.grace.chord ? { chord: note.grace.chord.map((pitch) => ({ ...pitch })) } : {}),
+    duration: "eighth",
+    dots: 0,
+  };
+  // 仮の選択中の場所（前打音の印は取りのぞき、玉の番号だけ残す）
+  const place = { part: selection.part, measure: selection.measure, note: selection.note };
+  if (Number.isInteger(selection.head)) place.head = selection.head;
+
+  const result = edit(temp, place);
+  if (result.error || result.score === temp) return { score: score, error: result.error ?? "", head: result.head ?? 0 };
+
+  // 直した高さを、本当の楽譜の前打音に書き戻す（ほかの所は、元の楽譜のまま）
+  const edited = result.score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const newScore = updateNote(score, selection, (n) => {
+    const { chord: _chord, ...rest } = n.grace;
+    n.grace = { ...rest, pitch: { ...edited.pitch }, ...(edited.chord ? { chord: edited.chord.map((pitch) => ({ ...pitch })) } : {}) };
+  });
+  return { score: newScore, error: "", head: result.head ?? 0 };
+}
+
+// ----------------------------------------------------------
+// 関数：transposeGrace
+// 選んでいる前打音の高さを変える（▲ ▼、↑ ↓ キー）（ステップ24-1）
+//   semitones … 変える半音の数（transposeNote と同じ。±12 なら音名を変えずにオクターブだけ）
+// 前打音が重音なら、選んでいる玉だけを動かす（ほかの玉と同じ高さになるときは動かさない）
+// ----------------------------------------------------------
+export function transposeGrace(score, selection, semitones) {
+  return editGrace(score, selection, (temp, place) => {
+    const target = temp.parts[place.part].measures[place.measure].notes[place.note];
+    if (target.chord) return transposeChordHead(temp, place, semitones);
+    const moved = transposeNote(temp, place, semitones);
+    if (moved === temp) return { score: temp, error: "これ以上は高さを変えられません", head: 0 };
+    return { score: moved, error: "", head: 0 };
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：setGraceAccidental
+// 選んでいる前打音を、その音名の♯・♭・♮にする（ステップ24-1）
+//   alter … 1 なら♯、-1 なら♭、0 なら♮
+// 前打音が重音なら、選んでいる玉だけを変える
+// ----------------------------------------------------------
+export function setGraceAccidental(score, selection, alter) {
+  return editGrace(score, selection, (temp, place) => {
+    const target = temp.parts[place.part].measures[place.measure].notes[place.note];
+    if (target.chord) return setChordHeadAccidental(temp, place, alter);
+    return { score: setAccidental(temp, place, alter), error: "", head: 0 };
+  });
+}
+
+// ----------------------------------------------------------
+// 関数：removeGrace
+// 選んでいる前打音を消す（削除）（ステップ24-1）
+//   ・前打音が重音 … 選んでいる玉だけを外す（removed は false）
+//   ・1音の前打音 … 前打音ごと外す（removed は true。呼ぶ側で、主音を選び直す）
+// 戻り値：{ score, error, head, removed }
+// ----------------------------------------------------------
+export function removeGrace(score, selection) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest || !note.grace) return { score: score, error: "", head: 0, removed: false };
+  if (note.grace.chord) {
+    return { ...editGrace(score, selection, (temp, place) => removeChordHead(temp, place)), removed: false };
+  }
+  const newScore = updateNote(score, selection, (n) => {
+    delete n.grace;
+  });
+  return { score: newScore, error: "", head: 0, removed: true };
+}
+
+// ----------------------------------------------------------
+// 関数：gracePitchForLetter
+// 前打音を選んでいるときに、音名キー（C D E F G A B）で入れる高さを決める（ステップ24-1）
+//   step … 音名（"C"〜"B"）
+// 決め方：♯♭は調号どおり。オクターブは、主音（重音ならいちばん高い音）にいちばん近い高さにする
+//   （前打音は主音のすぐ近くの音が多いため。pitchForLetter は「前の音」に近い高さにする）
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+export function gracePitchForLetter(score, selection, step) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  const alter = keyAlters(keyAt(score, selection.measure))[step];
+  const pitches = notePitches(note);
+  if (pitches.length === 0) return pitchForLetter(score, selection, step);
+  return nearestPitch(step, alter, pitchToMidi(pitches[pitches.length - 1]));
+}
+
+// ----------------------------------------------------------
+// 関数：nearestPitch
+// 音名と♯♭を決めた高さのうち、基準の高さにいちばん近いオクターブのものを返す（ステップ24-1）
+// （pitchForLetter の中にあった決め方を、gracePitchForLetter でも使えるように取り出した）
+//   step  … 音名（"C"〜"B"）
+//   alter … ♯♭の数
+//   base  … 基準の高さ（MIDI の番号）
+// ちょうど同じ近さのときは、低い方にする。範囲の外（ド1 より低い・ド8 より高い）は使わない
+// ----------------------------------------------------------
+function nearestPitch(step, alter, base) {
+  const baseOctave = Math.floor(base / 12) - 1;
+  let best = null;
+  for (let octave = baseOctave - 1; octave <= baseOctave + 1; octave++) {
+    const pitch = { step: step, alter: alter, octave: octave };
+    const midi = pitchToMidi(pitch);
+    if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) continue; // 範囲の外は使わない
+    const distance = Math.abs(midi - base);
+    // 低い方から調べるので、「より近い」ときだけ入れ替えれば、同じ近さなら低い方が残る
+    if (best === null || distance < best.distance) {
+      best = { pitch: pitch, distance: distance };
+    }
+  }
+  return best.pitch;
 }
 
 // ==========================================================
@@ -1195,20 +1331,8 @@ export function pitchForLetter(score, selection, step) {
     base = pitchToMidi({ step: "C", alter: 0, octave: INSTRUMENTS[instrument].keyboardOctave + 1 });
   }
 
-  // 基準の前後のオクターブを比べて、いちばん近いものを選ぶ
-  const baseOctave = Math.floor(base / 12) - 1;
-  let best = null;
-  for (let octave = baseOctave - 1; octave <= baseOctave + 1; octave++) {
-    const pitch = { step: step, alter: alter, octave: octave };
-    const midi = pitchToMidi(pitch);
-    if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) continue; // 範囲の外は使わない
-    const distance = Math.abs(midi - base);
-    // 低い方から調べるので、「より近い」ときだけ入れ替えれば、同じ近さなら低い方が残る
-    if (best === null || distance < best.distance) {
-      best = { pitch: pitch, distance: distance };
-    }
-  }
-  return best.pitch;
+  // 基準の前後のオクターブを比べて、いちばん近いものを選ぶ（ステップ24-1：nearestPitch に取り出した）
+  return nearestPitch(step, alter, base);
 }
 
 // ==========================================================
