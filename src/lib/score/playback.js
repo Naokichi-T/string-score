@@ -1012,7 +1012,11 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
         const nowEvents = new Map();
         const pitches = soundingPitches(note, part.instrument); // ハーモニクスなら、聞こえる音（ステップ14-5a）
         // 弦楽器の弾き方で鳴らすか：アルペジオがなく、3音以上の重音で、はじく音・トレモロでないとき（ステップ14-4a）
-        const broken = !note.arpeggio && pitches.length >= 3 && !plucked && !note.tremolo;
+        // （ステップ24-2：前打音のある重音は、前打音で主音の頭を借りるので、この弾き方にはしない）
+        const broken = !note.arpeggio && !note.grace && pitches.length >= 3 && !plucked && !note.tremolo;
+        // 前打音を鳴らす長さ（ティック）と、前打音の音をもう作ったか（重音の主音でも、前打音の音は1回だけ作る）（ステップ24-2）
+        const graceTicks = note.grace ? graceLength(note, length) : 0;
+        let graceDone = false;
         // 2音トレモロ：下の音の鳴らす音1つだけを作り、上の音は alternatePitch に入れて交互に鳴らす（ステップ14-6a）
         // （2音トレモロにはタイを付けない決まりなので、タイの続きにはならない）
         const alternate = isAlternate(note);
@@ -1072,22 +1076,30 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
             // 前打音：主音の頭の一部を借りて、先に前打音を鳴らす（ステップ11-8a）
             //   短前打音 … 32分音符の長さ（主音が短いときは、主音の半分まで）
             //   長前打音 … 主音の半分（付点の音符なら3分の2）
-            if (note.grace && k === 0) {
-              const graceTicks = graceLength(note, length);
-              events.push({
-                ...event,
-                pitch: note.grace.pitch,
-                ticks: graceTicks,
-                soundTicks: graceTicks,
-                connected: true, // 主音とつなげて鳴らす
-                fermataEnd: false,
-                ornament: null, // 装飾・トレモロ・グリッサンドは主音のほうだけ
-                upper: null,
-                lower: null,
-                tremoloStep: null,
-                alternatePitch: null,
-                glissTo: null,
-              });
+            // （ステップ24-2：前打音が重音なら、全部の高さをいっしょに鳴らす。
+            //   主音が重音なら、どの高さも借りたぶんだけ遅く始める。前打音の音は、最初に作る主音の音のときに1回だけ作る）
+            if (note.grace) {
+              if (!graceDone) {
+                notePitches(note.grace).forEach((gracePitch) => {
+                  events.push({
+                    ...event,
+                    pitch: gracePitch,
+                    startTick: tick, // 主音の頭から鳴らす
+                    ticks: graceTicks,
+                    soundTicks: graceTicks,
+                    connected: true, // 主音とつなげて鳴らす
+                    fermataEnd: false,
+                    ornament: null, // 装飾・トレモロ・グリッサンドは主音のほうだけ
+                    upper: null,
+                    lower: null,
+                    tremoloStep: null,
+                    alternatePitch: null,
+                    glissTo: null,
+                    rollIndex: 0, // アルペジオでずらすのは主音のほうだけ
+                  });
+                });
+                graceDone = true;
+              }
               // 主音は、借りたぶんだけ遅く始めて、短くする
               event.startTick = event.startTick + graceTicks;
               event.ticks = event.ticks - graceTicks;

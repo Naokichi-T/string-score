@@ -21,6 +21,7 @@
   // （ステップ14-5a：ハーモニクス（ひし形の玉のある音符）の音を確かめるときは、聞こえる音を鳴らす）
   // （ステップ17-1：「楽譜の設定」タブの［移調する］で、楽譜全体を移調する）
   // （ステップ24-1：前打音を1つの音として選べるようにする（クリック・← →）。選んだ前打音の高さ・♯♭♮・削除）
+  // （ステップ24-2：前打音を選んで［重音］を入にすると、前打音に音を足す。前打音にも指番号を付けられる）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -70,6 +71,9 @@
     setGraceAccidental, // 選んだ前打音の ♯♭♮（ステップ24-1）
     removeGrace, // 選んだ前打音を消す（ステップ24-1）
     gracePitchForLetter, // 前打音を選んでいるときに、音名キーで入れる高さ（ステップ24-1）
+    toggleGraceChordPitch, // 前打音に音を足す・外す（［重音］が入のとき）（ステップ24-2）
+    graceChordPitchForLetter, // 前打音に足すときに、音名キーで入れる高さ（ステップ24-2）
+    toggleGraceFingering, // 前打音の指番号（ステップ24-2）
     canSpan,
     getSpanState,
     toggleSpanner,
@@ -1140,8 +1144,9 @@
       return;
     }
     // 前打音を選んでいるときは、主音にいちばん近い高さにする（ステップ24-1）
+    // ［重音］が入なら、前打音のいちばん高い音のすぐ上の高さにする（ステップ24-2）
     if (graceSelected) {
-      inputPitch(gracePitchForLetter(score, selection, step));
+      inputPitch(chordMode ? graceChordPitchForLetter(score, selection, step) : gracePitchForLetter(score, selection, step));
       return;
     }
     // ［重音］が入っていて音符を選んでいるときは、選んでいる重音のすぐ上の高さにする（ステップ14-1）
@@ -1158,6 +1163,15 @@
     // 前打音を選んでいるなら、主音ではなく前打音の高さを入れ替える（次の音へは進まない。何回でも押せる）（ステップ24-1）
     // （ステップ11-8a の「前打音を付けた直後に1回だけ鍵盤で高さを入れる」しくみは、これに置きかえた）
     if (graceSelected) {
+      // ［重音］が入なら、前打音に音を足す・外す（足した玉を選ぶ。響きを確かめられるように、前打音の全部の音を鳴らす）（ステップ24-2）
+      if (chordMode) {
+        const result = toggleGraceChordPitch(score, selection, pitch);
+        message = result.error;
+        if (result.error) return;
+        commit(result.score, graceWithHead(result.score, selection, result.head));
+        playSelected();
+        return;
+      }
       const pizzAtGrace = isPizzAt(score, selection);
       commit(setGracePitch(score, selection, pitch), { ...mainPlace(selection), grace: true });
       message = "";
@@ -1499,10 +1513,16 @@
   //   value … 記号の名前や数字
   // ----------------------------------------------------------
   function handleSymbol(kind, value) {
-    // 前打音を選んでいるとき：効くのは前打音のボタンだけ（ステップ24-1）
+    // 前打音を選んでいるとき：効くのは前打音のボタンと指番号だけ（ステップ24-1）
     //   同じ種類のボタン … 前打音を外して、主音を選ぶ
     //   違う種類のボタン … 高さはそのままで種類だけ入れ替え、前打音を選んだままにする
+    //   指番号 … 前打音に付ける・外す（ステップ24-2）
     if (graceSelected) {
+      if (kind === "fingering") {
+        message = "";
+        commit(toggleGraceFingering(score, selection, value));
+        return;
+      }
       if (kind !== "grace") return;
       message = "";
       const main = mainPlace(selection);

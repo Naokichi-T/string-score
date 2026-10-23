@@ -216,6 +216,7 @@ function createMeasureRest(VF, note, clef) {
 //   ・短前打音 … 斜線の付いた小さな8分音符
 //   ・長前打音 … 斜線のない小さな音符（主音の半分の長さ。付点の主音なら付点を取った長さ）
 // 臨時記号は、調号と違う ♯♭ のときだけ付ける（小節の中の、前の臨時記号は見ない）
+// （ステップ24-2：前打音の重音（grace.chord）も描く。臨時記号は玉ごとに決める。前打音の指番号（grace.fingerings）も上に書く）
 //   staveNote … 主音（VexFlow の音符）
 //   note      … 主音のデータ（note.grace に前打音が入っている）
 //   clef      … 今の音部記号
@@ -230,18 +231,30 @@ function addGraceNote(VF, staveNote, note, clef, keySignature) {
     duration = (note.dots ?? 0) > 0 ? DURATIONS[note.duration].vf : (HALF_DURATION[note.duration] ?? "8");
   }
 
+  // 前打音の高さ（重音なら低い順に全部。前打音も { pitch, chord } の形なので notePitches が使える）（ステップ24-2）
+  const gracePitches = notePitches(grace);
   const graceNote = new VF.GraceNote({
-    keys: [pitchToVexKey(grace.pitch)],
+    keys: gracePitches.map((pitch) => pitchToVexKey(pitch)),
     duration: duration,
     clef: CLEFS[clef].vf,
     slash: GRACES[grace.type]?.slash ?? isShort, // 短前打音だけ斜線
     stemDirection: VF.Stem.UP, // 前打音の符尾は上向きにそろえる
   });
 
-  // 臨時記号：調号どおりでなければ付ける
-  const alter = grace.pitch.alter ?? 0;
-  if (alter !== keyAlters(keySignature)[grace.pitch.step]) {
-    graceNote.addModifier(new VF.Accidental(ALTER_TO_VF[alter] ?? "n"), 0);
+  // 臨時記号：調号どおりでなければ付ける（重音なら玉ごとに。addModifier の2つ目の数は「何番目の玉か」）（ステップ24-2）
+  gracePitches.forEach((pitch, index) => {
+    const alter = pitch.alter ?? 0;
+    if (alter !== keyAlters(keySignature)[pitch.step]) {
+      graceNote.addModifier(new VF.Accidental(ALTER_TO_VF[alter] ?? "n"), index);
+    }
+  });
+
+  // 前打音の指番号：前打音の上に小さい数字で書く（複数あれば、付けた順に下から積み重ねる）（ステップ24-2）
+  for (const number of grace.fingerings ?? []) {
+    const fingering = new VF.Annotation(String(number));
+    fingering.setFont("Academico", 11);
+    fingering.setVerticalJustification(VF.Annotation.VerticalJustify.TOP);
+    graceNote.addModifier(fingering, 0);
   }
 
   // 前打音のまとまりを作って、主音に付ける（true：主音とスラーでつなぐ）

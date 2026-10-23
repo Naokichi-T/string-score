@@ -660,16 +660,17 @@ export function canGlissando(score, selection) {
 //   value … 記号の名前や数字（'down'・2・'staccato' など。フェルマータは使わない）
 // 1つだけのもの（弓・強弱・ブレスとカエスーラ・装飾・トレモロ）は、別のものを押すと入れ替わる
 // 装飾とトレモロは、1つの音にどちらか1つだけ（片方を付けると、もう片方は外れる）
-// 重音には、装飾・前打音を付けられない（外すことはできる）（ステップ14-1）
+// 重音には、装飾を付けられない（外すことはできる）（ステップ14-1）
+// （ステップ24-2：重音にも前打音を付けられるようにした）
 // 戻り値：新しい楽譜データ（休符なら元の楽譜データのまま）
 // ----------------------------------------------------------
 export function toggleNoteSymbol(score, selection, kind, value) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest) return score;
 
-  // 重音：装飾・前打音は、付いていなければ付けない（ステップ14-1）
+  // 重音：装飾は、付いていなければ付けない（ステップ14-1）
+  // （前打音は、重音にも付けられる（ステップ24-2））
   if (note.chord && kind === "ornament" && !note.ornament) return score;
-  if (note.chord && kind === "grace" && !note.grace) return score;
 
   // 人工ハーモニクス（kind が 'artificialHarmonic'）（ステップ14-5a）
   //   ひし形の玉がある音符：ひし形を外す
@@ -785,6 +786,7 @@ export function toggleNoteSymbol(score, selection, kind, value) {
   // 前打音（kind が 'grace'）（ステップ11-8a）
   //   同じ種類が付いていれば外す。違う種類が付いていれば、高さはそのままで種類だけ入れ替える
   //   付いていなければ、主音の2度上（調号どおりの♯♭）の高さで付ける（あとで鍵盤で高さを変える）
+  //   （ステップ24-2：主音が重音なら、いちばん高い音の2度上）
   if (kind === "grace") {
     return updateNote(score, selection, (n) => {
       if (n.grace && n.grace.type === value) {
@@ -792,7 +794,8 @@ export function toggleNoteSymbol(score, selection, kind, value) {
       } else if (n.grace) {
         n.grace = { ...n.grace, type: value };
       } else {
-        n.grace = { type: value, pitch: stepAbove(n.pitch, keyAt(score, selection.measure)) };
+        const top = notePitches(n)[notePitches(n).length - 1]; // いちばん高い音（重音でなければ主音そのもの）
+        n.grace = { type: value, pitch: stepAbove(top, keyAt(score, selection.measure)) };
       }
     });
   }
@@ -967,18 +970,7 @@ function editGrace(score, selection, edit) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest || !note.grace) return { score: score, error: "", head: 0 };
 
-  // 前打音を、ふつうの音符に見立てる（長さは使わないので、8分音符にしておく）
-  const temp = cloneScore(score);
-  temp.parts[selection.part].measures[selection.measure].notes[selection.note] = {
-    pitch: { ...note.grace.pitch },
-    ...(note.grace.chord ? { chord: note.grace.chord.map((pitch) => ({ ...pitch })) } : {}),
-    duration: "eighth",
-    dots: 0,
-  };
-  // 仮の選択中の場所（前打音の印は取りのぞき、玉の番号だけ残す）
-  const place = { part: selection.part, measure: selection.measure, note: selection.note };
-  if (Number.isInteger(selection.head)) place.head = selection.head;
-
+  const { temp, place } = graceAsNote(score, selection);
   const result = edit(temp, place);
   if (result.error || result.score === temp) return { score: score, error: result.error ?? "", head: result.head ?? 0 };
 
@@ -989,6 +981,68 @@ function editGrace(score, selection, edit) {
     n.grace = { ...rest, pitch: { ...edited.pitch }, ...(edited.chord ? { chord: edited.chord.map((pitch) => ({ ...pitch })) } : {}) };
   });
   return { score: newScore, error: "", head: result.head ?? 0 };
+}
+
+// ----------------------------------------------------------
+// 関数：graceAsNote
+// 前打音を、ふつうの音符に見立てた仮の楽譜と、仮の選択中の場所を作る（editGrace などで使う）（ステップ24-2）
+// （ステップ24-1 では editGrace の中にあったものを取り出した）
+//   score     … 楽譜データ
+//   selection … 選択中の場所（前打音を選んでいる。前打音が付いていること）
+// 戻り値：{ temp: 仮の楽譜, place: 仮の選択中の場所（前打音の印は取りのぞき、玉の番号だけ残す） }
+// ----------------------------------------------------------
+function graceAsNote(score, selection) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  // 前打音を、ふつうの音符に見立てる（長さは使わないので、8分音符にしておく）
+  const temp = cloneScore(score);
+  temp.parts[selection.part].measures[selection.measure].notes[selection.note] = {
+    pitch: { ...note.grace.pitch },
+    ...(note.grace.chord ? { chord: note.grace.chord.map((pitch) => ({ ...pitch })) } : {}),
+    duration: "eighth",
+    dots: 0,
+  };
+  const place = { part: selection.part, measure: selection.measure, note: selection.note };
+  if (Number.isInteger(selection.head)) place.head = selection.head;
+  return { temp: temp, place: place };
+}
+
+// ----------------------------------------------------------
+// 関数：toggleGraceChordPitch
+// 前打音を選んで［重音］が入のときに、鍵盤・音名キーで押された高さを前打音に足す（ステップ24-2）
+// （同じ高さがもうあれば、その音を外す。最後の1音は外さない。4音まで。toggleChordPitch と同じ決まり）
+//   pitch … 足す（外す）高さ { step, alter, octave }
+// ----------------------------------------------------------
+export function toggleGraceChordPitch(score, selection, pitch) {
+  return editGrace(score, selection, (temp, place) => toggleChordPitch(temp, place, pitch));
+}
+
+// ----------------------------------------------------------
+// 関数：graceChordPitchForLetter
+// 前打音を選んで［重音］が入のときに、音名キーで足す高さを決める（ステップ24-2）
+// （前打音のいちばん高い音より上で、いちばん近い高さ。chordPitchForLetter と同じ決め方）
+//   step … 音名（"C"〜"B"）
+// 戻り値：音の高さ { step, alter, octave }
+// ----------------------------------------------------------
+export function graceChordPitchForLetter(score, selection, step) {
+  const { temp, place } = graceAsNote(score, selection);
+  return chordPitchForLetter(temp, place, step);
+}
+
+// ----------------------------------------------------------
+// 関数：toggleGraceFingering
+// 選んでいる前打音に指番号を付ける（もう付いていれば外す）（ステップ24-2）
+// 前打音の指番号は grace.fingerings に、付けた順に入れる（主音の fingerings と同じ形）
+//   number … 指番号（0〜4）
+// 戻り値：新しい楽譜データ（前打音がなければ元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleGraceFingering(score, selection, number) {
+  const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
+  if (!note || note.rest || !note.grace) return score;
+  return updateNote(score, selection, (n) => {
+    const list = toggleInList(n.grace.fingerings ?? [], number);
+    const { fingerings: _old, ...rest } = n.grace;
+    n.grace = list.length > 0 ? { ...rest, fingerings: list } : rest; // 空になったら項目ごと消す
+  });
 }
 
 // ----------------------------------------------------------
@@ -1348,7 +1402,8 @@ export function pitchForLetter(score, selection, step) {
 //   ・同じ高さ（鍵盤で同じ所）の音がもうある → その音を外す（ただし最後の1音は外さない）
 //   ・ない → 足す（MAX_CHORD_NOTES 音より多くはしない）
 //   ・足したり外したりしたら、低い順に並べ直す（いちばん低い音が pitch、残りが chord）
-//   ・重音になったら、重音には付けられない記号（装飾・前打音・グリッサンド）を外す
+//   ・重音になったら、重音には付けられない記号（装飾・グリッサンド）を外す
+//     （ステップ24-2：前打音は重音にも付けられるので、外さない）
 // 選んでいるのが休符のときは、ここでは何もしない（休符に音を入れるのは、編集ページで行う）
 // 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字）, head: このあと選ぶ玉の番号 }（ステップ14-2：head を足した）
 //   head … 足したときは足した玉、外したときはそのすぐ下の玉（いちばん下を外したら、新しいいちばん下）
@@ -1381,9 +1436,8 @@ export function toggleChordPitch(score, selection, pitch) {
   }
   const newScore = updateNote(score, selection, (n) => {
     setNotePitches(n, [...pitches, pitch]);
-    // 重音には付けられない記号を外す
+    // 重音には付けられない記号を外す（前打音は外さない（ステップ24-2））
     delete n.ornament;
-    delete n.grace;
     delete n.glissando;
   });
 

@@ -7,6 +7,7 @@
   // （ステップ4-6：範囲に付けるスラー・松葉のボタンを追加）
   // （ステップ14-6a：トレモロの斜線のボタンの右に、［2音トレモロ］のボタンを追加）
   // （ステップ24-1：前打音を選んでいるときは、前打音のボタンだけを押せるようにする）
+  // （ステップ24-2：重音にも前打音を付けられるようにする。前打音を選んでいるときは、指番号も押せる（前打音に付く））
   // ==========================================================
   import {
     BOWINGS,
@@ -56,7 +57,11 @@
   let disabled = $derived(!note || graceSelected);
 
   // 前打音のボタンを押せないか（音符を選んでいないときだけ押せない。前打音を選んでいても押せる）（ステップ24-1）
+  // 指番号のボタンも同じ（前打音を選んでいるときは、前打音に付く）（ステップ24-2）
   let graceDisabled = $derived(!note);
+
+  // 指番号のボタンを青くするための、今付いている指番号（前打音を選んでいるときは前打音のもの）（ステップ24-2）
+  let fingerings = $derived((graceSelected ? note?.grace?.fingerings : note?.fingerings) ?? []);
 
   // 選んでいる音符が重音か（重音には、装飾・前打音を付けられない。もう付いているものは、外すために押せる）（ステップ14-1）
   let isChord = $derived(!!note?.chord);
@@ -84,10 +89,17 @@
       {/each}
     </div>
 
-    <!-- 指番号 -->
+    <!-- 指番号（前打音を選んでいるときは、前打音に付く）（ステップ24-2） -->
     <div class="group" title="指番号">
       {#each FINGERINGS as number (number)}
-        <button class="tool text" class:on={(note?.fingerings ?? []).includes(number)} {disabled} onclick={() => onsymbol("fingering", number)} title="指番号 {number}" aria-label="指番号 {number}">
+        <button
+          class="tool text"
+          class:on={fingerings.includes(number)}
+          disabled={graceDisabled}
+          onclick={() => onsymbol("fingering", number)}
+          title={graceSelected ? `指番号 ${number}（前打音に付ける）` : `指番号 ${number}`}
+          aria-label="指番号 {number}"
+        >
           {number}
         </button>
       {/each}
@@ -242,17 +254,10 @@
 
     <!-- 前打音（短前打音・長前打音）。押したあと、鍵盤で前打音の高さを入れる（ステップ11-8a） -->
     <!-- （ステップ24-1：押すと前打音を選んだ状態になる。前打音を選んでいるときも押せる：同じ種類なら外す・違う種類なら入れ替える） -->
+    <!-- （ステップ24-2：重音にも付けられるようにした） -->
     <div class="group">
       {#each Object.entries(GRACES) as [name, symbol] (name)}
-        <!-- 重音のときは、今付いているもの（外すため）だけ押せる（ステップ14-1） -->
-        <button
-          class="tool"
-          class:on={note?.grace?.type === name}
-          disabled={graceDisabled || (isChord && note?.grace?.type !== name)}
-          onclick={() => onsymbol("grace", name)}
-          title={isChord ? `${symbol.label}（重音には付けられません）` : symbol.label}
-          aria-label={symbol.label}
-        >
+        <button class="tool" class:on={note?.grace?.type === name} disabled={graceDisabled} onclick={() => onsymbol("grace", name)} title={symbol.label} aria-label={symbol.label}>
           <span class="icon grace">{symbol.glyph}</span>
         </button>
       {/each}

@@ -11,7 +11,7 @@
 // ・楽譜の中の調（途中で変わる調も）は、全部同じだけずらす
 //   1小節目は選んだ調にする。途中の調で ♯♭ が7つ以上になったら、
 //   同じ音で記号の少ない調に読み替える（例：嬰ハ長調（♯7つ）→ 変ニ長調（♭5つ））
-// ・動かすのは、音符の高さ（pitch）・重音の上の音（chord）・前打音の高さ（grace.pitch）
+// ・動かすのは、音符の高さ（pitch）・重音の上の音（chord）・前打音の高さ（grace.pitch）・前打音の重音の上の音（grace.chord。ステップ24-2）
 //   ひし形の印（diamond）はそのまま残す
 //
 // 【5度圏の番号（tpc）を使う理由】
@@ -239,6 +239,8 @@ export function transposeScore(score, toKey, direction) {
         note.pitch = move(note.pitch, m);
         if (note.chord) note.chord = note.chord.map((pitch) => move(pitch, m));
         if (note.grace && note.grace.pitch) note.grace = { ...note.grace, pitch: move(note.grace.pitch, m) };
+        // 前打音の重音の上の音も動かす（ステップ24-2）
+        if (note.grace && note.grace.chord) note.grace = { ...note.grace, chord: note.grace.chord.map((pitch) => move(pitch, m)) };
       });
     });
 
