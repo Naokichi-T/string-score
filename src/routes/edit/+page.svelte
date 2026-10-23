@@ -22,6 +22,7 @@
   // （ステップ17-1：「楽譜の設定」タブの［移調する］で、楽譜全体を移調する）
   // （ステップ24-1：前打音を1つの音として選べるようにする（クリック・← →）。選んだ前打音の高さ・♯♭♮・削除）
   // （ステップ24-2：前打音を選んで［重音］を入にすると、前打音に音を足す。前打音にも指番号を付けられる）
+  // （ステップ27：付点の音（休符）を入れたら、付点のボタンを外す）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -1078,6 +1079,7 @@
   // 選んでいる場所に音（休符）を置いて、次の場所に進む
   //   newNote … 置く音（休符）のデータ
   // 置けたら true、置けなかったら false を返す
+  // 付点の音（休符）を置いたら、付点のボタンを外す（次の音は付点なしで入る）（ステップ27）
   // ----------------------------------------------------------
   function putNote(newNote) {
     if (!selection) {
@@ -1104,6 +1106,7 @@
     if (mode === "insert") {
       const result = insertAt(score, selection, newNote);
       commit(result.score, result.selection);
+      if (newNote.dots) dotted = false; // 付点のボタンを外す（ステップ27）
       return true;
     }
 
@@ -1112,6 +1115,7 @@
     // 次の場所へ（最後の小節の終わりなら、小節が1つ増える）
     const next = nextPosition(placed, selection);
     commit(next.score, next.selection);
+    if (newNote.dots) dotted = false; // 付点のボタンを外す（ステップ27）
     return true;
   }
 
@@ -1217,6 +1221,7 @@
       }
       message = "";
       commit(replaceAt(score, selection, { pitch: pitch, duration: duration, dots: dots, tie: false }));
+      if (dots) dotted = false; // 付点の音を入れたら、付点のボタンを外す（ステップ27）
       playSelected();
       return;
     }
