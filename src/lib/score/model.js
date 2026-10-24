@@ -272,11 +272,14 @@ export function isAlternate(note) {
 //   note    … 音符のデータ
 //   pitches … 高さの配列（順番はばらばらでもよい。同じ高さが入っていないこと）
 //   ひし形の印（diamond）は、その高さに付けたまま並べ直す（ステップ14-5a）
+//   注意の記号の印（courtesy）も、その高さに付けたまま並べ直す（注意の臨時記号）
 // ----------------------------------------------------------
 export function setNotePitches(note, pitches) {
   // 低い順に並べる（同じ高さなら、音名の順）
   const sorted = pitches
-    .map((pitch) => ({ step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave, ...(pitch.diamond ? { diamond: true } : {}) }))
+    // （注意の臨時記号：ひし形の印 diamond と同じく、注意の記号の印 courtesy も残す。
+    //   残さないと、重音の玉や前打音で付けた印が、並べ直すたびに消えてしまう）
+    .map((pitch) => ({ step: pitch.step, alter: pitch.alter ?? 0, octave: pitch.octave, ...(pitch.diamond ? { diamond: true } : {}), ...(pitch.courtesy ? { courtesy: true } : {}) }))
     .sort((a, b) => pitchNumber(a) - pitchNumber(b) || STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
   note.pitch = sorted[0];
   if (sorted.length > 1) {

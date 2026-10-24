@@ -342,7 +342,8 @@ export function transposeNote(score, selection, semitones) {
     const moved = notePitches(n).map((pitch) => {
       if (Math.abs(semitones) === 12) {
         // オクターブだけ変える（音名と♯♭はそのまま）
-        return { ...pitch, octave: pitch.octave + semitones / 12 };
+        // （注意の臨時記号：高さが変わるので、注意の記号の印は外す（withoutCourtesy））
+        return withoutCourtesy({ ...pitch, octave: pitch.octave + semitones / 12 });
       }
       // 半音ずつ：調に合わせて♯か♭で呼び直す（ひし形の印は残す（ステップ14-5a））
       return { ...midiToPitch(pitchToMidi(pitch) + semitones, key), ...(pitch.diamond ? { diamond: true } : {}) };
@@ -352,9 +353,40 @@ export function transposeNote(score, selection, semitones) {
 }
 
 // ----------------------------------------------------------
+// 関数：withoutCourtesy
+// 高さのデータから、注意の記号の印（courtesy）を外したコピーを返す（注意の臨時記号）
+// 高さを変えたときに使う（別の高さの音に、注意の記号が残らないようにするため）
+//   pitch … 高さ { step, alter, octave, courtesy, diamond など }
+// 戻り値：印のない高さ（ほかの項目（ひし形の印など）はそのまま）
+// ----------------------------------------------------------
+function withoutCourtesy(pitch) {
+  const { courtesy, ...rest } = pitch;
+  return rest;
+}
+
+// ----------------------------------------------------------
+// 関数：accidentalPitch
+// ♯♭♮ のボタンを押したときの、新しい高さを返す（注意の臨時記号）
+//   pitch … 今の高さ
+//   alter … 押したボタン（1 なら♯、-1 なら♭、0 なら♮）
+// 決まり
+//   ・今の ♯♭♮ とちがう → その ♯♭♮ にする（注意の記号の印は外す）
+//   ・今の ♯♭♮ と同じ   → 注意の記号の印を付ける・外す（押すたびに入れかわる）
+//       印があると、決まりで要らなくても記号を出す（accidentals.js のルール⑦）
+//       例：ハ長調で、前の小節のファ♯のあとのファ を選んで［♮］ → ♮ が出る。もう一度［♮］ → 消える
+// 戻り値：新しい高さ（コピー。渡された高さは書き換えない）
+// ----------------------------------------------------------
+function accidentalPitch(pitch, alter) {
+  if ((pitch.alter ?? 0) !== alter) return withoutCourtesy({ ...pitch, alter: alter });
+  if (pitch.courtesy) return withoutCourtesy(pitch);
+  return { ...pitch, courtesy: true };
+}
+
+// ----------------------------------------------------------
 // 関数：setAccidental
 // 選んでいる音を、その音名の♯・♭・♮にする（例：ミ → ミ♭）
 //   alter … 1 なら♯、-1 なら♭、0 なら♮
+// （注意の臨時記号：今と同じ ♯♭♮ のボタンを押したら、注意の記号の印を付ける・外す（accidentalPitch））
 // 戻り値：新しい楽譜データ（休符・重音なら元の楽譜データのまま）
 // （重音の中の1つの音の ♯♭♮ は、ステップ14-2 で重音の中の音を選べるようにしてから入れる）
 // ----------------------------------------------------------
@@ -362,7 +394,7 @@ export function setAccidental(score, selection, alter) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   if (!note || note.rest || note.chord) return score;
   return updateNote(score, selection, (n) => {
-    n.pitch.alter = alter;
+    n.pitch = accidentalPitch(n.pitch, alter);
   });
 }
 
@@ -1501,7 +1533,8 @@ export function transposeChordHead(score, selection, semitones) {
   if (midi < LOWEST_MIDI || midi > HIGHEST_MIDI) {
     return { score: score, error: "これ以上は高さを変えられません", head: head };
   }
-  const newPitch = Math.abs(semitones) === 12 ? { ...pitch, octave: pitch.octave + semitones / 12 } : midiToPitch(midi, keyAt(score, selection.measure));
+  // （注意の臨時記号：オクターブだけ変えるときも、高さが変わるので注意の記号の印は外す）
+  const newPitch = Math.abs(semitones) === 12 ? withoutCourtesy({ ...pitch, octave: pitch.octave + semitones / 12 }) : midiToPitch(midi, keyAt(score, selection.measure));
   return replaceChordHead(score, selection, newPitch);
 }
 
@@ -1510,12 +1543,15 @@ export function transposeChordHead(score, selection, semitones) {
 // 重音の中の、選んでいる玉だけを、その音名の♯・♭・♮にする
 //   alter … 1 なら♯、-1 なら♭、0 なら♮
 // ほかの玉と同じ高さになるときは変えない（例：ミとファの重音で、ミを♯にする）
+// （注意の臨時記号：今と同じ ♯♭♮ のボタンを押したら、その玉の注意の記号の印を付ける・外す）
 // ----------------------------------------------------------
 export function setChordHeadAccidental(score, selection, alter) {
   const note = score.parts[selection.part].measures[selection.measure].notes[selection.note];
   const head = selectedHead(score, selection);
   const pitch = notePitches(note)[head];
-  if ((pitch.alter ?? 0) === alter) return { score: score, error: "", head: head }; // 変わらない
+  // 今と同じ ♯♭♮：高さは変わらないので、注意の記号の印だけを入れかえる（注意の臨時記号）
+  // （人工ハーモニクスでも、もう1つの玉は動かさない）
+  if ((pitch.alter ?? 0) === alter) return replaceChordHead(score, selection, accidentalPitch(pitch, alter));
   // 人工ハーモニクス（ふつうの玉＋その4度上のひし形の2音）：選んだ玉の ♯♭♮ を変えて、もう1つの玉を4度の間に合わせ直す（ステップ14-5a）
   // （ほかの形のひし形の音符は、選んだ玉だけを変える）
   const pitches = notePitches(note);
@@ -1529,7 +1565,7 @@ export function setChordHeadAccidental(score, selection, alter) {
     });
     return { score: newScore, error: "", head: head };
   }
-  return replaceChordHead(score, selection, { ...pitch, alter: alter });
+  return replaceChordHead(score, selection, accidentalPitch(pitch, alter)); // ♯♭♮ を変える（注意の記号の印は外れる）
 }
 
 // ----------------------------------------------------------

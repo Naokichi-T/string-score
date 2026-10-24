@@ -32,6 +32,10 @@
 //       または、前の小節が「前の部分」で、2つ足すとちょうど1小節になる（印を書かないアプリのファイルのため）
 //   ・それ以外は、前の部分（short。小節の頭から・番号に数える）にする
 //   ・長さが拍の単位で割り切れないときは、アウフタクトと同じく切り上げて知らせる
+// （注意の臨時記号：<note> に <accidental>（表示する臨時記号）が書いてあれば、高さに注意の記号の印（courtesy）を付ける）
+//   ・ふつうの音符・重音の玉・前打音のどれも同じ
+//   ・最後に pruneCourtesy で、決まりでもともと記号が付く音の印を外す
+//     → 印が残るのは「決まりでは要らないのに、ファイルに記号が書いてあった音」（＝注意の記号）だけ
 //
 // 【流れ】
 //   ファイル → readMusicXMLFile → MusicXML の文字
@@ -93,6 +97,7 @@ import {
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
 import { cleanSpanners, cleanAlternates } from "./edit.js";
+import { pruneCourtesy } from "./accidentals.js"; // 要らない注意の記号の印を外す（注意の臨時記号）
 import { marksFromFile } from "./beams.js"; // 連桁の印（ステップ19-2）
 import { stemsFromFile } from "./stems.js"; // 符尾の向き（ステップ22）
 // 文字から、テンポの変化の意味を当てる関数と、このアプリで書き出した rit.・自由な文字の印（id の始まり）（自由な文字のテンポの指示）
@@ -441,6 +446,17 @@ function readTempo(firstMeasure) {
 }
 
 // ----------------------------------------------------------
+// 関数：markCourtesy
+// <note> に <accidental>（表示する臨時記号）が書いてあれば、高さに注意の記号の印（courtesy）を付ける（注意の臨時記号）
+//   noteElement … <note>
+//   pitch       … 読んだ高さのデータ（ここに印を足す）
+// ここでは、記号が書いてあれば全部に印を付ける（要らない印は、最後に pruneCourtesy で外す）
+// ----------------------------------------------------------
+function markCourtesy(noteElement, pitch) {
+  if (childElement(noteElement, "accidental")) pitch.courtesy = true;
+}
+
+// ----------------------------------------------------------
 // 関数：harmonicElements
 // <note> の中の <notations> → <technical> → <harmonic> を全部集めて返す（ステップ14-5b）
 //   noteElement … <note>
@@ -554,6 +570,7 @@ function readNote(noteElement, divisions) {
           pairMark: pair, // { type: "start" か "stop", count: 連桁の本数 }
         };
         if (isDiamondNote(noteElement)) note.pitch.diamond = true;
+        markCourtesy(noteElement, note.pitch); // 臨時記号が書いてあれば、注意の記号の印（注意の臨時記号）
         return { note: note, ticks: pairTicks };
       }
     }
@@ -598,6 +615,8 @@ function readNote(noteElement, divisions) {
   const note = { pitch: { step: step, alter: alter, octave: octave }, duration: shape.duration, dots: shape.dots, tie: tie };
   // ひし形の玉なら、高さに印を付ける（重音の2つ目からの音も、この関数で読むので、高さごとに付く）（ステップ14-5b）
   if (isDiamondNote(noteElement)) note.pitch.diamond = true;
+  // 臨時記号が書いてあれば、注意の記号の印を付ける（重音の2つ目からの音も、この関数で読むので、高さごとに付く）（注意の臨時記号）
+  markCourtesy(noteElement, note.pitch);
   if (tuplet) note.tuplet = tuplet; // 連符の印（ステップ10-6）
   return { note: note, ticks: ticks };
 }
@@ -1512,6 +1531,7 @@ function readPart(partElement, counter, skipped) {
             alter: Math.round(Number(childText(pitchElement, "alter") ?? 0)),
             octave: Number(childText(pitchElement, "octave")),
           };
+          markCourtesy(element, gracePitch); // 臨時記号が書いてあれば、注意の記号の印（注意の臨時記号）
           const graceFingers = readGraceFingerings(element);
 
           // 重音の2つ目からの前打音：1つ前の前打音に高さを足す（1つ前がなければ使わない）（ステップ24-3）
@@ -2216,5 +2236,10 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   }
 
   // ⑪ 2音トレモロの音符にかかるタイなどを、決まりどおりに直す（直すものがなければそのまま）（ステップ14-6b）
-  return { score: cleanAlternates(score), warnings: warnings };
+  const cleaned = cleanAlternates(score);
+
+  // ⑫ 要らない注意の記号の印を外す（決まりでもともと記号が付く音の印）（注意の臨時記号）
+  // （pruneCourtesy は楽譜データを直接書き換える。読み込みで作ったばかりの楽譜データなので、書き換えてよい）
+  pruneCourtesy(cleaned);
+  return { score: cleaned, warnings: warnings };
 }

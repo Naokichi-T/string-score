@@ -63,7 +63,8 @@ import {
 } from "./model.js";
 import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつなぎ方（ステップ19-2）
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
-import { computeAccidentals, keyAlters } from "./accidentals.js";
+// （注意の臨時記号：keyAlters は needsGraceAccidental の中で使うようになったので、ここでは読み込まない）
+import { computeAccidentals, needsGraceAccidental } from "./accidentals.js"; // needsGraceAccidental：前打音に臨時記号を書くか（注意の臨時記号）
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 import { GRADUAL_ID_PREFIX } from "./tempoWords.js"; // rit.・自由な文字の <direction> に付ける id の始まり（自由な文字のテンポの指示）
 
@@ -547,6 +548,7 @@ const ALTER_TO_XML = { "-2": "flat-flat", "-1": "flat", 0: "natural", 1: "sharp"
 //   ・<duration> は書かない（前打音は小節の長さに数えない決まり）
 //   ・主音とはスラーでつなぐ（ふつうのスラーと重ならないように、番号は 2）
 //   ・臨時記号は、調号と違う ♯♭ のときだけ書く（画面の表示と同じ）
+//     （注意の臨時記号：注意の記号の印（courtesy）があるときは、調号どおりでも書く。決まりは needsGraceAccidental）
 // （ステップ24-3）
 //   ・前打音が重音なら、低い音から高さごとに <note> を書き、2つ目からは <chord/> を付ける（主音の重音と同じ書き方）
 //     スラーの始まりは1つ目にだけ書く
@@ -587,8 +589,8 @@ function graceXml(note, keySignature) {
     lines.push("        </pitch>");
     lines.push("        <voice>1</voice>");
     lines.push(`        <type>${type}</type>`);
-    // 臨時記号：調号どおりでなければ書く
-    if (alter !== keyAlters(keySignature)[pitch.step]) {
+    // 臨時記号：調号どおりでなければ書く（注意の臨時記号：注意の記号の印があれば、調号どおりでも書く）
+    if (needsGraceAccidental(pitch, keySignature)) {
       lines.push(`        <accidental>${ALTER_TO_XML[alter] ?? "natural"}</accidental>`);
     }
     lines.push("        <stem>up</stem>"); // 前打音の符尾は上向き（画面と同じ）
