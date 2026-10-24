@@ -19,9 +19,18 @@
   //   ・タップ：画面の右のほう → 次のページ、左のほう → 前のページ（まん中は何もしない。手が当たってもめくれないように）
   //   ・キー：→・↓・PageDown・Space → 次のページ、←・↑・PageUp → 前のページ
   //       （Bluetooth の譜めくりペダルは、たいていこのどれかのキーを送るので、足でもめくれる）
+  //
+  // 【設定】（演奏モードのステップ3）右上の［⚙］から開く。ブラウザに保存する（library.js の saveSetting）
+  //   ・performAutoPortrait … タブレットを縦にしたら、自動で演奏モードに入るか（最初は入る。編集ページが使う）
+  //   ・performShowPrev     … 前のページの最後の段を、次のページのいちばん上にうすく出すか（最初は出さない）
+  //       出すときは、2ページ目からは、その1段ぶん（と区切りのすき間）を引いた高さでページに分ける
+  // 【画面が暗くならないようにする】（演奏モードのステップ3）
+  //   演奏モードの間は、Wake Lock（ブラウザの機能）で画面が暗くならないようにする
+  //   ほかのアプリに切り替えると外れるので、戻ってきたら、もう一度頼む（使えないブラウザでは何もしない）
   // ==========================================================
   import { onMount } from "svelte";
   import { renderScore } from "#lib/score/render.js";
+  import { loadSettings, saveSetting } from "#lib/score/library.js"; // 設定を読む・保存する（演奏モードのステップ3）
 
   // 親から受け取るもの
   //   score        … 楽譜データ
@@ -51,6 +60,19 @@
   const NEXT_KEYS = ["ArrowRight", "ArrowDown", "PageDown", " "]; // 次のページへ進むキー（" " は Space）
   const PREV_KEYS = ["ArrowLeft", "ArrowUp", "PageUp"]; // 前のページへ戻るキー
 
+  // 前のページの最後の段をうすく出すときの設定（演奏モードのステップ3）
+  const PREV_GAP = 10; // うすく出す段と、そのページの楽譜の間のすき間（区切りの線をここに引く）
+
+  // 設定（演奏モードのステップ3）
+  //   autoPortrait … タブレットを縦にしたら、自動で演奏モードに入るか（保存していなければ true）
+  //   showPrev     … 前のページの最後の段を、うすく出すか（保存していなければ false）
+  const savedSettings = loadSettings();
+  let autoPortrait = $state(savedSettings.performAutoPortrait !== false);
+  let showPrev = $state(savedSettings.performShowPrev === true);
+
+  // 設定の欄を開いているか（演奏モードのステップ3）
+  let settingsOpen = $state(false);
+
   // 描いた楽譜（ページに分ける前の、1枚の長い楽譜）
   //   svg … 描いた楽譜の SVG、width … その幅、lineTops・lineBottoms … 段ごとの上端と下端、totalHeight … 全体の高さ
   let drawn = null;
@@ -61,7 +83,9 @@
   // 今見ているページの番号（0 から）
   let pageIndex = $state(0);
 
-  // 今のページに出す SVG の並び（今のページが変わるたびに作り直す。今は1ページに1枚）
+  // 今のページに出す SVG の並び（今のページが変わるたびに作り直す）
+  //   [{ svg: 切り出した SVG, dim: うすく出すか }, ...]
+  //   ふつうは1ページに1枚。「前の段をうすく出す」が入なら、前のページの最後の段（dim: true）＋ そのページ の2枚（演奏モードのステップ3）
   let slices = $state.raw([]);
 
   // 楽譜を描いている途中か（最初の1回だけ「準備中…」を出す）
@@ -77,19 +101,24 @@
   //   lineBottoms  … 段ごとの下端の高さ
   //   totalHeight  … 楽譜全体の高さ
   //   pageHeight   … 1ページに入る高さ
+  //   withPrev     … 前のページの最後の段をうすく出すか（演奏モードのステップ3）
+  //                  true なら、2ページ目からは、前のページの最後の段の高さ＋すき間（PREV_GAP）を引いた高さに入れる
   // 戻り値：[{ top, bottom, lines }, ...]（ページごとの、楽譜の中の上端と下端の高さと、入る段の番号の配列）
   // ・1ページ目はいちばん上（タイトル）から始める
   // ・次の段がページに入りきらなければ、その段から次のページにする（段の途中では切らない）
   // ・1つの段だけでページに入りきらないときは、その段だけでページにする（はみ出した所は切れる）
   // ----------------------------------------------------------
-  function splitPages(lineTops, lineBottoms, totalHeight, pageHeight) {
+  function splitPages(lineTops, lineBottoms, totalHeight, pageHeight, withPrev = false) {
     const result = [];
     let pageTop = 0; // 今のページの上端
     let firstLine = 0; // 今のページの最初の段
 
     for (let l = 0; l < lineTops.length; l++) {
+      // 今のページに使える高さ（前の段をうすく出すときは、その段とすき間のぶんを引く）（演奏モードのステップ3）
+      let room = pageHeight;
+      if (withPrev && firstLine > 0) room = room - (lineBottoms[firstLine - 1] - lineTops[firstLine - 1]) - PREV_GAP;
       // この段の下端までが今のページに入らず、今のページにもう段があるなら、ここで区切る
-      if (lineBottoms[l] - pageTop > pageHeight && l > firstLine) {
+      if (lineBottoms[l] - pageTop > room && l > firstLine) {
         result.push({ top: pageTop, bottom: lineBottoms[l - 1], lines: range(firstLine, l - 1) });
         pageTop = lineTops[l];
         firstLine = l;
@@ -132,12 +161,19 @@
   // k ページ目を出す（ページの上端から下端までを1枚に切り出して、slices に入れる）
   //   ・1ページ目は、いちばん上（タイトル・テンポ）から
   //   ・最後のページは、楽譜の下の端まで
+  //   ・「前の段をうすく出す」が入なら、2ページ目からは、前のページの最後の段をうすくして先に入れる（演奏モードのステップ3）
   // ----------------------------------------------------------
   function showPage(k) {
     if (!drawn || pages.length === 0) return;
     pageIndex = Math.min(Math.max(k, 0), pages.length - 1); // 範囲の外にならないようにする
     const page = pages[pageIndex];
-    slices = [makeSlice(page.top, page.bottom)];
+    const list = [];
+    const prevLine = page.lines[0] - 1; // 前のページの最後の段
+    if (showPrev && prevLine >= 0) {
+      list.push({ svg: makeSlice(drawn.lineTops[prevLine], drawn.lineBottoms[prevLine]), dim: true });
+    }
+    list.push({ svg: makeSlice(page.top, page.bottom), dim: false });
+    slices = list;
   }
 
   // ----------------------------------------------------------
@@ -172,7 +208,7 @@
 
     // ② ページに分ける（1ページの高さ ＝ 画面の高さ − 上の余白 − ページ番号の場所）
     const pageHeight = window.innerHeight - PAGE_TOP - FOOTER_HEIGHT;
-    pages = splitPages(drawn.lineTops, drawn.lineBottoms, drawn.totalHeight, pageHeight);
+    pages = splitPages(drawn.lineTops, drawn.lineBottoms, drawn.totalHeight, pageHeight, showPrev);
 
     // ③ 前に見ていた段が入っているページを出す
     const found = pages.findIndex((page) => page.lines.includes(firstLine));
@@ -186,6 +222,43 @@
   // ----------------------------------------------------------
   function appendNode(node, child) {
     node.appendChild(child);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：changeAutoPortrait
+  // 設定「縦にしたら自動で演奏モードに入る」を変えたとき：保存する（演奏モードのステップ3）
+  // （使うのは編集ページ。向きが変わったときに、保存した設定を読む）
+  // ----------------------------------------------------------
+  function changeAutoPortrait(value) {
+    autoPortrait = value;
+    saveSetting("performAutoPortrait", value);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：changeShowPrev
+  // 設定「前のページの最後の段をうすく出す」を変えたとき：保存して、ページに分け直す（演奏モードのステップ3）
+  // （ページに入る段の数が変わるので、layout で描き直す。見ていた段が入っているページを開き直す）
+  // ----------------------------------------------------------
+  function changeShowPrev(value) {
+    showPrev = value;
+    saveSetting("performShowPrev", value);
+    layout();
+  }
+
+  // 画面が暗くならないようにする仕組み（Wake Lock）の、今の頼み（なければ null）（演奏モードのステップ3）
+  let wakeLock = null;
+
+  // ----------------------------------------------------------
+  // 関数：requestWakeLock
+  // 画面が暗くならないように、ブラウザに頼む（演奏モードのステップ3）
+  // 使えないブラウザや、頼みを断られたときは、何もしない（演奏モードはそのまま使える）
+  // ----------------------------------------------------------
+  async function requestWakeLock() {
+    try {
+      if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+    } catch (error) {
+      wakeLock = null; // 断られた（電池が少ないときなど）。暗くなるのを防げないだけ
+    }
   }
 
   // ----------------------------------------------------------
@@ -233,7 +306,8 @@
   // 2本目の指は使わない（最初の指だけを見る）
   // ----------------------------------------------------------
   function handlePointerDown(event) {
-    if (event.target.closest(".close")) return;
+    // ［×］・［⚙］・設定の欄の上では、めくらない（ふつうのボタン・チェックとして押す）（［⚙］・設定の欄は演奏モードのステップ3）
+    if (event.target.closest(".close, .gear, .settings")) return;
     if (!event.isPrimary) return;
     touchStart = { id: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now() };
   }
@@ -286,10 +360,20 @@
     };
     window.addEventListener("resize", handleResize);
 
+    // 画面が暗くならないようにする（ほかのアプリから戻ってきたときも、もう一度頼む）（演奏モードのステップ3）
+    requestWakeLock();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") requestWakeLock();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     // この部品が消えるときの後片付け
     return () => {
       clearTimeout(timer);
       window.removeEventListener("resize", handleResize);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      wakeLock?.release().catch(() => {}); // 画面が暗くなってよいことにもどす
+      wakeLock = null;
     };
   });
 </script>
@@ -306,8 +390,9 @@
       <p class="preparing">準備中…</p>
     {/if}
     <!-- 今のページを出す（ページが変わると、slices が入れかわる） -->
-    {#each slices as slice (slice)}
-      <div class="slice" use:appendNode={slice}></div>
+    <!-- dim：前のページの最後の段（うすく出して、下に区切りの線を引く）（演奏モードのステップ3） -->
+    {#each slices as slice (slice.svg)}
+      <div class="slice" class:dim={slice.dim} style:margin-bottom={slice.dim ? `${PREV_GAP}px` : null} use:appendNode={slice.svg}></div>
     {/each}
   </div>
 
@@ -318,8 +403,25 @@
     {/if}
   </div>
 
+  <!-- 設定の欄を開く・閉じる（演奏モードのステップ3） -->
+  <button class="gear" class:open={settingsOpen} onclick={() => (settingsOpen = !settingsOpen)} title="演奏モードの設定" aria-label="演奏モードの設定">⚙</button>
+
   <!-- 編集の画面に戻る -->
   <button class="close" onclick={() => onclose()} title="編集の画面に戻る（Esc）" aria-label="演奏モードを終える">×</button>
+
+  <!-- 設定の欄（［⚙］を押したときだけ出す）（演奏モードのステップ3） -->
+  {#if settingsOpen}
+    <div class="settings">
+      <label>
+        <input type="checkbox" checked={autoPortrait} onchange={(event) => changeAutoPortrait(event.currentTarget.checked)} />
+        タブレットを縦にしたら、自動で演奏モードにする
+      </label>
+      <label>
+        <input type="checkbox" checked={showPrev} onchange={(event) => changeShowPrev(event.currentTarget.checked)} />
+        前のページの最後の段を、上にうすく出す
+      </label>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -360,8 +462,14 @@
     font-size: 14px;
     color: #666;
   }
-  /* 右上の［×］：楽譜のじゃまにならないよう、小さくうすく */
-  .close {
+  /* 前のページの最後の段：うすくして、下に区切りの線を引く（演奏モードのステップ3） */
+  .slice.dim {
+    opacity: 0.3;
+    border-bottom: 1px dashed #999;
+  }
+  /* 右上の［×］と［⚙］：楽譜のじゃまにならないよう、小さくうすく */
+  .close,
+  .gear {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -374,5 +482,40 @@
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
+  }
+  /* ［⚙］は［×］の左（演奏モードのステップ3） */
+  .gear {
+    right: 52px;
+    font-size: 18px;
+  }
+  .gear.open {
+    border-color: #2563eb;
+    color: #2563eb;
+  }
+  /* 設定の欄：右上のボタンの下に出す（演奏モードのステップ3） */
+  .settings {
+    position: absolute;
+    top: 52px;
+    right: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    font-size: 14px;
+    color: #333;
+  }
+  .settings label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+  .settings input {
+    width: 20px; /* 指で押しやすい大きさ */
+    height: 20px;
   }
 </style>

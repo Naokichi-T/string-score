@@ -661,6 +661,11 @@
     };
     coarseMedia.addEventListener("change", handleCoarseChange);
 
+    // 画面の向きが変わったら、演奏モードに入る・戻る（演奏モードのステップ3）
+    const portraitMedia = window.matchMedia("(orientation: portrait)");
+    const handlePortraitChange = () => handleOrientation(portraitMedia.matches);
+    portraitMedia.addEventListener("change", handlePortraitChange);
+
     // タブレットで初めて開いたときは、使い方の窓を出す（一度閉じたら出さない）（ステップ18-6）
     if (isTablet && loadSettings().tabletGuideSeen !== true) {
       guideOpen = true;
@@ -706,6 +711,7 @@
       cancelAnimationFrame(highlightFrame);
       phoneMedia.removeEventListener("change", handlePhoneChange); // スマホかどうかを調べるのもやめる（ステップ18-5）
       coarseMedia.removeEventListener("change", handleCoarseChange); // 指で操作する画面かを調べるのもやめる（ステップ18-6）
+      portraitMedia.removeEventListener("change", handlePortraitChange); // 画面の向きを調べるのもやめる（演奏モードのステップ3）
     };
   });
 
@@ -2237,6 +2243,41 @@
   // 演奏モード（楽譜だけを画面いっぱいに出す）を出しているか（true の間だけ PerformView を出す）（演奏モード）
   let performing = $state(false);
 
+  // 演奏モードに、タブレットを縦にしたことで自動で入ったか（演奏モードのステップ3）
+  // true のときだけ、横に戻したら自動で編集の画面に戻る（［演奏モード］のボタンで入ったときは、横にしても戻らない）
+  let performAuto = false;
+
+  // ----------------------------------------------------------
+  // 関数：closePerform
+  // 演奏モードを終える（［×］・Esc・横に戻したとき）（演奏モードのステップ3）
+  // ----------------------------------------------------------
+  function closePerform() {
+    performing = false;
+    performAuto = false;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleOrientation
+  // 画面の向きが変わったとき（演奏モードのステップ3）
+  //   ・タブレットを縦にした → 設定「縦にしたら自動で演奏モードにする」が入なら、演奏モードに入る
+  //   ・横に戻した → 縦にしたことで自動で入っていたなら、編集の画面に戻る
+  // 向きが「変わった」ときだけ動く（縦のまま編集の画面を開いたときは、自動では入らない）
+  // 楽譜を読み込む前・印刷の準備中・使い方の窓を出しているときは何もしない
+  //   portrait … 縦向きになったか
+  // ----------------------------------------------------------
+  function handleOrientation(portrait) {
+    if (!isTablet || loadState !== "ready") return;
+    if (portrait) {
+      if (performing || printing || guideOpen) return;
+      if (loadSettings().performAutoPortrait === false) return; // 設定で「入らない」にしてある
+      handleStop();
+      performing = true;
+      performAuto = true;
+    } else if (performing && performAuto) {
+      closePerform();
+    }
+  }
+
   // ----------------------------------------------------------
   // 関数：handlePerform
   // ［演奏モード］が押されたとき：再生を止めて、演奏モードを出す（演奏モード）
@@ -2637,7 +2678,8 @@
   <!-- 演奏モード（［演奏モード］を押したときだけ出す。［×］・Esc で消す）（演奏モード） -->
   {#if performing}
     <!-- visibleParts：表示しているパートだけを出す（PDF 出力と同じ） -->
-    <PerformView {score} {visibleParts} onclose={() => (performing = false)} />
+    <!-- （演奏モードのステップ3：終えるときは closePerform。自動で入ったかどうかの印も消す） -->
+    <PerformView {score} {visibleParts} onclose={closePerform} />
   {/if}
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->
