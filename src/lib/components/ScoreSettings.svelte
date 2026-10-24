@@ -8,6 +8,7 @@
   // （ブラウザの datalist は「含む」ものを出すので、候補の一覧は自分で作っている）
   // （ステップ17-1：楽譜全体の移調の欄を追加）
   // （ステップ20：「小節の長さ」の欄（アウフタクト・最後の小節）を追加。アウフタクトは「小節」タブから移した）
+  // （小節の長さの自動判断：「小節の長さ」の欄を消した。どの小節の長さも「小節」タブの「長さ」の欄で変える）
   // ==========================================================
   import { tick, onMount } from "svelte";
   import { keyAt, KEY_CHOICES } from "#lib/score/model.js"; // 1小節目の調・調の一覧（ステップ17-1）
@@ -20,60 +21,8 @@
   //   focusTitle … true なら、出てきたときにタイトルの入力欄にカーソルを入れて、文字を全部選ぶ（ステップ7-3）
   //   ontranspose … ［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
   //                 例：ontranspose(4, "nearest")
-  //   pickup     … 1小節目の拍子と、今のアウフタクトの拍の数 { time, count }（count が 0 ならアウフタクトなし）（ステップ15-1。ステップ20で移した）
-  //   onpickup   … アウフタクトの長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならやめる）
-  //   shortEnd   … 最後の小節の拍子と、今の拍の数と、短くできるか { time, count, enabled }（count が 0 ならふつうの長さ）（ステップ20）
-  //   onshortend … 最後の小節の長さを選んだときに呼ぶ関数（拍の数を渡す。0 ならふつうの長さに戻す）（ステップ20）
-  let {
-    score,
-    onsettings = () => {},
-    focusTitle = false,
-    ontranspose = () => {},
-    pickup = { time: { beats: 4, beatType: 4 }, count: 0 },
-    onpickup = () => {},
-    shortEnd = { time: { beats: 4, beatType: 4 }, count: 0, enabled: true },
-    onshortend = () => {},
-  } = $props();
-
-  // ----------------------------------------------------------
-  // ここから下は、小節の長さの欄（アウフタクト・最後の小節）（ステップ20）
-  // ----------------------------------------------------------
-
-  // ----------------------------------------------------------
-  // 関数：beatCounts
-  // 選べる拍の数の一覧（1拍から「1小節の拍の数 − 1」拍まで）
-  //   time … 拍子
-  // 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]
-  // ----------------------------------------------------------
-  function beatCounts(time) {
-    return Array.from({ length: Math.max(0, time.beats - 1) }, (_, k) => k + 1);
-  }
-
-  // ----------------------------------------------------------
-  // 関数：beatLabel
-  // 選ぶ欄に出す、拍の数の名前（例：4/4 で 1 → "4分音符1つ"、6/8 で 2 → "8分音符2つ"）
-  // ----------------------------------------------------------
-  function beatLabel(time, count) {
-    return `${time.beatType}分音符${count}つ`;
-  }
-
-  // アウフタクト・最後の小節で選べる拍の数
-  let pickupCounts = $derived(beatCounts(pickup.time));
-  let shortEndCounts = $derived(beatCounts(shortEnd.time));
-
-  // ----------------------------------------------------------
-  // 関数：pickCount
-  // 欄で長さを選んだとき：親に拍の数を渡す
-  // 変えられなかったとき（取りのぞく所に音があるときなど）は、欄の表示を今の長さに戻す
-  //   select  … 選ぶ欄の要素
-  //   handler … 親の関数（onpickup か onshortend）
-  //   current … 今の拍の数を返す関数（親が楽譜を変えたあとの値を読むため）
-  // ----------------------------------------------------------
-  async function pickCount(select, handler, current) {
-    handler(Number(select.value));
-    await tick(); // 親が楽譜を変えて、新しい値が届くのを待つ
-    select.value = String(current());
-  }
+  //   （小節の長さの自動判断：pickup・onpickup・shortEnd・onshortend は、「小節の長さ」の欄といっしょに消した）
+  let { score, onsettings = () => {}, focusTitle = false, ontranspose = () => {} } = $props();
 
   // ----------------------------------------------------------
   // ここから下は、移調の欄（ステップ17-1）
@@ -287,41 +236,6 @@
     <input class="number" type="number" min="20" max="300" step="1" value={score.tempo} onchange={(event) => handleChange("tempo", event)} onkeydown={handleKeydown} />
   </label>
 
-  <!-- 小節の長さ：アウフタクト（1小節目）と、最後の小節（ステップ20） -->
-  <div class="section">
-    <span class="heading">小節の長さ</span>
-    <!-- アウフタクト：選んだらすぐ変わる（1小節目に効く）（ステップ15-1。ステップ20で「小節」タブから移した） -->
-    <label>
-      アウフタクト
-      <select
-        value={pickup.count}
-        disabled={pickupCounts.length === 0}
-        onchange={(event) => pickCount(event.currentTarget, onpickup, () => pickup.count)}
-        title="1小節目を、拍子より短い小節（アウフタクト）にする。長さは、拍子の下の数字の音符がいくつ分かで選ぶ"
-      >
-        <option value={0}>なし</option>
-        {#each pickupCounts as count}
-          <option value={count}>{beatLabel(pickup.time, count)}</option>
-        {/each}
-      </select>
-    </label>
-    <!-- 最後の小節：選んだらすぐ変わる（後ろの休符を消す・足す）（ステップ20） -->
-    <label>
-      最後の小節
-      <select
-        value={shortEnd.count}
-        disabled={!shortEnd.enabled || shortEndCounts.length === 0}
-        onchange={(event) => pickCount(event.currentTarget, onshortend, () => shortEnd.count)}
-        title="最後の小節を、拍子より短い小節にする（アウフタクトで始まる曲で、アウフタクトの分だけ短くするときなど）。長さは、拍子の下の数字の音符がいくつ分かで選ぶ"
-      >
-        <option value={0}>なし</option>
-        {#each shortEndCounts as count}
-          <option value={count}>{beatLabel(shortEnd.time, count)}</option>
-        {/each}
-      </select>
-    </label>
-  </div>
-
   <!-- 移調（楽譜全体。全パート・全小節を動かして、調号も変える）（ステップ17-1） -->
   <div class="transpose">
     <span class="heading">移調</span>
@@ -377,19 +291,6 @@
   }
   .number {
     width: 70px;
-  }
-  /* 小節の長さの欄（ステップ20）：移調の欄と同じく、左に線を引いて分ける */
-  .section {
-    display: flex;
-    flex-wrap: wrap; /* 画面が狭いときは折り返す */
-    align-items: center;
-    gap: 12px;
-    padding-left: 16px;
-    border-left: 1px solid #ddd;
-  }
-  .section select {
-    height: 32px; /* 入力欄と同じ高さ */
-    font-size: 14px;
   }
   /* 移調の欄（ステップ17-1） */
   .transpose {

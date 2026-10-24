@@ -88,9 +88,6 @@
     insertMeasure,
     deleteMeasures,
     changeTime,
-    setPickup,
-    setShortEnd, // 最後の小節を短くする（ステップ20）
-    canShortEnd,
     measureLengthKind, // 小節の今の長さの種類（途中の短い小節）
     setMeasureLengthAuto, // どの小節でも長さを変える。番号に数えるかどうかは自動で決める（小節の長さの自動判断）
     changeKey,
@@ -1761,52 +1758,8 @@
     commit(result.score, newSelection);
   }
 
-  // 1小節目の拍子と、今のアウフタクトの拍の数（「楽譜の設定」タブのアウフタクトの欄に出す）（ステップ15-1。ステップ20で移した）
-  let pickup = $derived({ time: timeAt(score, 0), count: score.measures[0].pickup ?? 0 });
-
-  // 最後の小節の拍子と、今の拍の数と、短くできるか（「楽譜の設定」タブの最後の小節の欄に出す）（ステップ20）
-  let shortEnd = $derived.by(() => {
-    const last = score.measures.length - 1;
-    return { time: timeAt(score, last), count: score.measures[last].short ?? 0, enabled: canShortEnd(score) };
-  });
-
-  // ----------------------------------------------------------
-  // 関数：handleShortEnd
-  // 「楽譜の設定」タブで最後の小節の長さを選んだとき（ステップ20）
-  //   count … 最後の小節の拍の数（0 ならふつうの長さに戻す）
-  // 後ろのほうに音があって短くできないときは、知らせて終わり（楽譜は変えない）
-  // 最後の小節の中の音の数が変わるので、最後の小節を選んでいたときは、その最初の音を選び直す
-  // ----------------------------------------------------------
-  function handleShortEnd(count) {
-    message = "";
-    const result = setShortEnd(score, count);
-    if (result.error) {
-      message = result.error;
-      return;
-    }
-    const last = score.measures.length - 1;
-    const newSelection = selection && selection.measure === last ? { part: selection.part, measure: last, note: 0 } : selection;
-    commit(result.score, newSelection);
-  }
-
-  // ----------------------------------------------------------
-  // 関数：handlePickup
-  // 「小節」タブでアウフタクトの長さを選んだとき（ステップ15-1）
-  //   count … アウフタクトの拍の数（0 ならアウフタクトをやめる）
-  // どの小節を選んでいても、1小節目に効く
-  // 1小節目の前のほうに音があって短くできないときは、知らせて終わり（楽譜は変えない）
-  // 1小節目の中の音の数が変わるので、1小節目を選んでいたときは、その最初の音を選び直す
-  // ----------------------------------------------------------
-  function handlePickup(count) {
-    message = "";
-    const result = setPickup(score, count);
-    if (result.error) {
-      message = result.error;
-      return;
-    }
-    const newSelection = selection && selection.measure === 0 ? { part: selection.part, measure: 0, note: 0 } : selection;
-    commit(result.score, newSelection);
-  }
+  // （小節の長さの自動判断：「楽譜の設定」タブのアウフタクト・最後の小節の欄を消したので、
+  //   pickup・shortEnd・handlePickup・handleShortEnd も消した。長さは「小節」タブの handleMeasureLength で変える）
 
   // 「小節」タブの「長さ」の欄に出す、選んでいる小節（範囲なら最初の小節）の長さ（途中の短い小節）
   //   { time: その小節の拍子, kind: "normal"・"short"・"pickup", count: 拍の数, first: 1小節目か }（何も選んでいなければ null）
@@ -2568,10 +2521,6 @@
       onmeasure={handleMeasure}
       {currentTime}
       ontime={handleTime}
-      {pickup}
-      onpickup={handlePickup}
-      {shortEnd}
-      onshortend={handleShortEnd}
       {currentKey}
       {currentTempo}
       ontempo={handleTempoChange}
