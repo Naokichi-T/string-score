@@ -30,8 +30,10 @@
   let { score, visibleParts = null, onclose = () => {} } = $props();
 
   // 演奏モードで出す楽譜データ（表示しているパートだけ。PDF 出力と同じ作り方）
-  const showParts = visibleParts ?? score.parts.map((_, p) => p);
-  const showScore = showParts.length === score.parts.length ? score : { ...score, parts: showParts.map((p) => score.parts[p]) };
+  // （$derived：親から受け取った score・visibleParts が変わったら、作り直す。
+  //   ふつうの const だと「最初の値しか使っていない」と VSCode に注意されるため、決まりどおり $derived にした）
+  let showParts = $derived(visibleParts ?? score.parts.map((_, p) => p));
+  let showScore = $derived(showParts.length === score.parts.length ? score : { ...score, parts: showParts.map((p) => score.parts[p]) });
 
   // ----------------------------------------------------------
   // 見た目の設定（単位はピクセル）
@@ -296,7 +298,8 @@
 
 <!-- 演奏モードの画面（編集ページの上に、画面いっぱいに重ねる） -->
 <!-- 指（マウス）の操作で、ページをめくる（演奏モードのステップ2） -->
-<div class="perform" role="dialog" aria-label="演奏モード" onpointerdown={handlePointerDown} onpointerup={handlePointerUp} onpointercancel={handlePointerCancel}>
+<!-- tabindex="-1"：dialog の役割の要素は、キーボードの操作の行き先（フォーカス）になれるようにする決まり（VSCode の注意を直した） -->
+<div class="perform" role="dialog" aria-label="演奏モード" tabindex="-1" onpointerdown={handlePointerDown} onpointerup={handlePointerUp} onpointercancel={handlePointerCancel}>
   <!-- 楽譜を出す場所（この幅で楽譜を描く） -->
   <div class="stage" bind:this={stage} style:padding-top={`${PAGE_TOP}px`}>
     {#if preparing}
