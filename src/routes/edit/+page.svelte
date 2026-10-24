@@ -78,6 +78,7 @@
     canSpan,
     getSpanState,
     toggleSpanner,
+    toggleHold, // 範囲に保持線を付ける・外す（保持線）
     canWedgeInside,
     toggleWedgeInside,
     rangeHasNotes,
@@ -174,8 +175,8 @@
   // （ステップ16-1：音符を1つだけ選んでいるときは、その音符の下だけの松葉）
   let spanState = $derived.by(() => {
     if (canSpanRange) return getSpanState(score, range);
-    if (canWedgeNote) return { slur: false, wedge: getSelectedNote(score, selection)?.wedgeInside ?? null };
-    return { slur: false, wedge: null };
+    if (canWedgeNote) return { slur: false, wedge: getSelectedNote(score, selection)?.wedgeInside ?? null, holds: [] };
+    return { slur: false, wedge: null, holds: [] };
   });
 
   // 選んでいる音にグリッサンドを付けられるか（「記号」タブのボタンを押せるようにするため）（ステップ11-5a）
@@ -1554,12 +1555,15 @@
   // ----------------------------------------------------------
   // 関数：handleSpanner
   // スラー・＜・＞ のボタンが押されたとき：選んだ範囲に付ける・外す
-  //   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）
+  //   kind … 'slur'（スラー）・'crescendo'（＜）・'diminuendo'（＞）・'hold'（保持線）
+  //   finger … 保持線の指の番号（kind が 'hold' のときだけ使う）（保持線）
   // （ステップ16-1：音符を1つだけ選んでいるときの ＜・＞ は、その音符の下だけの松葉を付ける・外す）
+  // （保持線：保持線は、スラーと同じく範囲を選んでいるときだけ付けられる）
   // ----------------------------------------------------------
-  function handleSpanner(kind) {
+  function handleSpanner(kind, finger = 0) {
     if (!canSpanRange) {
-      if (kind !== "slur" && canWedgeNote) {
+      // （保持線：保持線は1つの音符には付けないので、＜・＞ のときだけ）
+      if ((kind === "crescendo" || kind === "diminuendo") && canWedgeNote) {
         message = "";
         commit(toggleWedgeInside(score, selection, kind));
       }
@@ -1569,7 +1573,7 @@
     // commit で範囲選択が消えるので、覚えておいて元に戻す
     // （スラーや松葉を付けても音の並びは変わらないので、範囲はずれない）
     const end = rangeEnd;
-    commit(toggleSpanner(score, range, kind));
+    commit(kind === "hold" ? toggleHold(score, range, finger) : toggleSpanner(score, range, kind)); // 保持線は toggleHold（保持線）
     rangeEnd = end;
   }
 

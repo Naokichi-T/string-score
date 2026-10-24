@@ -193,7 +193,7 @@
     onclipboard = () => {},
     selectedNote = null,
     onsymbol = () => {},
-    spanState = { slur: false, wedge: null },
+    spanState = { slur: false, wedge: null, holds: [] }, // holds：範囲に付いている保持線の指（保持線）
     canSpanRange = false,
     canWedgeNote = false,
     onspanner = () => {},

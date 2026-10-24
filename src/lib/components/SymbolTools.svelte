@@ -8,6 +8,7 @@
   // （ステップ14-6a：トレモロの斜線のボタンの右に、［2音トレモロ］のボタンを追加）
   // （ステップ24-1：前打音を選んでいるときは、前打音のボタンだけを押せるようにする）
   // （ステップ24-2：重音にも前打音を付けられるようにする。前打音を選んでいるときは、指番号も押せる（前打音に付く））
+  // （保持線：スラー・松葉の右に、範囲に付ける保持線（指を押さえたままにする線）の 1〜4 のボタンを追加）
   // ==========================================================
   import {
     BOWINGS,
@@ -25,6 +26,7 @@
     ARTIFICIAL_HARMONIC,
     DIAMOND_HEAD,
     ALTERNATE_TREMOLO,
+    HOLD_FINGERS, // 保持線に使える指の番号（1〜4）（保持線）
   } from "#lib/score/symbols.js";
   import { notePitches, hasDiamond, canAlternate, isAlternate } from "#lib/score/model.js";
 
@@ -33,17 +35,19 @@
   //   onsymbol … ボタンが押されたときに呼ぶ関数（記号の種類と名前を渡す）
   //              例：onsymbol('bowing', 'down')、onsymbol('fingering', 2)
   //   spanState    … 選んだ範囲に付いているスラー・松葉 { slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
+  //                  （保持線：holds（範囲に付いている保持線の指の番号の並び）も入る。ボタンを青くするのに使う）
   //   canSpanRange … 範囲にスラー・松葉を付けられるか（範囲の中に音符が2つ以上あるか）
   //   canWedgeNote … 選んでいる1つの音符の下だけに松葉を付けられるか（ステップ16-1）
   //                  （このときの spanState.wedge は、その音符の下だけの松葉）
   //   onspanner    … スラー・松葉のボタンが押されたときに呼ぶ関数（'slur'・'crescendo'・'diminuendo' を渡す）
+  //                  （保持線：保持線のボタンでは ('hold', 指の番号) を渡す）
   //   canGlissando … 選んでいる音にグリッサンドを付けられるか（次の音が音符で、タイが付いていないか）（ステップ11-5a）
   //   head         … 重音の中で選んでいる玉の番号（低い順。0 から。［ひし形］のボタンを青くするのに使う）（ステップ14-5a）
   //   graceSelected … 前打音を選んでいるか（true のときの note は、その主音のデータ）（ステップ24-1）
   let {
     note = null,
     onsymbol = () => {},
-    spanState = { slur: false, wedge: null },
+    spanState = { slur: false, wedge: null, holds: [] },
     canSpanRange = false,
     canWedgeNote = false,
     onspanner = () => {},
@@ -287,6 +291,26 @@
         ＞
       </button>
     </div>
+
+    <!-- 保持線（指を押さえたままにする線。範囲を選んだときだけ押せる。スラーと同じ）（保持線） -->
+    <!-- 押すと、範囲の最初の音から最後の音まで、五線の下に「1 ———」のような線が付く。もう一度押すと外れる -->
+    <!-- （iPad Air の横向き（1180px）で2行に収めるため、見出しは付けずに、ボタンを少し細くした。
+         ボタンの中の「1—」の形と、マウスを乗せたとき・長押ししたときの説明で、保持線だと分かるようにする） -->
+    <div class="group">
+      {#each HOLD_FINGERS as finger (finger)}
+        <button
+          class="tool hold"
+          class:on={(spanState.holds ?? []).includes(finger)}
+          disabled={!canSpanRange}
+          onclick={() => onspanner("hold", finger)}
+          title={`保持線 ${finger}（${finger}の指を押さえたままにする線。Shift＋クリックで範囲を選んでから押す。もう一度押すと外れる）`}
+          aria-label={`保持線 ${finger}`}
+        >
+          <!-- 数字と、その右の短い線で、保持線だと分かるようにする（指番号のボタンと見分けるため） -->
+          <span class="hold-icon">{finger}<span class="hold-line"></span></span>
+        </button>
+      {/each}
+    </div>
   </div>
 </div>
 
@@ -323,6 +347,22 @@
   }
   .tool.wide {
     width: 52px;
+  }
+  /* 保持線のボタンは少し細くする（iPad Air の横向きの幅で2行に収めるため）（保持線） */
+  .tool.hold {
+    width: 34px;
+  }
+  /* 保持線のボタンの中身：数字と、その右の短い横線（保持線） */
+  .hold-icon {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 13px;
+  }
+  .hold-line {
+    display: inline-block;
+    width: 11px;
+    border-top: 1.5px solid currentColor; /* ボタンが青いときは白い線になる */
   }
   .tool.on {
     background: #2563eb; /* 付いている記号は青 */
