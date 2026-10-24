@@ -20,9 +20,15 @@
 //       貼り付ける連符が小節線をまたぐとき
 //         （連符を小節線で分けると、分けた長さが音符で書けないことが多いので、貼らずに知らせる。
 //           知らせる文には、パート・何連符か・どの小節の終わりでまたぐかを出す（ステップ18-7））
+//
+// 【最後の小節への貼り付け】（最後の小節への貼り付けで小節を足す）
+//   貼り付けた音が、楽譜の最後（最後の小節の終わり）までちょうど埋めたら、空の小節を1つ足す
+//   （音を入力して最後の音のあとへ進んだときと同じく、続きをすぐ入れられるようにするため）
+//   ・最後の小節の途中で終わるときは足さない
+//   ・最後の小節が短い小節（曲の終わり）のときは足さない（音の入力と同じ決まり）
 // ==========================================================
 
-import { noteTicks, durationToTicks, timeAt, measureLength, restsForSpan, tupletGroups, measureName } from "./model.js";
+import { noteTicks, durationToTicks, timeAt, measureLength, restsForSpan, tupletGroups, measureName, isShortEnd } from "./model.js"; // isShortEnd：最後の小節が短い小節か（最後の小節への貼り付けで小節を足す）
 import { cloneScore, appendMeasure, cleanSpanners } from "./edit.js";
 import { positionsInRange } from "./selection.js";
 
@@ -155,6 +161,8 @@ export function plainNote(note, value) {
 // 選んでいる音の頭から、コピーした音を貼り付ける（上書き）
 //   selection … 貼り付ける場所（この音の頭から貼る）
 //   clip      … copyNotes で作った音の配列
+// 貼り付けた音が楽譜の最後までちょうど埋めたら、空の小節を1つ足す（最後の小節が短い小節のときは足さない）
+//   （最後の小節への貼り付けで小節を足す）
 // 戻り値：{ score: 新しい楽譜データ, start: 貼り付けた最初の場所, end: 貼り付けた最後の場所, error: "" }
 //         貼り付けられないときは { score: 元の楽譜データ, error: 知らせる文 }（ステップ10-4）
 // ----------------------------------------------------------
@@ -355,6 +363,16 @@ export function pasteNotes(score, selection, clip) {
 
   // ⑧ 相手のいなくなったスラー・松葉を外す
   cleanSpanners(part);
+
+  // ⑧-2 貼り付けた音が楽譜の最後までちょうど埋めたら、空の小節を1つ足す（最後の小節への貼り付けで小節を足す）
+  //   starts の最後 ＝ 楽譜の最後（最後の小節の終わり）の位置
+  //   （② で小節を足したときも、足した小節の終わりまでちょうど埋まったら、もう1つ足す）
+  //   最後の小節が短い小節（曲の終わり）のときは足さない
+  //   小節は後ろに足すだけなので、⑨ で使う「貼り付けた場所（何小節目の何番目の音か）」は変わらない
+  const lastIndex = newScore.measures.length - 1;
+  if (pasteEnd === starts[starts.length - 1] && !isShortEnd(newScore, lastIndex)) {
+    newScore = appendMeasure(newScore);
+  }
 
   // ⑨ 貼り付けた最初と最後の場所
   const pasted = events.filter((event) => event.kind === "paste");
