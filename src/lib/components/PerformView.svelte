@@ -91,7 +91,8 @@
   //   ふつうは1ページに1枚。「前の段をうすく出す」が入なら、前のページの最後の段（dim: true）＋ そのページ の2枚（演奏モードのステップ3）
   let slices = $state.raw([]);
 
-  // 楽譜を描いている途中か（最初の1回だけ「準備中…」を出す）
+  // 楽譜を描いている途中か（true の間は、楽譜を隠して、画面のまん中に「準備中…」を出す）
+  // （「準備中…」を出す手直し：最初の1回だけでなく、向きを変えたとき・設定でページを分け直すときも出すようにした）
   let preparing = $state(true);
 
   // 楽譜を出す場所（この幅で描く）
@@ -185,6 +186,12 @@
   // 前に見ていたページがあれば、その最初の段が入っているページを開く（向きを変えても、同じ所を見ていられるように）
   // ----------------------------------------------------------
   async function layout() {
+    // 「準備中…」を出して、画面に出るのを待ってから描く（「準備中…」を出す手直し）
+    // （楽譜を描く計算は重く、その間は画面が書き換わらないので、先に「準備中…」を画面に出しておく。
+    //   requestAnimationFrame を2回待つと、ブラウザが1回画面を書き換えたあとになる）
+    preparing = true;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
     // VexFlow と楽譜用のフォントの準備（編集の画面で読み込み済みなので、すぐ終わる）
     const VF = (await import("vexflow")).default;
     await document.fonts.ready;
@@ -358,6 +365,7 @@
 
     let timer = null;
     const handleResize = () => {
+      preparing = true; // 描き直すまで待つ間も、ずれた楽譜を見せずに「準備中…」を出す（「準備中…」を出す手直し）
       clearTimeout(timer);
       timer = setTimeout(layout, RESIZE_WAIT);
     };
@@ -389,15 +397,18 @@
 <div class="perform" role="dialog" aria-label="演奏モード" tabindex="-1" onpointerdown={handlePointerDown} onpointerup={handlePointerUp} onpointercancel={handlePointerCancel}>
   <!-- 楽譜を出す場所（この幅で楽譜を描く） -->
   <div class="stage" bind:this={stage} style:padding-top={`${PAGE_TOP}px`}>
-    {#if preparing}
-      <p class="preparing">準備中…</p>
-    {/if}
     <!-- 今のページを出す（ページが変わると、slices が入れかわる） -->
     <!-- dim：前のページの最後の段（うすく出して、下に区切りの線を引く）（演奏モードのステップ3） -->
+    <!-- hidden：描き直している間は、ずれた楽譜を見せないように隠す（場所はそのまま取っておく）（「準備中…」を出す手直し） -->
     {#each slices as slice (slice.svg)}
-      <div class="slice" class:dim={slice.dim} style:margin-bottom={slice.dim ? `${PREV_GAP}px` : null} use:appendNode={slice.svg}></div>
+      <div class="slice" class:dim={slice.dim} class:hidden={preparing} style:margin-bottom={slice.dim ? `${PREV_GAP}px` : null} use:appendNode={slice.svg}></div>
     {/each}
   </div>
+
+  <!-- 描いている間は、画面のまん中に「準備中…」を出す（「準備中…」を出す手直し） -->
+  {#if preparing}
+    <div class="preparing" role="status">準備中…</div>
+  {/if}
 
   <!-- ページ番号（例：2 / 5）。この行の右端に［⚙］［×］を置く -->
   <div class="footer" style:height={`${FOOTER_HEIGHT}px`}>
@@ -451,9 +462,20 @@
   .slice :global(svg) {
     display: block; /* SVG の下にすき間ができないようにする */
   }
+  /* 「準備中…」：画面のまん中に出す（「準備中…」を出す手直し） */
   .preparing {
-    margin: 24px;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
     color: #666;
+    pointer-events: none; /* 下のボタン（［⚙］［×］）は押せるようにする */
+  }
+  /* 描き直している間は、楽譜を見えなくする（場所は取っておく）（「準備中…」を出す手直し） */
+  .slice.hidden {
+    visibility: hidden;
   }
   /* ページ番号の場所 */
   .footer {
