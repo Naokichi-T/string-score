@@ -32,6 +32,8 @@
 //       または、前の小節が「前の部分」で、2つ足すとちょうど1小節になる（印を書かないアプリのファイルのため）
 //   ・それ以外は、前の部分（short。小節の頭から・番号に数える）にする
 //   ・長さが拍の単位で割り切れないときは、アウフタクトと同じく切り上げて知らせる
+// （保持線：「指の数字（<words>1</words>）＋線の括弧（<bracket type="start" line-end="none">）」の <direction> を、
+//   保持線の始まりとして読むようにした。同じ番号の <bracket type="stop"> までを、その指の保持線にする（このアプリの書き出しと同じ形））
 // （注意の臨時記号：<note> に <accidental>（表示する臨時記号）が書いてあれば、高さに注意の記号の印（courtesy）を付ける）
 //   ・ふつうの音符・重音の玉・前打音のどれも同じ
 //   ・最後に pruneCourtesy で、決まりでもともと記号が付く音の印を外す
@@ -95,7 +97,7 @@ import {
   upgradeWedgeNotes,
   measureNumberLabel, // 小節番号の文字（続きの小節は "(8)"）（途中の短い小節）
 } from "./model.js";
-import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS } from "./symbols.js";
+import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS, HOLD_FINGERS } from "./symbols.js"; // HOLD_FINGERS：保持線に使える指（保持線）
 import { cleanSpanners, cleanAlternates } from "./edit.js";
 import { pruneCourtesy } from "./accidentals.js"; // 要らない注意の記号の印を外す（注意の臨時記号）
 import { marksFromFile } from "./beams.js"; // 連桁の印（ステップ19-2）
@@ -1216,6 +1218,8 @@ function dashesStartNumber(direction) {
 //                                1つの音符の中で始まって終わる松葉を、その音符の下だけの松葉にできないときだけ使う）
 //                openWedges … 開いている（まだ終わりの来ていない）松葉の一覧（ステップ16-2）
 //                             { number: 番号, kind: 種類, note: 始まりの音符（まだ音符が来ていなければ null）} を、始まった順に並べる
+//                openHolds … 開いている（まだ終わりの来ていない）保持線の一覧（保持線）
+//                            { finger: 指の番号, number: <bracket> の番号, note: 始まりの音符（まだ音符が来ていなければ null）}
 //   counter   … 使えなかった記号を数える表
 // ----------------------------------------------------------
 function readDirection(direction, state, counter) {
@@ -1223,6 +1227,14 @@ function readDirection(direction, state, counter) {
   const sound = childElement(direction, "sound");
   const hasTempo = (sound && sound.getAttribute("tempo")) || direction.getElementsByTagName("metronome").length > 0;
   if (hasTempo) return;
+
+  // 保持線の始まり（指の数字＋線の括弧の始まり）：開いている保持線の一覧に足して、ほかの読み方はしない（保持線）
+  // （数字の <words> を、奏法の文字などとして数えないようにするため）
+  const holdStart = holdStartOf(direction);
+  if (holdStart) {
+    state.openHolds.push({ finger: holdStart.finger, number: holdStart.number, note: null });
+    return;
+  }
 
   childElements(direction, "direction-type").forEach((type) => {
     // 強弱：次の音符に付ける
@@ -1263,6 +1275,13 @@ function readDirection(direction, state, counter) {
       }
     });
 
+    // 線の括弧の終わり：同じ番号で開いている保持線があれば閉じる（保持線）
+    // （開いていなければ、保持線ではない括弧なので、何もしない（数えない。今までと同じ））
+    childElements(type, "bracket").forEach((bracket) => {
+      if (bracket.getAttribute("type") !== "stop") return;
+      stopHold(bracket.getAttribute("number") ?? "1", state, counter);
+    });
+
     // 点線の終わり：点線付きの cresc.・dim. で始めた松葉が、同じ番号で開いていれば閉じる（点線付きの cresc.・dim.）
     // （開いていなければ、rit.・accel. などのほかの点線の終わりなので、何もしない（数えない））
     childElements(type, "dashes").forEach((dashes) => {
@@ -1271,6 +1290,70 @@ function readDirection(direction, state, counter) {
       if (state.openWedges.some((open) => open.number === number)) stopWedge(number, state, counter);
     });
   });
+}
+
+// ----------------------------------------------------------
+// 関数：holdStartOf
+// <direction> が保持線の始まりかを調べる（保持線）
+// 保持線の始まりとみなすもの（このアプリの書き出しと同じ形）
+//   ・<words> の文字が、指の番号（1〜4）だけ
+//   ・<bracket type="start"> があって、線の端の形が「なし」（line-end="none"。書いていないときも「なし」とみなす）
+//   ・ほかの種類の指示（強弱・松葉など）は入っていない
+//   direction … <direction> の要素
+// 戻り値：{ finger: 指の番号, number: <bracket> の番号（文字）}（保持線の始まりでなければ null）
+// ----------------------------------------------------------
+function holdStartOf(direction) {
+  const types = childElements(direction, "direction-type");
+  const words = types.flatMap((type) => childElements(type, "words"));
+  const brackets = types.flatMap((type) => childElements(type, "bracket"));
+  // 数字1つと括弧1つだけでできているか（ほかの子の要素がないか）
+  const others = types.flatMap((type) => [...type.children].filter((child) => child.nodeName !== "words" && child.nodeName !== "bracket"));
+  if (words.length !== 1 || brackets.length !== 1 || others.length > 0) return null;
+  const finger = Number(words[0].textContent.trim());
+  if (!HOLD_FINGERS.includes(finger)) return null;
+  const bracket = brackets[0];
+  if (bracket.getAttribute("type") !== "start") return null;
+  const lineEnd = bracket.getAttribute("line-end") ?? "none";
+  if (lineEnd !== "none") return null;
+  return { finger: finger, number: bracket.getAttribute("number") ?? "1" };
+}
+
+// ----------------------------------------------------------
+// 関数：stopHold
+// 線の括弧の終わり（<bracket type="stop">）を読んだときの処理（保持線）
+// 同じ番号で開いている保持線を閉じて、始まりの音符に holdStart、ここまでに読んだ最後の音符に holdEnd を付ける
+//   ・開いている保持線がなければ、保持線ではない括弧なので、何もしない
+//   ・始まりのあと音符が来ていない・始まりと同じ音符で終わる（長さのない線）ときは、使わずに数える
+//   number  … <bracket> の番号（文字）
+//   state   … パートごとの読みかけの情報（readDirection の説明を参照）
+//   counter … 使えなかった記号を数える表
+// ----------------------------------------------------------
+function stopHold(number, state, counter) {
+  const index = state.openHolds.findIndex((open) => open.number === number);
+  if (index < 0) return;
+  const open = state.openHolds[index];
+  state.openHolds.splice(index, 1); // 一覧から外す
+  const last = state.lastNote;
+  if (open.note === null || !last || open.note === last) {
+    report(counter, "つなげられなかった保持線");
+    return;
+  }
+  addHoldFinger(open.note, "holdStart", open.finger);
+  addHoldFinger(last, "holdEnd", open.finger);
+}
+
+// ----------------------------------------------------------
+// 関数：addHoldFinger
+// 音符の holdStart か holdEnd の並びに、指の番号を足す（小さい順に並べる。同じ番号は1つだけ）（保持線）
+//   note   … 音符のデータ（直接書き換える）
+//   key    … "holdStart" か "holdEnd"
+//   finger … 指の番号
+// （edit.js の addFinger と同じ。読み込みは edit.js の関数をなるべく使わない作りなので、ここにも置いた）
+// ----------------------------------------------------------
+function addHoldFinger(note, key, finger) {
+  const list = note[key] ?? [];
+  if (!list.includes(finger)) list.push(finger);
+  note[key] = list.sort((a, b) => a - b);
 }
 
 // ----------------------------------------------------------
@@ -1361,6 +1444,10 @@ function applyPending(note, state, counter) {
   state.openWedges.forEach((open) => {
     if (open.note === null) open.note = note;
   });
+  // 保持線の始まり：この音符の前で始まった保持線に、始まりの音符を覚える（保持線）
+  state.openHolds.forEach((open) => {
+    if (open.note === null) open.note = note;
+  });
   state.pending = {};
 }
 
@@ -1437,7 +1524,8 @@ function readPart(partElement, counter, skipped) {
   //                    主音に付けるときに finishGrace で { type, pitch, chord, fingerings } の形にする）
   //   wedgeStopNext … 松葉の終わりを次の音符に付けるか（ステップ15-6）
   //   openWedges    … 開いている松葉の一覧（ステップ16-2）
-  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false, openWedges: [] };
+  // （保持線：openHolds … 開いている保持線の一覧 { finger, number, note }（readDirection の説明を参照））
+  const state = { slurNumber: null, pending: {}, lastNote: null, pendingGrace: null, wedgeStopNext: false, openWedges: [], openHolds: [] };
 
   // このパートに連桁（<beam>）が1つでも書いてあったか（ステップ19-2）
   // （連桁を書かないアプリのファイルでは、全部を「つながない」にしないよう、自動のつなぎ方のままにするため）
