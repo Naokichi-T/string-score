@@ -16,6 +16,12 @@
 // （ステップ19-2：連桁を <beam> で書く。画面と同じつなぎ方（手で変えた所も）がほかのアプリでも同じになるように）
 //   番号が 1 のときは書かない（書かなければ 1 という決まり。今までの楽譜の書き出しは変わらない）
 // （ステップ22：［符尾↑］［符尾↓］で決めた符尾の向きを <stem> で書く。自動の音符には書かない（ほかのアプリが自動で決める））
+// （保持線：指を押さえたままにする線を、五線の下の「指の数字（<words>）＋実線の括弧（<bracket>）」で書く）
+//   MusicXML には保持線そのものを表す書き方がないので、ほかのアプリでも「1 ———」と見える形にした
+//   始まり：始まりの音の前に <words>1</words> と <bracket type="start" line-end="none" line-type="solid"/> を1つの <direction> に
+//   終わり：終わりの音のあとに <bracket type="stop" line-end="none"/>
+//   bracket の番号（number）は指の番号にする（読み込みで、どの指の線か分かるように）
+//   同じ音で、同じ指の線が終わって次の線が始まるときだけ、新しい線の番号を「指の番号＋4」にする（組がまざらないように）
 //
 // 【MusicXML の形（パートごとに小節を並べる「score-partwise」という形を使う）】
 //   <score-partwise>
@@ -776,14 +782,79 @@ function wedgeNumbers(partNotes) {
 }
 
 // ----------------------------------------------------------
+// 関数：holdNumbers
+// パートの音を前から見て、保持線ごとに <bracket> の番号を決める（保持線）
+// 番号はふつう指の番号。同じ音で、同じ指の線が終わって次の線が始まるときだけ、新しい線を「指の番号＋4」にする
+// （前の線の終わりは、その音のあとに書くので、同じ番号だと「始まり → 始まり → 終わり」の順になって組がまざるため）
+//   partNotes … パートの音を、小節をまたいで1列に並べたもの
+// 戻り値：Map（音符のデータ → { starts: [{ finger, number }], ends: [{ finger, number }] }）
+// （保持線の付いていない音符は Map に入らない）
+// ----------------------------------------------------------
+function holdNumbers(partNotes) {
+  const numbers = new Map();
+  const open = new Map(); // 指の番号 → 今開いている線の番号
+  partNotes.forEach((note) => {
+    if (note.rest || (!note.holdStart && !note.holdEnd)) return;
+    const entry = { starts: [], ends: [] };
+    // この音で終わる線：開いている線の番号（開いていなければ書かない）
+    (note.holdEnd ?? []).forEach((finger) => {
+      if (!open.has(finger)) return;
+      entry.ends.push({ finger: finger, number: open.get(finger) });
+    });
+    // この音から始まる線：同じ指の線がこの音で終わるなら、その番号とは別にする
+    (note.holdStart ?? []).forEach((finger) => {
+      const closing = entry.ends.find((end) => end.finger === finger);
+      const number = closing && closing.number === finger ? finger + 4 : finger;
+      entry.starts.push({ finger: finger, number: number });
+    });
+    // 次の音のために、開いている線を入れかえる（終わった線を閉じてから、始まった線を開く）
+    entry.ends.forEach((end) => open.delete(end.finger));
+    entry.starts.forEach((start) => open.set(start.finger, start.number));
+    numbers.set(note, entry);
+  });
+  return numbers;
+}
+
+// ----------------------------------------------------------
+// 関数：holdStartXml
+// 保持線の始まりの <direction> 1つ分を作る（五線の下に、指の数字と実線の括弧の始まり）（保持線）
+//   finger … 指の番号（数字として書く）
+//   number … <bracket> の番号（holdNumbers で決めたもの）
+// 戻り値：XML の行の配列
+// ----------------------------------------------------------
+function holdStartXml(finger, number) {
+  return [
+    `      <direction placement="below">`,
+    "        <direction-type>",
+    `          <words>${finger}</words>`,
+    "        </direction-type>",
+    "        <direction-type>",
+    `          <bracket type="start" number="${number}" line-end="none" line-type="solid"/>`,
+    "        </direction-type>",
+    "      </direction>",
+  ];
+}
+
+// ----------------------------------------------------------
+// 関数：holdStopXml
+// 保持線の終わりの <direction> 1つ分を作る（保持線）
+//   number … <bracket> の番号（始まりと同じ番号）
+// 戻り値：XML の行の配列
+// ----------------------------------------------------------
+function holdStopXml(number) {
+  return [`      <direction placement="below">`, "        <direction-type>", `          <bracket type="stop" number="${number}" line-end="none"/>`, "        </direction-type>", "      </direction>"];
+}
+
+// ----------------------------------------------------------
 // 関数：directionsBeforeXml
 // 音符の前に置く <direction>（強弱・pizz./arco・松葉の始まり）を作る（ステップ8-2）
 // MusicXML では、強弱などは音符の中ではなく、音符の直前に「指示」として書く
 //   note    … 音符・休符のデータ
 //   numbers … この音符の松葉の番号 { start, end, inside }（wedgeNumbers で決めたもの。なければ空）（ステップ16-2）
+//   holds   … この音符の保持線の番号 { starts, ends }（holdNumbers で決めたもの。なければ空）（保持線）
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // ----------------------------------------------------------
-function directionsBeforeXml(note, numbers = {}) {
+function directionsBeforeXml(note, numbers = {}, holds = {}) {
   const lines = [];
 
   // 強弱（pp〜ff・sf・fp）：五線の下に書く
@@ -820,6 +891,11 @@ function directionsBeforeXml(note, numbers = {}) {
     lines.push(...wedgeXml(note.wedgeInside, numbers.inside));
   }
 
+  // 保持線の始まり：五線の下に、指の数字と実線の括弧の始まり（保持線）
+  (holds.starts ?? []).forEach((start) => {
+    lines.push(...holdStartXml(start.finger, start.number));
+  });
+
   return lines;
 }
 
@@ -829,10 +905,12 @@ function directionsBeforeXml(note, numbers = {}) {
 // 終わりの音の「あと」に置くと、松葉がその音の終わりまでのびる（このアプリの表示と同じ）
 //   note    … 音符・休符のデータ
 //   numbers … この音符の松葉の番号 { start, end, inside }（wedgeNumbers で決めたもの。なければ空）（ステップ16-2）
+//   holds   … この音符の保持線の番号 { starts, ends }（holdNumbers で決めたもの。なければ空）（保持線）
 // 戻り値：XML の行の配列（何もなければ空の配列）
 // （ステップ16-1：松葉の終わりは wedgeEnd に分けた）
+// （保持線：保持線の終わりも、終わりの音のあとに書く。線がその音の終わりまでのびる）
 // ----------------------------------------------------------
-function directionsAfterXml(note, numbers = {}) {
+function directionsAfterXml(note, numbers = {}, holds = {}) {
   const lines = [];
 
   // この音符の下だけの松葉の終わり（ステップ16-2）
@@ -845,6 +923,11 @@ function directionsAfterXml(note, numbers = {}) {
   if (note.wedgeEnd) {
     lines.push(...wedgeXml("stop", numbers.end));
   }
+
+  // 保持線の終わり（保持線）
+  (holds.ends ?? []).forEach((end) => {
+    lines.push(...holdStopXml(end.number));
+  });
 
   return lines;
 }
@@ -1010,6 +1093,8 @@ function partXml(score, p, divisions) {
   });
   // 松葉の番号を、先に全部決めておく（ステップ16-2）
   const wedgeNumberMap = wedgeNumbers(partNotes);
+  // 保持線の番号も、先に全部決めておく（保持線）
+  const holdNumberMap = holdNumbers(partNotes);
   const lastIndex = part.measures.length - 1;
   let noteIndex = -1; // パート全体で、今書いている音の番号（partNotes の中の番号）（ステップ14-3）
 
@@ -1094,7 +1179,8 @@ function partXml(score, p, divisions) {
       }
 
       const wedgeNumber = wedgeNumberMap.get(note) ?? {}; // この音符の松葉の番号（ステップ16-2）
-      lines.push(...directionsBeforeXml(note, wedgeNumber)); // 強弱・pizz.・松葉の始まり（ステップ8-2）
+      const holdNumber = holdNumberMap.get(note) ?? {}; // この音符の保持線の番号（保持線）
+      lines.push(...directionsBeforeXml(note, wedgeNumber, holdNumber)); // 強弱・pizz.・松葉の始まり（ステップ8-2）・保持線の始まり
       // グリッサンドの組なら、書き出すときだけの印（glissStart・glissStop）を付けたものを渡す（ステップ11-5c）
       const xmlNote = glissStarts.has(note) || glissStops.has(note) ? { ...note, glissStart: glissStarts.has(note), glissStop: glissStops.has(note) } : note;
       // 前打音があれば、主音のすぐ前に小さな音符を書く（ステップ11-8b）
@@ -1122,7 +1208,7 @@ function partXml(score, p, divisions) {
           lines.push(...noteXml(piece.note, accidentals[k][h] ?? null, piece.tieStop, divisions, mark, false, h > 0, h === 0 ? beamValues[k] : [], stemDirs[k]));
         });
       }
-      lines.push(...directionsAfterXml(note, wedgeNumber)); // 松葉の終わり（ステップ8-2。ステップ16-2：音符の下だけの松葉の終わりも）
+      lines.push(...directionsAfterXml(note, wedgeNumber, holdNumber)); // 松葉の終わり（ステップ8-2。ステップ16-2：音符の下だけの松葉の終わりも）・保持線の終わり
       prevTie = !note.rest && !!note.tie;
       prevTiedNote = prevTie ? note : null;
     });
