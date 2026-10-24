@@ -11,6 +11,9 @@
   // （ステップ12-3b：鳴らすパートを選ぶ欄をやめた。「再生」タブのソロで選ぶ）
   // （ステップ18-6：タブレットのときだけ、右端に［？］（タブレットでの使い方）を出す）
   // （演奏モード：［PDF 出力］の右に［演奏モード］（楽譜だけを画面いっぱいに出す）を足した）
+  //   画面の幅が狭いとき（1140px 以下）は、右のボタンの文字を短くする（1024px の幅で上のバーがはみ出さないように）
+  //   例：「MusicXML 書き出し」→「MusicXML」、「PDF 出力」→「PDF」、「演奏モード」→「演奏」
+  //   長い文字（.long）と短い文字（.short）の両方を書いておき、CSS でどちらを見せるかを切り替える
   // ==========================================================
 
   // 親から受け取るもの
@@ -115,10 +118,17 @@
     {:else}
       <span class="save-status">✓ 保存済み</span>
     {/if}
-    <button onclick={() => onexport()} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">MusicXML 書き出し</button>
-    <button onclick={() => onprint()} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">PDF 出力</button>
+    <!-- 画面が狭いときは短い文字（.short）を見せる（演奏モード） -->
+    <button onclick={() => onexport()} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">
+      <span class="long">MusicXML 書き出し</span><span class="short">MusicXML</span>
+    </button>
+    <button onclick={() => onprint()} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">
+      <span class="long">PDF 出力</span><span class="short">PDF</span>
+    </button>
     <!-- 楽譜だけを画面いっぱいに出して、ページをめくりながら見る（演奏モード） -->
-    <button onclick={() => onperform()} title="楽譜だけを画面いっぱいに出して、ページをめくりながら演奏する（Esc か ×で戻る）">演奏モード</button>
+    <button onclick={() => onperform()} title="楽譜だけを画面いっぱいに出して、ページをめくりながら演奏する（Esc か ×で戻る）">
+      <span class="long">演奏モード</span><span class="short">演奏</span>
+    </button>
     <!-- タブレットでの使い方の窓を開く（タブレットのときだけ）（ステップ18-6） -->
     {#if showHelp}
       <button class="help" onclick={() => onhelp()} title="タブレットでの使い方を見る">？</button>
@@ -191,5 +201,22 @@
     height: 40px; /* ボタンと同じ高さ（ステップ12-8d） */
     font-size: 14px;
     padding: 0 4px;
+  }
+  /* ボタンの短い文字は、ふだんは見せない（演奏モード） */
+  .short {
+    display: none;
+  }
+  /* 画面の幅が狭いとき（1140px 以下）：ボタンの文字を短くして、グループの間も少しつめる（演奏モード）
+     （1024px の幅（古い iPad・iPad mini の横向きなど）で、上のバーの右のボタンがはみ出さないようにするため） */
+  @media (max-width: 1140px) {
+    .long {
+      display: none;
+    }
+    .short {
+      display: inline;
+    }
+    .top-bar {
+      gap: 12px;
+    }
   }
 </style>
