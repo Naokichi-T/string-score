@@ -13,6 +13,12 @@
   //   ④ 画面の大きさが変わったら（向きを変えたなど）、①からやり直す
   //      今見ていたページの最初の段が入っているページを開き直す
   // ［×］か Esc キーで、編集の画面に戻る（onclose）
+  //
+  // 【めくり方】（演奏モードのステップ2）
+  //   ・スワイプ：左へ → 次のページ、右へ → 前のページ
+  //   ・タップ：画面の右のほう → 次のページ、左のほう → 前のページ（まん中は何もしない。手が当たってもめくれないように）
+  //   ・キー：→・↓・PageDown・Space → 次のページ、←・↑・PageUp → 前のページ
+  //       （Bluetooth の譜めくりペダルは、たいていこのどれかのキーを送るので、足でもめくれる）
   // ==========================================================
   import { onMount } from "svelte";
   import { renderScore } from "#lib/score/render.js";
@@ -33,6 +39,15 @@
   const PAGE_TOP = 8; // 画面の上の余白
   const FOOTER_HEIGHT = 36; // 画面の下の、ページ番号を出す場所の高さ
   const RESIZE_WAIT = 200; // 画面の大きさが変わってから、描き直すまで待つ時間（ミリ秒。向きを変えている途中で何度も描かないため）
+
+  // めくる操作の設定（演奏モードのステップ2）
+  const SWIPE_MIN = 50; // スワイプとみなす、横に動かすいちばん短い長さ（ピクセル）
+  const SWIPE_RATIO = 1.5; // 横の動きが縦の動きの何倍より大きければ、横のスワイプとみなすか（ななめの指の動きでめくれないように）
+  const TAP_MOVE = 12; // タップとみなす、指の動きのいちばん大きい長さ（ピクセル。これより動いたらタップではない）
+  const TAP_TIME = 500; // タップとみなす、触ってから離すまでのいちばん長い時間（ミリ秒）
+  const TAP_SIDE = 0.35; // 画面の左右の、この割合の幅をタップするとめくれる（0.35 なら、左の35%・右の35%）
+  const NEXT_KEYS = ["ArrowRight", "ArrowDown", "PageDown", " "]; // 次のページへ進むキー（" " は Space）
+  const PREV_KEYS = ["ArrowLeft", "ArrowUp", "PageUp"]; // 前のページへ戻るキー
 
   // 描いた楽譜（ページに分ける前の、1枚の長い楽譜）
   //   svg … 描いた楽譜の SVG、width … その幅、lineTops・lineBottoms … 段ごとの上端と下端、totalHeight … 全体の高さ
@@ -172,15 +187,88 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：turnPage
+  // ページをめくる（演奏モードのステップ2）
+  //   step … 1 なら次のページ、-1 なら前のページ
+  // 最後のページで「次」、最初のページで「前」のときは何もしない（showPage が範囲の中に収める）
+  // ----------------------------------------------------------
+  function turnPage(step) {
+    const next = pageIndex + step;
+    if (next < 0 || next >= pages.length) return;
+    showPage(next);
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleKeydown
-  // キーが押されたとき：Esc で編集の画面に戻る
+  // キーが押されたとき
+  //   ・Esc → 編集の画面に戻る
+  //   ・→・↓・PageDown・Space → 次のページ、←・↑・PageUp → 前のページ（演奏モードのステップ2）
   // （編集ページのキーの処理は、演奏モードの間は何もしないようにしてある）
   // ----------------------------------------------------------
   function handleKeydown(event) {
     if (event.key === "Escape") {
       event.preventDefault();
       onclose();
+      return;
     }
+    if (NEXT_KEYS.includes(event.key)) {
+      event.preventDefault(); // Space で、ボタンが押されたりしないように
+      turnPage(1);
+    } else if (PREV_KEYS.includes(event.key)) {
+      event.preventDefault();
+      turnPage(-1);
+    }
+  }
+
+  // 指（マウス）を置いたときの場所と時刻（離したときに、スワイプかタップかを決めるのに使う）（演奏モードのステップ2）
+  //   { id: 指の番号, x, y, time }（置いていなければ null）
+  let touchStart = null;
+
+  // ----------------------------------------------------------
+  // 関数：handlePointerDown
+  // 画面に指（マウス）を置いたとき：場所と時刻を覚える（演奏モードのステップ2）
+  // ［×］の上では覚えない（［×］はふつうのボタンとして押す）
+  // 2本目の指は使わない（最初の指だけを見る）
+  // ----------------------------------------------------------
+  function handlePointerDown(event) {
+    if (event.target.closest(".close")) return;
+    if (!event.isPrimary) return;
+    touchStart = { id: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now() };
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handlePointerUp
+  // 画面から指（マウス）を離したとき：スワイプかタップかを決めて、ページをめくる（演奏モードのステップ2）
+  //   ・横に SWIPE_MIN 以上動いて、縦より十分大きく動いた → スワイプ（左へ：次、右へ：前）
+  //   ・ほとんど動かず、すぐ離した → タップ（右のほう：次、左のほう：前、まん中：何もしない）
+  // ----------------------------------------------------------
+  function handlePointerUp(event) {
+    if (!touchStart || event.pointerId !== touchStart.id) return;
+    const dx = event.clientX - touchStart.x; // 横に動いた長さ（右がプラス）
+    const dy = event.clientY - touchStart.y; // 縦に動いた長さ（下がプラス）
+    const time = performance.now() - touchStart.time; // 触っていた時間
+    touchStart = null;
+
+    // スワイプ
+    if (Math.abs(dx) >= SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * SWIPE_RATIO) {
+      turnPage(dx < 0 ? 1 : -1); // 左へはらう → 次のページ（紙の本と同じ向き）
+      return;
+    }
+
+    // タップ
+    if (Math.abs(dx) <= TAP_MOVE && Math.abs(dy) <= TAP_MOVE && time <= TAP_TIME) {
+      const width = window.innerWidth;
+      if (event.clientX >= width * (1 - TAP_SIDE)) turnPage(1);
+      else if (event.clientX <= width * TAP_SIDE) turnPage(-1);
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handlePointerCancel
+  // 指の操作がとちゅうで取り消されたとき（電話がかかってきた・ブラウザが別の動きにしたなど）：覚えた場所を捨てる
+  // ----------------------------------------------------------
+  function handlePointerCancel() {
+    touchStart = null;
   }
 
   // ----------------------------------------------------------
@@ -207,7 +295,8 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <!-- 演奏モードの画面（編集ページの上に、画面いっぱいに重ねる） -->
-<div class="perform" role="dialog" aria-label="演奏モード">
+<!-- 指（マウス）の操作で、ページをめくる（演奏モードのステップ2） -->
+<div class="perform" role="dialog" aria-label="演奏モード" onpointerdown={handlePointerDown} onpointerup={handlePointerUp} onpointercancel={handlePointerCancel}>
   <!-- 楽譜を出す場所（この幅で楽譜を描く） -->
   <div class="stage" bind:this={stage} style:padding-top={`${PAGE_TOP}px`}>
     {#if preparing}
@@ -240,6 +329,9 @@
     display: flex;
     flex-direction: column;
     overflow: hidden; /* スクロールさせない（ページでめくる） */
+    touch-action: none; /* 指の動きで、ブラウザがスクロール・拡大をしないようにする（スワイプをこの画面で受け取るため）（演奏モードのステップ2） */
+    user-select: none; /* 長押しで文字が選ばれないようにする */
+    -webkit-user-select: none; /* iPad の Safari 用 */
   }
   /* 楽譜を出す場所：残りの高さを全部使う */
   .stage {
