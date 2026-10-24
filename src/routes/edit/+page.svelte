@@ -34,6 +34,7 @@
   import PianoKeyboard from "#lib/components/PianoKeyboard.svelte";
   import ImportNotice from "#lib/components/ImportNotice.svelte";
   import PrintView from "#lib/components/PrintView.svelte";
+  import PerformView from "#lib/components/PerformView.svelte"; // 楽譜だけを画面いっぱいに出す（演奏モード）
   import TabletGuide from "#lib/components/TabletGuide.svelte"; // タブレットでの使い方の窓（ステップ18-6）
   import {
     createEmptyScore,
@@ -2233,6 +2234,18 @@
     printing = true;
   }
 
+  // 演奏モード（楽譜だけを画面いっぱいに出す）を出しているか（true の間だけ PerformView を出す）（演奏モード）
+  let performing = $state(false);
+
+  // ----------------------------------------------------------
+  // 関数：handlePerform
+  // ［演奏モード］が押されたとき：再生を止めて、演奏モードを出す（演奏モード）
+  // ----------------------------------------------------------
+  function handlePerform() {
+    handleStop();
+    performing = true;
+  }
+
   // コピーした音の配列（まだ何もコピーしていないときは null）
   // （ステップ13-1：ブラウザの中にも保存するので、ほかのタブ・ページの再読み込みのあとでも貼り付けられる）
   let clipboard = $state.raw(null);
@@ -2313,6 +2326,8 @@
     if (loadState !== "ready") return;
     // スマホで案内を出しているときも何もしない（見えない楽譜を変えないため）（ステップ18-5）
     if (isPhone) return;
+    // 演奏モードの間も何もしない（キーは演奏モードの部品が受け取る。見えない楽譜を変えないため）（演奏モード）
+    if (performing) return;
 
     // Ctrl キー（Mac は ⌘ キー）を押しているか
     const command = event.ctrlKey || event.metaKey;
@@ -2480,6 +2495,7 @@
       onsoundtype={handleSoundType}
       onexport={handleExport}
       onprint={handlePrint}
+      onperform={handlePerform}
       showHelp={isTablet}
       onhelp={() => (guideOpen = true)}
     />
@@ -2616,6 +2632,12 @@
   {#if printing}
     <!-- visibleParts：表示しているパートだけを印刷する（ステップ12-6b） -->
     <PrintView {score} onclose={() => (printing = false)} {visibleParts} />
+  {/if}
+
+  <!-- 演奏モード（［演奏モード］を押したときだけ出す。［×］・Esc で消す）（演奏モード） -->
+  {#if performing}
+    <!-- visibleParts：表示しているパートだけを出す（PDF 出力と同じ） -->
+    <PerformView {score} {visibleParts} onclose={() => (performing = false)} />
   {/if}
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->
