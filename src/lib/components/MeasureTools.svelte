@@ -12,6 +12,7 @@
   // （ステップ17-1：調の一覧を model.js の KEY_CHOICES から読むようにした）
   // （自由な文字のテンポの指示：［文字…］のボタンと、文字を入れる欄を追加）
   // （途中の短い小節：選んでいる小節の「長さ」の欄を追加（前の部分・続き））
+  // （小節の長さの自動判断：「長さ」の欄は長さだけを選ぶ形にした。番号に数えるかどうかはアプリが決めて、欄の右に出す）
   // ==========================================================
   import { tick } from "svelte"; // 親が楽譜を変えるのを待つ（途中の短い小節）
   import { KEY_CHOICES } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）
@@ -45,7 +46,8 @@
   //   currentLength  … 選んでいる小節（範囲なら最初の小節）の長さ（途中の短い小節）
   //                    { time: その小節の拍子, kind: "normal"・"short"・"pickup", count: 拍の数, first: 1小節目か }
   //                    何も選んでいないときは null
-  //   onlength       … 「長さ」の欄で選んだときに呼ぶ関数（kind と count を渡す）（途中の短い小節）
+  //   onlength       … 「長さ」の欄で選んだときに呼ぶ関数（拍の数 count を渡す。0 なら拍子どおり）
+  //                    （小節の長さの自動判断：kind は渡さなくなった。数えるかどうかは edit.js の setMeasureLengthAuto が決める）
   let {
     canDelete = false,
     onmeasure = () => {},
@@ -71,42 +73,35 @@
   // 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]
   let lengthCounts = $derived(currentLength ? Array.from({ length: Math.max(0, currentLength.time.beats - 1) }, (_, k) => k + 1) : []);
 
-  // 欄に出す今の値（"normal"・"short:3"・"pickup:1" のような文字）
-  let lengthValue = $derived(currentLength ? lengthKey(currentLength.kind, currentLength.count) : "normal");
+  // 欄に出す今の値（拍の数。拍子どおりなら 0）（小節の長さの自動判断）
+  let lengthValue = $derived(currentLength ? currentLength.count : 0);
 
-  // ----------------------------------------------------------
-  // 関数：lengthKey
-  // 長さの種類と拍の数を、選ぶ欄の値の文字にする（途中の短い小節）
-  // 例：("short", 3) → "short:3"、("normal", 0) → "normal"
-  // ----------------------------------------------------------
-  function lengthKey(kind, count) {
-    return kind === "normal" ? "normal" : `${kind}:${count}`;
-  }
+  // 欄の右に出す、アプリが決めた種類の説明（小節の長さの自動判断）
+  //   ・1小節目の、番号に数えない小節 … "アウフタクト"
+  //   ・途中の、番号に数えない小節     … "続き"（前の小節の続き。長いと iPad の横向きの幅で3行になるので短くした）
+  //   ・それ以外（拍子どおり・番号に数える短い小節） … ""（何も出さない）
+  let lengthNote = $derived(!currentLength || currentLength.kind !== "pickup" ? "" : currentLength.first ? "アウフタクト" : "続き");
 
   // ----------------------------------------------------------
   // 関数：lengthLabel
-  // 選ぶ欄に出す長さの文字を返す（途中の短い小節）
-  // 欄を閉じているときにも、前の部分か続きかが分かるように、種類の名前を前に付ける
-  //   kind  … "short"（前の部分）か "pickup"（続き。1小節目ならアウフタクト）
+  // 選ぶ欄に出す長さの文字を返す（小節の長さの自動判断）
   //   count … 拍の数
-  // 例：4/4 で ("short", 3) → "前の部分：4分音符3つ"、("pickup", 1) → "続き：4分音符1つ"
+  // 例：4/4 で 3 → "4分音符3つ"、6/8 で 5 → "8分音符5つ"
   // ----------------------------------------------------------
-  function lengthLabel(kind, count) {
-    const name = kind === "short" ? "前の部分" : currentLength.first ? "アウフタクト" : "続き";
-    return `${name}：${currentLength.time.beatType}分音符${count}つ`;
+  function lengthLabel(count) {
+    return `${currentLength.time.beatType}分音符${count}つ`;
   }
 
   // ----------------------------------------------------------
   // 関数：pickLength
-  // 「長さ」の欄で選んだとき：親に種類と拍の数を渡す（途中の短い小節）
+  // 「長さ」の欄で選んだとき：親に拍の数を渡す（小節の長さの自動判断）
   // 変えられなかったとき（詰める所に音があるときなど）は、欄の表示を今の長さに戻す
   //   select … 選ぶ欄の要素
   // ----------------------------------------------------------
   async function pickLength(select) {
-    const [kind, count] = select.value.split(":");
-    onlength(kind, Number(count ?? 0));
+    onlength(Number(select.value));
     await tick(); // 親が楽譜を変えて、新しい値が届くのを待つ
-    select.value = lengthValue;
+    select.value = String(lengthValue);
   }
 
   // 速度記号の候補（「楽譜の設定」タブと同じもの）（ステップ11-6a）
@@ -406,30 +401,26 @@
     </div>
 
     <!-- 小節の長さ（途中の短い小節） -->
-    <!-- くり返し記号の前で終わる小節（前の部分）と、くり返し記号のあとの続きの小節（続き）を作る -->
+    <!-- （小節の長さの自動判断：長さだけを選ぶ。番号に数えるかどうかはアプリが決めて、右に出す） -->
     <div class="group">
       <span class="label">長さ</span>
       <select
         value={lengthValue}
         disabled={!currentLength || lengthCounts.length === 0}
         onchange={(event) => pickLength(event.currentTarget)}
-        title="選んでいる小節を、拍子より短い小節にする。前の部分：小節の頭から（小節番号に数える。くり返し記号の前で終わる小節など）。続き：小節の後ろの部分（小節番号に数えない。くり返し記号のあとの、前の小節の続きなど）"
+        title="選んでいる小節を、拍子より短い小節にする。1小節目ならアウフタクトに、すぐ前の短い小節と合わせてちょうど1小節になるなら前の小節の続き（どちらも小節番号に数えない）に、自動でなる"
       >
-        <option value="normal">拍子どおり</option>
+        <option value={0}>拍子どおり</option>
         {#if currentLength}
-          <optgroup label="前の部分（番号に数える）">
-            {#each lengthCounts as count}
-              <option value={lengthKey("short", count)}>{lengthLabel("short", count)}</option>
-            {/each}
-          </optgroup>
-          <!-- 1小節目の続きはアウフタクトなので、名前を変えて出す -->
-          <optgroup label={currentLength.first ? "アウフタクト（番号に数えない）" : "続き（番号に数えない）"}>
-            {#each lengthCounts as count}
-              <option value={lengthKey("pickup", count)}>{lengthLabel("pickup", count)}</option>
-            {/each}
-          </optgroup>
+          {#each lengthCounts as count}
+            <option value={count}>{lengthLabel(count)}</option>
+          {/each}
         {/if}
       </select>
+      <!-- アプリが決めた種類（アウフタクト・前の小節の続き）。番号に数える小節のときは出さない -->
+      {#if lengthNote}
+        <span class="length-note" title="小節番号に数えない小節">{lengthNote}</span>
+      {/if}
     </div>
 
     <!-- テンポ：選んでいる小節の頭から変える（何も選んでいないときは使えない）（ステップ11-6a） -->
@@ -685,6 +676,15 @@
   .gradual-text {
     width: 160px;
     font-style: italic;
+  }
+  /* 「長さ」の欄の右に出す、アプリが決めた種類（アウフタクト・前の小節の続き）（小節の長さの自動判断） */
+  .length-note {
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap; /* 途中で折り返さない */
+    padding: 2px 6px;
+    background: #f1f5f9; /* うすい灰色の札にして、欄の説明だと分かるようにする */
+    border-radius: 10px;
   }
   /* 「a tempo は［a tempo］ボタンで」の案内 */
   .text-note {
