@@ -404,7 +404,8 @@
   </div>
 
   <!-- 設定の欄を開く・閉じる（演奏モードのステップ3） -->
-  <button class="gear" class:open={settingsOpen} onclick={() => (settingsOpen = !settingsOpen)} title="演奏モードの設定" aria-label="演奏モードの設定">⚙</button>
+  <!-- 「\uFE0E」：⚙ を絵文字の形ではなく、文字の形で出す印（iPad で絵文字の小さい歯車になるのを防ぐ）（ボタンを大きくした手直し） -->
+  <button class="gear" class:open={settingsOpen} onclick={() => (settingsOpen = !settingsOpen)} title="演奏モードの設定" aria-label="演奏モードの設定">{"\u2699\uFE0E"}</button>
 
   <!-- 編集の画面に戻る -->
   <button class="close" onclick={() => onclose()} title="編集の画面に戻る（Esc）" aria-label="演奏モードを終える">×</button>
@@ -467,26 +468,30 @@
     opacity: 0.3;
     border-bottom: 1px dashed #999;
   }
-  /* 右上の［×］と［⚙］：楽譜のじゃまにならないよう、小さくうすく */
+  /* 右上の［×］と［⚙］：楽譜のじゃまにならないよう、うすい色にする
+     （ボタンを大きくした手直し：何のボタンか分かりやすいように、36px → 44px、記号も大きくした。2つの大きさをそろえる） */
   .close,
   .gear {
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: flex; /* 記号をボタンのまん中に置く */
+    align-items: center;
+    justify-content: center;
     border: 1px solid #ddd;
-    border-radius: 18px;
+    border-radius: 22px;
     background: rgba(255, 255, 255, 0.9);
-    color: #666;
-    font-size: 20px;
+    color: #555;
+    font-size: 28px;
     line-height: 1;
     cursor: pointer;
   }
   /* ［⚙］は［×］の左（演奏モードのステップ3） */
   .gear {
-    right: 52px;
-    font-size: 18px;
+    right: 60px; /* ［×］の幅 44px ＋ すき間 8px ＋ 右の余白 8px */
   }
   .gear.open {
     border-color: #2563eb;
@@ -495,7 +500,7 @@
   /* 設定の欄：右上のボタンの下に出す（演奏モードのステップ3） */
   .settings {
     position: absolute;
-    top: 52px;
+    top: 60px; /* ボタンの下（上の余白 8px ＋ ボタン 44px ＋ すき間 8px）（ボタンを大きくした手直し） */
     right: 8px;
     display: flex;
     flex-direction: column;
