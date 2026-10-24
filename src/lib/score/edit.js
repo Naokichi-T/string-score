@@ -2616,6 +2616,120 @@ export function setMeasureLength(score, i, kind, count) {
 }
 
 // ==========================================================
+// ここから下は、小節の長さを選ぶだけで、番号に数えるかどうかを自動で決める関数（小節の長さの自動判断）
+// 「小節」タブの「長さ」の欄で使う（ユーザーは長さだけを選ぶ）
+//   決まり（上から順に調べる）
+//     ・1小節目                                         → 数えない（pickup。アウフタクト）
+//     ・すぐ前が「数える短い小節（short）」で、
+//       2つを足すとちょうど1小節になる                   → 数えない（pickup。前の小節の続き）
+//     ・それ以外（最後の小節も含む）                     → 数える（short）
+//   ある小節を変えると、すぐ後ろの小節の判断も変わることがあるので、後ろの小節も見直す
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：autoLengthKind
+// i 小節目を count 拍の短い小節にするとき、番号に数えるかどうか（種類）を決めて返す（小節の長さの自動判断）
+//   i     … 何小節目か（0 から）
+//   count … 拍の数（拍子の下の数字の音符がいくつ分か。1 以上）
+// 「前の小節と足してちょうど1小節か」は、拍の数ではなくティック（長さ）で比べる
+//   （前の小節と拍子がちがっても、正しく比べられるようにするため）
+// 戻り値："pickup"（数えない）か "short"（数える）
+// 例：4/4 で、3小節目が short: 3 のとき、4小節目を 1拍 → "pickup"、2拍 → "short"
+// ----------------------------------------------------------
+export function autoLengthKind(score, i, count) {
+  // 1小節目はアウフタクト
+  if (i === 0) return "pickup";
+
+  // すぐ前の小節が「数える短い小節」でなければ、数える
+  if (!isShortMeasure(score, i - 1)) return "short";
+
+  // 前の小節の長さ ＋ この小節の新しい長さ が、この小節の拍子の1小節分とちょうど同じなら、続き
+  const time = timeAt(score, i);
+  const full = measureTicks(time); // この小節の拍子の1小節の長さ
+  const newLength = (full / time.beats) * count; // この小節の新しい長さ
+  if (measureLength(score, i - 1) + newLength === full) return "pickup";
+  return "short";
+}
+
+// ----------------------------------------------------------
+// 関数：relabelMeasure
+// i 小節目の、短い小節の種類（short か pickup）だけを入れかえる（小節の長さの自動判断）
+//   kind … 新しい種類（"short" か "pickup"）
+// 長さ（拍の数）は同じままなので、小節の中の音はさわらない（番号の数え方・拍の線の位置だけが変わる）
+// 【注意】渡された楽譜データを直接書き換える（コピーした楽譜データにだけ使う）
+// ----------------------------------------------------------
+function relabelMeasure(score, i, kind) {
+  const info = score.measures[i];
+  const count = info.pickup ?? info.short; // 今の拍の数
+  delete info.short;
+  delete info.pickup;
+  info[kind] = count;
+}
+
+// ----------------------------------------------------------
+// 関数：refreshFollowing
+// i 小節目を変えたあと、すぐ後ろの小節から順に、種類（数えるか数えないか）を見直す（小節の長さの自動判断）
+//   ・後ろの小節が拍子どおりなら、そこで終わり
+//   ・決まりどおりの種類なら、そこで終わり
+//   ・ちがっていたら種類を入れかえて（音はそのまま）、さらにその後ろを見る
+// 例：4/4 で5小節目が short: 1（数える）のとき、4小節目を short: 3 にした
+//     → 3 ＋ 1 ＝ 4 なので、5小節目を pickup: 1（数えない・4小節目の続き）に入れかえる
+// 【注意】渡された楽譜データを直接書き換える（コピーした楽譜データにだけ使う）
+// ----------------------------------------------------------
+function refreshFollowing(score, i) {
+  for (let j = i + 1; j < score.measures.length; j++) {
+    const now = measureLengthKind(score, j);
+    if (now.kind === "normal") return; // 拍子どおりの小節なら、その後ろには影響しない
+    const kind = autoLengthKind(score, j, now.count);
+    if (kind === now.kind) return; // 決まりどおりなら、その後ろも変わらない
+    relabelMeasure(score, j, kind);
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：setMeasureLengthAuto
+// i 小節目の長さを変える。番号に数えるかどうかは、アプリが自動で決める（小節の長さの自動判断）
+//   i     … 何小節目か（0 から）
+//   count … 拍の数（拍子の下の数字の音符がいくつ分か）。0 なら拍子どおりに戻す
+// 流れ
+//   ① 種類を決める（0 なら "normal"、それ以外は autoLengthKind で決める）
+//   ② 長さが今と同じで、種類だけがちがう → 種類だけ入れかえる（音はそのまま）
+//      それ以外 → setMeasureLength で長さを変える
+//        （数える小節は後ろの側を、数えない小節は前の側を詰める・足す）
+//   ③ すぐ後ろの小節から、種類を見直す（refreshFollowing）
+// 詰める所に音があるパートが1つでもあれば、何も変えずに知らせる（setMeasureLength の知らせる文をそのまま返す）
+// 戻り値：{ score: 新しい楽譜データ, error: 知らせる文（うまくいったときは空の文字） }
+//   （何も変わらないとき・変えられないときは、元の楽譜データのまま）
+// ----------------------------------------------------------
+export function setMeasureLengthAuto(score, i, count) {
+  // ① 種類を決める
+  const kind = count === 0 ? "normal" : autoLengthKind(score, i, count);
+  const now = measureLengthKind(score, i);
+
+  // ② 長さを変える（または種類だけ入れかえる）
+  let newScore;
+  if (kind !== "normal" && now.kind !== "normal" && now.count === count && now.kind !== kind) {
+    // 長さが同じで種類だけちがう：音はそのままで、種類だけ入れかえる
+    // （setMeasureLength だと、いったん拍子どおりに戻して反対側を詰めるので、音があると変えられなくなるため）
+    newScore = cloneScore(score);
+    relabelMeasure(newScore, i, kind);
+  } else {
+    const result = setMeasureLength(score, i, kind, count);
+    if (result.error) return result; // 変えられなかった：知らせる文をそのまま返す
+    newScore = result.score === score ? cloneScore(score) : result.score; // 見直しで書き換えるので、コピーにしておく
+  }
+
+  // ③ すぐ後ろの小節から、種類を見直す
+  refreshFollowing(newScore, i);
+
+  // 何も変わっていなければ、元の楽譜データを返す（「元に戻す」の履歴に残さないため）
+  if (JSON.stringify(newScore) === JSON.stringify(score)) {
+    return { score: score, error: "" };
+  }
+  return { score: newScore, error: "" };
+}
+
+// ==========================================================
 // ここから下は、調を変える関数（ステップ5-4）
 // ==========================================================
 
