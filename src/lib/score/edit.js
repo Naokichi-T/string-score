@@ -1198,17 +1198,19 @@ export function canSpan(score, range) {
 // 関数：getSpanState
 // 範囲の最初と最後の音符に、どのスラー・松葉が付いているかを調べる（ボタンを青くするため）
 // （ステップ16-1：松葉の終わりは wedgeEnd で調べる）
-// 戻り値：{ slur: true / false, wedge: 'crescendo' / 'diminuendo' / null }
+// 戻り値：{ slur: true / false, wedge: 'crescendo' / 'diminuendo' / null, holds: 指の番号の並び }
+// （保持線：範囲の最初の音から始まり、最後の音で終わる保持線の指の番号を holds に入れる（例：[1, 3]））
 // ----------------------------------------------------------
 export function getSpanState(score, range) {
   const ends = range ? spanEnds(score, range) : null;
-  if (!ends) return { slur: false, wedge: null };
+  if (!ends) return { slur: false, wedge: null, holds: [] };
   const noteAt = (pos) => score.parts[pos.part].measures[pos.measure].notes[pos.note];
   const first = noteAt(ends.first);
   const last = noteAt(ends.last);
   return {
     slur: first.slur === "start" && last.slur === "stop",
     wedge: last.wedgeEnd ? (first.wedge ?? null) : null,
+    holds: (first.holdStart ?? []).filter((finger) => (last.holdEnd ?? []).includes(finger)),
   };
 }
 
@@ -1271,6 +1273,80 @@ export function toggleSpanner(score, range, kind) {
   first.wedge = kind; // 最初の音符の wedgeEnd（前の松葉の終わり）は残す
   last.wedgeEnd = true; // 最後の音符の wedge（次の松葉の始まり）は残す
   cleanSpanners(newScore.parts[range.part]); // 入れ替えで相手がいなくなった松葉を外す
+  return newScore;
+}
+
+// ==========================================================
+// ここから下は、保持線（指を押さえたままにする線）の関数（保持線）
+// データは model.js の説明を参照（holdStart・holdEnd に指の番号の並び）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：addFinger
+// 音符の holdStart か holdEnd の並びに、指の番号を足す（小さい順に並べる）（保持線）
+//   note   … 音符のデータ（直接書き換える。コピーした楽譜データの中でだけ使う）
+//   key    … "holdStart" か "holdEnd"
+//   finger … 指の番号
+// ----------------------------------------------------------
+function addFinger(note, key, finger) {
+  const list = note[key] ?? [];
+  if (!list.includes(finger)) list.push(finger);
+  note[key] = list.sort((a, b) => a - b);
+}
+
+// ----------------------------------------------------------
+// 関数：removeFinger
+// 音符の holdStart か holdEnd の並びから、指の番号を外す（空になったら項目ごと消す）（保持線）
+//   note   … 音符のデータ（直接書き換える。コピーした楽譜データの中でだけ使う）
+//   key    … "holdStart" か "holdEnd"
+//   finger … 指の番号
+// ----------------------------------------------------------
+function removeFinger(note, key, finger) {
+  if (!note[key]) return;
+  note[key] = note[key].filter((f) => f !== finger);
+  if (note[key].length === 0) delete note[key];
+}
+
+// ----------------------------------------------------------
+// 関数：toggleHold
+// 範囲に保持線を付ける（同じ指の保持線がすでに付いていれば外す）（保持線）
+//   range  … 選んでいる範囲（音符が2つ以上あること。スラーと同じ）
+//   finger … 指の番号（1〜4）
+// 範囲の最初の音符の holdStart、最後の音符の holdEnd に、指の番号を入れる
+// 決まり（スラー・松葉と同じ考え方）
+//   ・最初と最後に、同じ指の始まりと終わりがもう付いている → 外す
+//   ・それ以外 → 付ける。間の音符に付いていた同じ指の始まり・終わりは消す（重なってわかりにくくならないように）
+//       最初の音符で、前の同じ指の線が終わっていても（holdEnd）、そのまま残す（そこから次の線を始められる）
+//       最後の音符から、次の同じ指の線が始まっていても（holdStart）、そのまま残す
+//   ・相手がいなくなった印は、最後に cleanSpanners で外す
+//   ・ほかの指の保持線はさわらない（1と3の線は重ねられる）
+// 戻り値：新しい楽譜データ（付けられないときは元の楽譜データのまま）
+// ----------------------------------------------------------
+export function toggleHold(score, range, finger) {
+  const ends = spanEnds(score, range);
+  if (!ends) return score;
+
+  const newScore = cloneScore(score);
+  const noteAt = (pos) => newScore.parts[pos.part].measures[pos.measure].notes[pos.note];
+  const first = noteAt(ends.first);
+  const last = noteAt(ends.last);
+
+  // すでに同じ指の保持線が付いていれば外す
+  if ((first.holdStart ?? []).includes(finger) && (last.holdEnd ?? []).includes(finger)) {
+    removeFinger(first, "holdStart", finger);
+    removeFinger(last, "holdEnd", finger);
+    cleanSpanners(newScore.parts[range.part]);
+    return newScore;
+  }
+
+  // 付ける：間の音符の、同じ指の始まり・終わりは消す
+  ends.inner.forEach((pos) => {
+    removeFinger(noteAt(pos), "holdStart", finger);
+    removeFinger(noteAt(pos), "holdEnd", finger);
+  });
+  addFinger(first, "holdStart", finger); // 最初の音符の holdEnd（前の線の終わり）は残す
+  addFinger(last, "holdEnd", finger); // 最後の音符の holdStart（次の線の始まり）は残す
+  cleanSpanners(newScore.parts[range.part]); // 入れ替えで相手がいなくなった印を外す
   return newScore;
 }
 
@@ -2116,6 +2192,7 @@ export function clefAt(part, i) {
 // ----------------------------------------------------------
 // 関数：cleanSpanners
 // 1つのパートの中で、相手がいなくなったスラー・松葉の印を外す
+// （保持線：保持線の始まり holdStart・終わり holdEnd も、指の番号ごとに同じ決まりで調べる）
 // （「ここから」だけ・「ここまで」だけが残ると、おかしな所どうしがつながってしまうため）
 // （ステップ5-7：コピー＆貼り付けでも使うので export した）
 // ----------------------------------------------------------
@@ -2167,6 +2244,25 @@ export function cleanSpanners(part) {
     }
   });
   if (openWedge) delete openWedge.wedge; // 最後まで終わりが来なかった始まりは外す
+
+  // 保持線（始まり holdStart と終わり holdEnd）を、指の番号ごとに調べる（保持線）
+  // 松葉と同じく、1つの音符では「前の線の終わり → 次の線の始まり」の順に見る
+  // （同じ音符で始まって終わる線（1つの音符だけの線）は作らないので、終わりを先に見ると外れる）
+  const openHolds = new Map(); // 指の番号 → 始まりが付いていて、まだ終わりが来ていない音符
+  notes.forEach((note) => {
+    [...(note.holdEnd ?? [])].forEach((finger) => {
+      if (openHolds.has(finger)) {
+        openHolds.delete(finger); // 正しい組になった
+      } else {
+        removeFinger(note, "holdEnd", finger); // 始まりのない終わりは外す
+      }
+    });
+    [...(note.holdStart ?? [])].forEach((finger) => {
+      if (openHolds.has(finger)) removeFinger(openHolds.get(finger), "holdStart", finger); // 前の始まりに終わりがなかったので外す
+      openHolds.set(finger, note);
+    });
+  });
+  openHolds.forEach((note, finger) => removeFinger(note, "holdStart", finger)); // 最後まで終わりが来なかった始まりは外す
 }
 
 // ----------------------------------------------------------

@@ -50,7 +50,14 @@
 //             //   wedgeEnd    … 前から続いてきた松葉が、ここで終わる（true）
 //             //   wedgeInside … この音符の下だけの松葉（"crescendo" か "diminuendo"。1つの音符に1つだけ）
 //             // 例：ファで ＜ が終わって、ファから ＞ が始まる → ファに wedgeEnd: true と wedge: "diminuendo"
-//             { pitch: { step: 'F', alter: 0, octave: 4 }, duration: 'quarter', dots: 0, tie: false, wedgeEnd: true, wedge: 'diminuendo' }
+//             { pitch: { step: 'F', alter: 0, octave: 4 }, duration: 'quarter', dots: 0, tie: false, wedgeEnd: true, wedge: 'diminuendo' },
+//             // 保持線（指を押さえたままにする線。五線の下に「1 ————」と書く）は2つの項目で書く（保持線）
+//             //   holdStart … ここから始まる保持線の指の番号の並び（例：[1, 3]）
+//             //   holdEnd   … 前から続いてきた保持線が、ここで終わる指の番号の並び（例：[1]）
+//             // 同じ指の番号どうしで、始まりと終わりを組にする（1と3の線が重なっていても区別できる）
+//             // 例：ラから1の指、ド♯から3の指を押さえたままにして、ソ♯で両方離す
+//             //     ラに holdStart: [1]、ド♯に holdStart: [3]、ソ♯に holdEnd: [1, 3]
+//             { pitch: { step: 'A', alter: 0, octave: 4 }, duration: 'quarter', dots: 0, tie: false, holdStart: [1] }
 //           ]
 //         }
 //       ]

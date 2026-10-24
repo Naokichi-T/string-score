@@ -149,6 +149,11 @@ function layoutPart(events, count, length, time) {
       delete first.wedgeEnd;
       last.wedgeEnd = true;
     }
+    // 保持線の終わり（holdEnd）も、分けた音の最後の部分に移す（始まり holdStart は最初の部分に残す）（保持線）
+    if (first.holdEnd) {
+      last.holdEnd = first.holdEnd;
+      delete first.holdEnd;
+    }
     if (first.glissando) {
       delete first.glissando;
       last.glissando = true;
