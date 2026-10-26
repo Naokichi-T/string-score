@@ -35,12 +35,16 @@
   let { score, onclose = () => {}, visibleParts = null, maxPages = null } = $props();
 
   // 印刷する楽譜データ（表示しているパートだけ）（ステップ12-6b）
-  const printParts = visibleParts ?? score.parts.map((_, p) => p);
-  const printScore = printParts.length === score.parts.length ? score : { ...score, parts: printParts.map((p) => score.parts[p]) };
+  // （VSCode の注意を直した手直し：ふつうの const だと「親から受け取った値の、最初の値しか使っていない」と注意されるので、
+  //   演奏モード（PerformView.svelte）と同じく $derived にした。score・visibleParts が変わったら作り直す。
+  //   印刷用のページを作っている間に変わることはないので、動きは今までと同じ）
+  let printParts = $derived(visibleParts ?? score.parts.map((_, p) => p));
+  let printScore = $derived(printParts.length === score.parts.length ? score : { ...score, parts: printParts.map((p) => score.parts[p]) });
 
   // 1ページ目の左上に出すパート名（一部のパートだけのとき。全部のときは空の文字）（ステップ12-6b）
   // 例："Violin I"、"Violin I・Viola"
-  const partLabel = printParts.length === score.parts.length ? "" : printParts.map((p) => score.parts[p].name).join("・");
+  // （VSCode の注意を直した手直し：上と同じく $derived にした）
+  let partLabel = $derived(printParts.length === score.parts.length ? "" : printParts.map((p) => score.parts[p].name).join("・"));
 
   // ----------------------------------------------------------
   // 紙の設定
