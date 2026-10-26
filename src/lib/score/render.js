@@ -72,10 +72,11 @@ const MEASURE_NUMBER_SHIFT = 4; // 文字の左端を、五線の左端からど
 const PLAYING_COLOR = "#16a34a";
 
 // 最後に測った「五線の上下のはみ出し」を覚えておく
-// 楽譜データと幅が前と同じなら測り直さない（選択の青や再生中の緑では、はみ出しは変わらないため）
+// 楽譜データと幅と間隔を詰める割合が前と同じなら測り直さない（選択の青や再生中の緑では、はみ出しは変わらないため）
+// （X枚に収めるの下準備 a：割合が変わると改行の位置が変わり、はみ出しも変わるので、割合（spacing）も覚えて比べる）
 // （楽譜データは書き換えずに新しく作る決まりなので、「同じものか」は === で比べられる）
 // （ステップ25：スラーの外に書く記号を持ち上げる量（slurLifts）も、いっしょに覚えておく）
-let lastMeasured = { score: null, width: 0, extents: null, slurLifts: new Map() };
+let lastMeasured = { score: null, width: 0, spacing: 1, extents: null, slurLifts: new Map() };
 
 // ----------------------------------------------------------
 // 関数：renderScore
@@ -93,6 +94,9 @@ let lastMeasured = { score: null, width: 0, extents: null, slurLifts: new Map() 
 //                 titleBold … タイトルを太字にするか（省略したら true）
 //                 keepHeader … true なら、タイトルも作曲者も空のときも、タイトルの場所を空ける（省略したら false）
 //                              （PDF で一部のパートだけを出すとき、左上のパート名を書く場所にする。後で直す候補の手直し）
+//                 spacing … 音符の間隔を詰める割合（1 ならふつう、0.8 なら 8割の幅。省略したら 1）（X枚に収めるの下準備 a）
+//                           小節が狭くなるので、1段に入る小節が増えて、段の数が減る（音符の大きさは変わらない）
+//                           VexFlow の最低の幅（音符どうしがぶつからない幅）より狭くはならない
 // 戻り値：{ hitBoxes, lineTops, lineBottoms, totalHeight }
 //   hitBoxes    … クリックの当たり判定に使う、音符ごとの四角の一覧
 //                 [{ part, measure, note, x, y, w, h, lineTop, lineBottom }, ...]
@@ -131,7 +135,8 @@ export function renderScore(VF, container, score, width, selection = null, range
 
   // ----- 3. 小節ごとに必要な幅を計算する -----
   const noteWidths = []; // 音符のための幅（全パートの中で一番広いもの）
-  const noteAreaWidths = measureNoteWidths(VF, score, states, accidentalsList); // 音符を並べるのに要る幅（ステップ13-2）
+  const spacing = options.spacing ?? 1; // 間隔を詰める割合（X枚に収めるの下準備 a）
+  const noteAreaWidths = measureNoteWidths(VF, score, states, accidentalsList, spacing); // 音符を並べるのに要る幅（ステップ13-2。spacing は下準備 a）
   const startWidths = []; // 段の頭に来たときの記号の幅
   const middleWidths = []; // 段の途中に来たときの記号の幅
   for (let i = 0; i < measureCount; i++) {
@@ -184,7 +189,7 @@ export function renderScore(VF, container, score, width, selection = null, range
 
   // ----- 5. 下書きを描いて、段ごと・パートごとに、五線の上下にどれだけはみ出すかを測る -----
   // （下書きでは、パートの間をとても広くとるので、となりのパートとは重ならない）
-  // 楽譜データと幅が前回と同じなら、前回測った結果をそのまま使う
+  // 楽譜データと幅と間隔を詰める割合が前回と同じなら、前回測った結果をそのまま使う（割合は X枚に収めるの下準備 a）
   // （ステップ25：スラーの外に書く記号（弓・指番号など）を、スラーの上へ持ち上げる）
   //   ① 1回目の下書きで、スラーの通り道と、記号を持ち上げる量（slurLifts）を測る
   //   ② 持ち上げる記号があれば、持ち上げた形でもう一度下書きを描いて、はみ出しを測り直す
@@ -193,7 +198,7 @@ export function renderScore(VF, container, score, width, selection = null, range
   //   スラーの通り道は、玉・符尾とスラーの内側に書く記号だけで決めるので、持ち上げても変わらない
   let extents;
   let slurLifts;
-  if (lastMeasured.score === score && lastMeasured.width === totalWidth) {
+  if (lastMeasured.score === score && lastMeasured.width === totalWidth && lastMeasured.spacing === spacing) {
     extents = lastMeasured.extents;
     slurLifts = lastMeasured.slurLifts;
   } else {
@@ -206,7 +211,7 @@ export function renderScore(VF, container, score, width, selection = null, range
         drawSystems(VF, draftContext, { ...drawInfo, slurLifts: slurLifts }, draftStaveYs, true);
       });
     }
-    lastMeasured = { score: score, width: totalWidth, extents: extents, slurLifts: slurLifts };
+    lastMeasured = { score: score, width: totalWidth, spacing: spacing, extents: extents, slurLifts: slurLifts };
   }
   drawInfo.slurLifts = slurLifts; // 本番で使う
 

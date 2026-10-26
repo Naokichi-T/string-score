@@ -17,6 +17,11 @@
 //     基本の幅 × (長さ ÷ 4分音符の長さ) の 0.6 乗
 //   を足して、「音の長さに合わせた幅」を出す（2分音符は4分音符の約1.5倍、全音符は約2.3倍、8分音符は約0.66倍）
 //   最低の幅と「音の長さに合わせた幅」のうち、広いほうを使う（細かい音符の多い小節は、今までどおり最低の幅で決まる）
+//
+// 【間隔を詰める割合】（X枚に収めるの下準備 a）
+//   spacing（1 ならふつう、0.8 なら 8割）を渡すと、上で決めた幅にその割合をかけて狭くする
+//   ただし、VexFlow の最低の幅（音符どうしがぶつからずに並ぶいちばん狭い幅）より狭くはしない
+//   （VexFlow の計算は重いので、最低の幅と「音の長さに合わせた幅」は覚えておき、割合を変えたときはかけ算だけし直す）
 // ==========================================================
 
 import { createNote, vexStemDirection } from "./notes.js";
@@ -66,7 +71,8 @@ function durationWidth(measures) {
 // 最後に計算した楽譜と、その結果を覚えておく
 // 楽譜データが前と同じなら計算し直さない（選択の青や再生中の緑では、幅は変わらないため）
 // （楽譜データは書き換えずに新しく作る決まりなので、「同じものか」は === で比べられる）
-let lastResult = { score: null, widths: null };
+// （X枚に収めるの下準備 a：割合をかける前の、小節ごとの最低の幅（minWidths）と、ふつうの幅（baseWidths）を覚える形にした）
+let lastResult = { score: null, minWidths: null, baseWidths: null };
 
 // ----------------------------------------------------------
 // 関数：measureNoteWidths
@@ -75,12 +81,29 @@ let lastResult = { score: null, widths: null };
 //   score           … 楽譜データ
 //   states          … 小節ごとの状態（拍子・調・音部記号。render/measures.js の buildStates で作ったもの）
 //   accidentalsList … パートごと・小節ごとの臨時記号（render.js の 2. で作ったもの）
+//   spacing         … 間隔を詰める割合（1 ならふつう。0.8 なら 8割の幅。省略したら 1）（X枚に収めるの下準備 a）
 // 戻り値：小節ごとの幅の配列（音符を並べる所だけ。小節の頭の記号や、小節の終わりのすき間は入らない）
 // ----------------------------------------------------------
-export function measureNoteWidths(VF, score, states, accidentalsList) {
-  if (lastResult.score === score) return lastResult.widths;
+export function measureNoteWidths(VF, score, states, accidentalsList, spacing = 1) {
+  // 楽譜データが前と同じなら、覚えておいた幅に割合をかけるだけ
+  if (lastResult.score !== score) {
+    const measured = measureBaseWidths(VF, score, states, accidentalsList);
+    lastResult = { score: score, minWidths: measured.minWidths, baseWidths: measured.baseWidths };
+  }
+  // ふつうの幅 × 割合。ただし最低の幅より狭くはしない（spacing が 1 なら、ふつうの幅そのまま）
+  return lastResult.baseWidths.map((base, i) => Math.max(lastResult.minWidths[i], base * spacing));
+}
 
-  const widths = score.measures.map((_, i) => {
+// ----------------------------------------------------------
+// 関数：measureBaseWidths
+// 小節ごとの「最低の幅」と「ふつうの幅（割合をかける前の幅）」を、VexFlow に計算させる（X枚に収めるの下準備 a）
+// （前は measureNoteWidths の中に書いていた計算を、そのまま移したもの）
+//   VF・score・states・accidentalsList … measureNoteWidths と同じ
+// 戻り値：{ minWidths: 最低の幅の配列, baseWidths: ふつうの幅の配列 }
+// ----------------------------------------------------------
+function measureBaseWidths(VF, score, states, accidentalsList) {
+  const minWidths = [];
+  const baseWidths = score.measures.map((_, i) => {
     const state = states[i];
     // パートごとに、この小節の音符を作って「声部（Voice）」にまとめる（描くときと同じ作り方）
     const voices = score.parts.map((part, p) => {
@@ -106,9 +129,9 @@ export function measureNoteWidths(VF, score, states, accidentalsList) {
     const minWidth = formatter.preCalculateMinTotalWidth(voices);
     // 最低の幅と、音の長さに合わせた幅の、広いほう（後で直す候補の手直し）
     const byDuration = durationWidth(score.parts.map((part) => part.measures[i]));
+    minWidths.push(minWidth); // 詰めるときの下限（X枚に収めるの下準備 a）
     return Math.max(minWidth * SPACE_RATE, byDuration) + SPACE_EXTRA;
   });
 
-  lastResult = { score: score, widths: widths };
-  return widths;
+  return { minWidths: minWidths, baseWidths: baseWidths };
 }
