@@ -301,7 +301,7 @@
   // ----------------------------------------------------------
   // 関数：handleFitPages
   // 「X枚に収める」の枚数を変えたとき：覚えて保存する（X枚に収める b）
-  //   kind  … "pdf"（PDF 出力）か "perform"（演奏モード）
+  //   kind  … "pdf"（PDF 出力）か "perform"（演奏モード。X枚に収める c で使い始めた）
   //   count … 枚数（指定なしは null）
   // ----------------------------------------------------------
   function handleFitPages(kind, count) {
@@ -2730,7 +2730,8 @@
   {#if performing}
     <!-- visibleParts：表示しているパートだけを出す（PDF 出力と同じ） -->
     <!-- （演奏モードのステップ3：終えるときは closePerform。自動で入ったかどうかの印も消す） -->
-    <PerformView {score} {visibleParts} onclose={closePerform} />
+    <!-- maxPages・onmaxpages：何枚に収めるか（楽譜ごとに覚える）（X枚に収める c） -->
+    <PerformView {score} {visibleParts} onclose={closePerform} maxPages={fitPages.perform ?? null} onmaxpages={(count) => handleFitPages("perform", count)} />
   {/if}
 {:else if loadState === "loading"}
   <!-- 読み込み中（すぐに終わるので、ほとんど見えない） -->

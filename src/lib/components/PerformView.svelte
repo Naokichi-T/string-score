@@ -25,6 +25,15 @@
   //   ・performAutoPortrait … タブレットを縦にしたら、自動で演奏モードに入るか（最初は入る。編集ページが使う）
   //   ・performShowPrev     … 前のページの最後の段を、次のページのいちばん上にうすく出すか（最初は出さない）
   //       出すときは、2ページ目からは、その1段ぶん（と区切りのすき間）を引いた高さでページに分ける
+  //   ・何枚に収めるか    … 楽譜ごとに覚える（保存は親がする。library.js の saveFitPages）（X枚に収める c）
+  //
+  // 【X枚に収める】（X枚に収める c。PDF 出力（PrintView.svelte）の fitLayout と同じ決まり）
+  //   枚数を指定していて、ふつうに描くとそれより多くなるときは、少しずつ詰めて描き直し、入った最初の形を使う
+  //     ① 音符の間隔を 90% → 80% に詰める（音符の大きさは変わらない）
+  //     ② 間隔 80% のまま、楽譜の大きさを 95% → 90% → … と 5% ずつ縮める（下限は決めない。安全のため 30% で止める）
+  //   縮めるときは、画面の幅 ÷ 大きさ の広い幅で描いてから、大きさの割合で縮めて出す
+  //   詰めたときは、ページ番号の行の左に「間隔 80%・大きさ 90%」のように小さく出す
+  //   向きを変えたときも、その向きの画面で、もう一度収め直す
   // 【画面が暗くならないようにする】（演奏モードのステップ3）
   //   演奏モードの間は、Wake Lock（ブラウザの機能）で画面が暗くならないようにする
   //   ほかのアプリに切り替えると外れるので、戻ってきたら、もう一度頼む（使えないブラウザでは何もしない）
@@ -37,7 +46,9 @@
   //   score        … 楽譜データ
   //   visibleParts … 表示しているパートの本当の番号の配列（null なら全部）（PDF 出力と同じ）
   //   onclose      … 演奏モードを終えるときに呼ぶ関数（［×］・Esc）
-  let { score, visibleParts = null, onclose = () => {} } = $props();
+  //   maxPages     … 何枚に収めるか（指定なしは null）（X枚に収める c）
+  //   onmaxpages   … ［⚙］で枚数を変えたときに呼ぶ関数（枚数か null を渡す。親が楽譜ごとに保存する）（X枚に収める c）
+  let { score, visibleParts = null, onclose = () => {}, maxPages = null, onmaxpages = () => {} } = $props();
 
   // 演奏モードで出す楽譜データ（表示しているパートだけ。PDF 出力と同じ作り方）
   // （$derived：親から受け取った score・visibleParts が変わったら、作り直す。
@@ -66,18 +77,36 @@
   // 前のページの最後の段をうすく出すときの設定（演奏モードのステップ3）
   const PREV_GAP = 10; // うすく出す段と、そのページの楽譜の間のすき間（区切りの線をここに引く）
 
+  // X枚に収めるときの詰め方（X枚に収める c。PrintView.svelte と同じ）
+  const FIT_SPACINGS = [0.9, 0.8]; // ① 試す音符の間隔の割合（順に試す）
+  const FIT_ZOOM_STEP = 0.05; // ② 楽譜の大きさを、1回に何%ずつ縮めるか（0.05 ＝ 5%）
+  const FIT_ZOOM_MIN = 0.3; // ② 安全のための、いちばん小さい大きさ（30%。これでも入らなければあきらめる）
+  const FIT_PAGE_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // ［⚙］の「何枚に収めるか」で選べる枚数
+
   // 設定（演奏モードのステップ3）
   //   autoPortrait … タブレットを縦にしたら、自動で演奏モードに入るか（保存していなければ true）
   //   showPrev     … 前のページの最後の段を、うすく出すか（保存していなければ false）
   const savedSettings = loadSettings();
   let autoPortrait = $state(savedSettings.performAutoPortrait !== false);
   let showPrev = $state(savedSettings.performShowPrev === true);
+  // 何枚に収めるか（指定なしは null）（X枚に収める c）
+  // 最初は親から受け取った値。［⚙］で変えたら、ここを変えて描き直し、親にも知らせる（親が保存する）
+  // （演奏モードの間に親から値が変わることはないので、最初の値だけ使えばよい）
+  // svelte-ignore state_referenced_locally
+  let fitCount = $state(maxPages);
+
+  // 収めるために詰めたときの知らせ（ページ番号の行の左に出す。詰めていなければ空の文字）（X枚に収める c）
+  //   例：「間隔 80%・大きさ 90%」、入らなかったとき「2枚に収まりません」
+  let fitNote = $state("");
+  // 入らなかったときは赤い字にする（X枚に収める c）
+  let fitFailed = $state(false);
 
   // 設定の欄を開いているか（演奏モードのステップ3）
   let settingsOpen = $state(false);
 
   // 描いた楽譜（ページに分ける前の、1枚の長い楽譜）
   //   svg … 描いた楽譜の SVG、width … その幅、lineTops・lineBottoms … 段ごとの上端と下端、totalHeight … 全体の高さ
+  //   zoom … 画面に出すときに縮める割合（1 ならそのまま）、spacing … 音符の間隔の割合（X枚に収める c）
   let drawn = null;
 
   // ページの一覧 [{ top, bottom, lines }, ...]（splitPages で作ったもの）
@@ -104,15 +133,16 @@
   //   lineTops     … 段ごとの上端の高さ
   //   lineBottoms  … 段ごとの下端の高さ
   //   totalHeight  … 楽譜全体の高さ
-  //   pageHeight   … 1ページに入る高さ
+  //   pageHeight   … 1ページに入る高さ（楽譜の大きさに直したもの）
   //   withPrev     … 前のページの最後の段をうすく出すか（演奏モードのステップ3）
-  //                  true なら、2ページ目からは、前のページの最後の段の高さ＋すき間（PREV_GAP）を引いた高さに入れる
+  //                  true なら、2ページ目からは、前のページの最後の段の高さ＋すき間（prevGap）を引いた高さに入れる
+  //   prevGap      … うすく出す段の下のすき間（楽譜の大きさに直したもの。縮めて出すときは PREV_GAP ÷ 大きさ）（X枚に収める c）
   // 戻り値：[{ top, bottom, lines }, ...]（ページごとの、楽譜の中の上端と下端の高さと、入る段の番号の配列）
   // ・1ページ目はいちばん上（タイトル）から始める
   // ・次の段がページに入りきらなければ、その段から次のページにする（段の途中では切らない）
   // ・1つの段だけでページに入りきらないときは、その段だけでページにする（はみ出した所は切れる）
   // ----------------------------------------------------------
-  function splitPages(lineTops, lineBottoms, totalHeight, pageHeight, withPrev = false) {
+  function splitPages(lineTops, lineBottoms, totalHeight, pageHeight, withPrev = false, prevGap = PREV_GAP) {
     const result = [];
     let pageTop = 0; // 今のページの上端
     let firstLine = 0; // 今のページの最初の段
@@ -120,7 +150,7 @@
     for (let l = 0; l < lineTops.length; l++) {
       // 今のページに使える高さ（前の段をうすく出すときは、その段とすき間のぶんを引く）（演奏モードのステップ3）
       let room = pageHeight;
-      if (withPrev && firstLine > 0) room = room - (lineBottoms[firstLine - 1] - lineTops[firstLine - 1]) - PREV_GAP;
+      if (withPrev && firstLine > 0) room = room - (lineBottoms[firstLine - 1] - lineTops[firstLine - 1]) - prevGap;
       // この段の下端までが今のページに入らず、今のページにもう段があるなら、ここで区切る
       if (lineBottoms[l] - pageTop > room && l > firstLine) {
         result.push({ top: pageTop, bottom: lineBottoms[l - 1], lines: range(firstLine, l - 1) });
@@ -146,7 +176,7 @@
   // ----------------------------------------------------------
   // 関数：makeSlice
   // 描いた楽譜の SVG を写して、top から bottom までの範囲だけを見せる SVG にする（PrintView.svelte の makePageSvg と同じ考え方）
-  // 画面では縮めないので、大きさは楽譜のまま
+  // ふつうは縮めないので、大きさは楽譜のまま（X枚に収めるために縮めたときは、drawn.zoom の割合で縮める）（X枚に収める c）
   //   top    … 見せる範囲の上端
   //   bottom … 見せる範囲の下端
   // ----------------------------------------------------------
@@ -154,8 +184,8 @@
     const copy = drawn.svg.cloneNode(true); // 中身ごと写す
     const height = bottom - top;
     copy.setAttribute("viewBox", `0 ${top} ${drawn.width} ${height}`);
-    copy.setAttribute("width", String(drawn.width));
-    copy.setAttribute("height", String(height));
+    copy.setAttribute("width", String(drawn.width * drawn.zoom));
+    copy.setAttribute("height", String(height * drawn.zoom));
     copy.removeAttribute("style"); // VexFlow が付けた大きさの指定を消す（上の width・height を使うため）
     return copy;
   }
@@ -181,6 +211,98 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：drawLayout
+  // 決めた「音符の間隔」と「大きさ」で楽譜を描いて、ページに分ける（X枚に収める c）
+  // （前は layout の中に書いていた ① ② を、何度も試せるように関数にしたもの）
+  //   VF      … VexFlow の部品一式
+  //   spacing … 音符の間隔の割合（1 ならふつう）
+  //   zoom    … 楽譜の大きさの割合（1 ならふつう。0.9 なら 90% に縮めて出す）
+  // 戻り値：{ drawn: 描いた楽譜（drawn に入れる形）, pages: ページの一覧 }
+  // ----------------------------------------------------------
+  function drawLayout(VF, spacing, zoom) {
+    // ① 見えない場所に描く（縮めて出すときは、そのぶん広い幅で描く。1段に入る小節が増える）
+    const width = stage.clientWidth / zoom;
+    const draw = document.createElement("div");
+    draw.style.position = "absolute";
+    draw.style.left = "-100000px";
+    document.body.appendChild(draw);
+    const result = renderScore(VF, draw, showScore, width, null, null, [], false, { spacing: spacing });
+    const svg = draw.querySelector("svg");
+    const layoutDrawn = {
+      svg: svg,
+      width: Number(svg.getAttribute("width")), // renderScore が決めた幅（最低限の幅より狭いときは広がる）
+      lineTops: result.lineTops,
+      lineBottoms: result.lineBottoms,
+      totalHeight: result.totalHeight,
+      zoom: zoom,
+      spacing: spacing,
+    };
+    draw.remove(); // 描いたもとの場所は、もういらない（SVG は手元に持っている）
+
+    // ② ページに分ける（1ページの高さ ＝ 画面の高さ − 上の余白 − ページ番号の場所。楽譜の大きさに直して比べる）
+    const pageHeight = (window.innerHeight - PAGE_TOP - FOOTER_HEIGHT) / zoom;
+    const layoutPages = splitPages(layoutDrawn.lineTops, layoutDrawn.lineBottoms, layoutDrawn.totalHeight, pageHeight, showPrev, PREV_GAP / zoom);
+    return { drawn: layoutDrawn, pages: layoutPages };
+  }
+
+  // ----------------------------------------------------------
+  // 関数：fitLayout
+  // fitCount 枚以内に入るように、少しずつ詰めて描く（X枚に収める c。PrintView.svelte の fitLayout と同じ流れ）
+  //   VF … VexFlow の部品一式
+  // 戻り値：drawLayout の戻り値（使う形）
+  //   ・まず、ふつうに描く。枚数の指定がない・枚数以内なら、それを使う
+  //   ・① 音符の間隔を 90% → 80% にして描く
+  //   ・② 間隔 80% のまま、大きさを 95% → 90% → … → 30% にして描く
+  //   ・30% でも入らなければ、30% の形を使って、入らなかったことを知らせる
+  // 知らせること（fitNote・fitFailed）もここで決める
+  // ----------------------------------------------------------
+  function fitLayout(VF) {
+    fitNote = "";
+    fitFailed = false;
+    const first = drawLayout(VF, 1, 1);
+    if (!fitCount || first.pages.length <= fitCount) return first;
+
+    // ① 音符の間隔を詰める
+    for (const spacing of FIT_SPACINGS) {
+      const tried = drawLayout(VF, spacing, 1);
+      if (tried.pages.length <= fitCount) {
+        fitNote = fitText(tried.drawn);
+        return tried;
+      }
+    }
+
+    // ② 間隔をいちばん詰めたまま、楽譜を縮める（小さなずれが出ないように、小数第2位で丸める）
+    const spacing = FIT_SPACINGS[FIT_SPACINGS.length - 1];
+    let last = null;
+    for (let k = 1; ; k++) {
+      const zoom = Math.round((1 - FIT_ZOOM_STEP * k) * 100) / 100;
+      if (zoom < FIT_ZOOM_MIN) break;
+      last = drawLayout(VF, spacing, zoom);
+      if (last.pages.length <= fitCount) {
+        fitNote = fitText(last.drawn);
+        return last;
+      }
+    }
+
+    // いちばん小さくしても入らなかった
+    fitNote = `${fitCount}枚に収まりません`;
+    fitFailed = true;
+    return last;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：fitText
+  // 詰めて収めたときに、ページ番号の行に出す文を作る（X枚に収める c）
+  //   layoutDrawn … drawLayout で描いた楽譜（spacing・zoom を見る）
+  // 例：「間隔 80%・大きさ 90%」（大きさを変えていないときは「間隔 90%」だけ）
+  // ----------------------------------------------------------
+  function fitText(layoutDrawn) {
+    const spacingText = `間隔 ${Math.round(layoutDrawn.spacing * 100)}%`;
+    const zoomText = layoutDrawn.zoom < 1 ? `・大きさ ${Math.round(layoutDrawn.zoom * 100)}%` : "";
+    return spacingText + zoomText;
+  }
+
+  // ----------------------------------------------------------
   // 関数：layout
   // 今の画面の大きさで楽譜を描いて、ページに分け直す
   // 前に見ていたページがあれば、その最初の段が入っているページを開く（向きを変えても、同じ所を見ていられるように）
@@ -199,26 +321,11 @@
     // 今見ている段（描き直す前のページの最初の段）を覚えておく
     const firstLine = pages[pageIndex]?.lines[0] ?? 0;
 
-    // ① 画面の幅で、見えない場所に描く
-    const width = stage.clientWidth;
-    const draw = document.createElement("div");
-    draw.style.position = "absolute";
-    draw.style.left = "-100000px";
-    document.body.appendChild(draw);
-    const result = renderScore(VF, draw, showScore, width, null, null, [], false);
-    const svg = draw.querySelector("svg");
-    drawn = {
-      svg: svg,
-      width: Number(svg.getAttribute("width")), // renderScore が決めた幅（最低限の幅より狭いときは広がる）
-      lineTops: result.lineTops,
-      lineBottoms: result.lineBottoms,
-      totalHeight: result.totalHeight,
-    };
-    draw.remove(); // 描いたもとの場所は、もういらない（SVG は drawn に持っている）
-
-    // ② ページに分ける（1ページの高さ ＝ 画面の高さ − 上の余白 − ページ番号の場所）
-    const pageHeight = window.innerHeight - PAGE_TOP - FOOTER_HEIGHT;
-    pages = splitPages(drawn.lineTops, drawn.lineBottoms, drawn.totalHeight, pageHeight, showPrev);
+    // ①② 画面の幅で描いて、ページに分ける（X枚に収める c：drawLayout・fitLayout にまとめた）
+    //     枚数の指定があり、ふつうに描くとそれより多くなるときは、詰めて描き直す
+    const fitted = fitLayout(VF);
+    drawn = fitted.drawn;
+    pages = fitted.pages;
 
     // ③ 前に見ていた段が入っているページを出す
     const found = pages.findIndex((page) => page.lines.includes(firstLine));
@@ -252,6 +359,17 @@
   function changeShowPrev(value) {
     showPrev = value;
     saveSetting("performShowPrev", value);
+    layout();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：changeFitCount
+  // 設定「何枚に収めるか」を変えたとき：親に知らせて（親が楽譜ごとに保存する）、ページに分け直す（X枚に収める c）
+  //   value … 選ぶ欄の値（指定なしは空の文字）
+  // ----------------------------------------------------------
+  function changeFitCount(value) {
+    fitCount = value === "" ? null : Number(value);
+    onmaxpages(fitCount);
     layout();
   }
 
@@ -317,6 +435,7 @@
   // ----------------------------------------------------------
   function handlePointerDown(event) {
     // ［×］・［⚙］・設定の欄の上では、めくらない（ふつうのボタン・チェックとして押す）（［⚙］・設定の欄は演奏モードのステップ3）
+    // （X枚に収める c：設定の欄の中の、枚数を選ぶ欄も同じ。.settings の中にあるので、ここで止まる）
     if (event.target.closest(".close, .gear, .settings")) return;
     if (!event.isPrimary) return;
     touchStart = { id: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now() };
@@ -412,6 +531,10 @@
 
   <!-- ページ番号（例：2 / 5）。この行の右端に［⚙］［×］を置く -->
   <div class="footer" style:height={`${FOOTER_HEIGHT}px`}>
+    <!-- 収めるために詰めたときは、左に小さく出す（例：間隔 80%・大きさ 90%）（X枚に収める c） -->
+    {#if fitNote && !preparing}
+      <span class="fit-note" class:failed={fitFailed}>{fitNote}</span>
+    {/if}
     {#if pages.length > 0}
       <span class="page-number">{pageIndex + 1} / {pages.length}</span>
     {/if}
@@ -434,6 +557,15 @@
       <label>
         <input type="checkbox" checked={showPrev} onchange={(event) => changeShowPrev(event.currentTarget.checked)} />
         前のページの最後の段を、上にうすく出す
+      </label>
+      <!-- 何枚に収めるか（楽譜ごとに覚える）（X枚に収める c） -->
+      <label>
+        <select value={fitCount === null ? "" : String(fitCount)} onchange={(event) => changeFitCount(event.currentTarget.value)}>
+          <option value="">ページ数の指定なし</option>
+          {#each FIT_PAGE_CHOICES as count}
+            <option value={String(count)}>{count}枚に収める</option>
+          {/each}
+        </select>
       </label>
     </div>
   {/if}
@@ -487,6 +619,17 @@
   .page-number {
     font-size: 14px;
     color: #666;
+  }
+  /* 収めるために詰めたときの知らせ：ページ番号の行の左に小さく出す（X枚に収める c） */
+  .fit-note {
+    position: absolute;
+    left: 12px;
+    font-size: 12px;
+    color: #999;
+  }
+  /* 入らなかったときは赤い字（X枚に収める c） */
+  .fit-note.failed {
+    color: #dc2626;
   }
   /* 前のページの最後の段：うすくして、下に区切りの線を引く（演奏モードのステップ3） */
   .slice.dim {
@@ -554,5 +697,14 @@
   .settings input {
     width: 20px; /* 指で押しやすい大きさ */
     height: 20px;
+  }
+  /* 何枚に収めるかを選ぶ欄（X枚に収める c）：指で押しやすい高さ */
+  .settings select {
+    height: 36px;
+    padding: 0 8px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
   }
 </style>
