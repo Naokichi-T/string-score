@@ -11,6 +11,8 @@
 //   "string-score:score:（id）"   … 楽譜データそのもの（1曲に1つ）
 //   "string-score:mixer:（id）"   … 楽譜ごとの、パートの音量の設定（ステップ12-3。くわしくは mixer.js）
 //   "string-score:view:（id）"    … 楽譜ごとの、隠すパートの名札（id）の配列（ステップ12-6a）
+//   "string-score:fit:（id）"     … 楽譜ごとの、「X枚に収める」の枚数（X枚に収める b）
+//       { pdf: 2, perform: 3 }（pdf：PDF 出力、perform：演奏モード。指定なしは null か、項目がない）
 //   "string-score:settings"      … アプリ全体の設定（楽譜とは別）（ステップ7-4）
 //       { soundType: "instrument" }（音の種類。"instrument"：楽器の音、"synth"：電子音）
 //   "string-score:clipboard"     … コピーした音の配列（タブをまたいでコピー・貼り付けするため）（ステップ13-1）
@@ -159,6 +161,7 @@ export function deleteScore(id) {
     localStorage.removeItem(scoreKey(id));
     localStorage.removeItem(mixerKey(id)); // 音量の設定もいっしょに消す（ステップ12-3）
     localStorage.removeItem(viewKey(id)); // 隠すパートの設定もいっしょに消す（ステップ12-6a）
+    localStorage.removeItem(fitKey(id)); // 「X枚に収める」の設定もいっしょに消す（X枚に収める b）
     const list = readList().filter((item) => item.id !== id);
     writeList(list);
     return true;
@@ -259,6 +262,55 @@ export function saveHiddenParts(id, hidden) {
   } catch (error) {
     // 保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
     console.error("隠すパートの設定を保存できませんでした", error);
+  }
+}
+
+// ==========================================================
+// ここから下は、楽譜ごとの「X枚に収める」の設定（X枚に収める b）
+// PDF 出力と演奏モードで、それぞれ何枚に収めるかを覚える
+// （楽譜データとは別に保存するので、変えても「元に戻す」の対象にならず、楽譜の更新日時も変わらない）
+// ==========================================================
+
+// ----------------------------------------------------------
+// 関数：fitKey
+// 「X枚に収める」の設定を入れる場所の名前を作る
+// 例："abc123" → "string-score:fit:abc123"
+// ----------------------------------------------------------
+function fitKey(id) {
+  return "string-score:fit:" + id;
+}
+
+// ----------------------------------------------------------
+// 関数：loadFitPages
+// 楽譜の「X枚に収める」の設定を読み込む
+//   id … 楽譜の id
+// 戻り値：{ pdf: 枚数, perform: 枚数 }（まだ保存していない・読めないときは空の {}。指定なしは null か、項目がない）
+// ----------------------------------------------------------
+export function loadFitPages(id) {
+  try {
+    const text = localStorage.getItem(fitKey(id));
+    if (!text) return {};
+    const fit = JSON.parse(text);
+    // ふつうのオブジェクトでなければ（壊れていたら）空にする
+    return fit && typeof fit === "object" ? fit : {};
+  } catch (error) {
+    console.error("「X枚に収める」の設定を読み込めませんでした", error);
+    return {};
+  }
+}
+
+// ----------------------------------------------------------
+// 関数：saveFitPages
+// 楽譜の「X枚に収める」の設定を保存する（楽譜の更新日時は変えない）
+//   id  … 楽譜の id
+//   fit … { pdf: 枚数, perform: 枚数 }
+// ----------------------------------------------------------
+export function saveFitPages(id, fit) {
+  try {
+    localStorage.setItem(fitKey(id), JSON.stringify(fit));
+  } catch (error) {
+    // 保存できなくても、アプリはそのまま使える（次に開いたときに元に戻るだけ）
+    console.error("「X枚に収める」の設定を保存できませんでした", error);
   }
 }
 

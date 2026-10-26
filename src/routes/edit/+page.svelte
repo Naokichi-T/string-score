@@ -128,7 +128,21 @@
   import { stemState, canChangeStem, setStem } from "#lib/score/stems.js"; // 符尾の向きを決める（ステップ22）
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches } from "#lib/score/playback.js";
-  import { loadScore, saveScore, loadSettings, saveSetting, loadMixer, saveMixer, loadHiddenParts, saveHiddenParts, loadClipboard, saveClipboard, CLIPBOARD_KEY } from "#lib/score/library.js";
+  import {
+    loadScore,
+    saveScore,
+    loadSettings,
+    saveSetting,
+    loadMixer,
+    saveMixer,
+    loadHiddenParts,
+    saveHiddenParts,
+    loadFitPages,
+    saveFitPages,
+    loadClipboard,
+    saveClipboard,
+    CLIPBOARD_KEY,
+  } from "#lib/score/library.js";
   import { mixerOf } from "#lib/score/mixer.js";
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
@@ -278,6 +292,39 @@
     const shown = score.parts.map((part, p) => (hiddenParts.includes(part.id) ? -1 : p)).filter((p) => p >= 0);
     return shown.length > 0 ? shown : score.parts.map((_, p) => p);
   });
+
+  // 「X枚に収める」の設定（X枚に収める b）
+  //   { pdf: PDF 出力の枚数, perform: 演奏モードの枚数 }（指定なしは null か、項目がない）
+  // 楽譜を開いたときに、その楽譜の設定を読み込む（楽譜ごとに覚える）
+  let fitPages = $state({});
+
+  // ----------------------------------------------------------
+  // 関数：handleFitPages
+  // 「X枚に収める」の枚数を変えたとき：覚えて保存する（X枚に収める b）
+  //   kind  … "pdf"（PDF 出力）か "perform"（演奏モード）
+  //   count … 枚数（指定なしは null）
+  // ----------------------------------------------------------
+  function handleFitPages(kind, count) {
+    fitPages = { ...fitPages, [kind]: count };
+    saveFitPages(scoreId, fitPages);
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handlePrintClose
+  // 印刷の画面が閉じたとき：印刷用のページを消して、PrintView からの知らせがあれば出す（X枚に収める b）
+  //   notice … { text: 知らせる文, error: まちがいの知らせか }（知らせることがなければ null）
+  //            例：「PDF を2枚に収めました（音符の間隔 80%・大きさ 90%）」は案内（青い字）
+  //                「PDF を1枚に収められませんでした」はまちがいの知らせ（赤い字）
+  // ----------------------------------------------------------
+  function handlePrintClose(notice) {
+    printing = false;
+    if (!notice) return;
+    if (notice.error) {
+      message = notice.text;
+    } else {
+      showInfo(notice.text);
+    }
+  }
 
   // ----------------------------------------------------------
   // 関数：handleToggleView
@@ -738,6 +785,7 @@
     scoreId = id;
     mixer = loadMixer(id); // この楽譜の音量の設定（ステップ12-3）
     hiddenParts = loadHiddenParts(id); // この楽譜の、隠すパートの設定（ステップ12-6a）
+    fitPages = loadFitPages(id); // この楽譜の、「X枚に収める」の設定（X枚に収める b）
     // パートに id（名札）がなければ付ける（ステップ12-3 より前に作った楽譜）（ステップ12-3）
     // （ステップ16-1：古い形の松葉の終わり（wedge: "stop"）も、新しい形（wedgeEnd）に直す）
     const withIds = upgradeWedges(ensurePartIds(loaded));
@@ -2578,6 +2626,8 @@
       {score}
       onsettings={handleSettings}
       ontranspose={handleTransposeScore}
+      pdfPages={fitPages.pdf ?? null}
+      onpdfpages={(count) => handleFitPages("pdf", count)}
       {canDeleteMeasure}
       onmeasure={handleMeasure}
       {currentTime}
@@ -2672,7 +2722,8 @@
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->
   {#if printing}
     <!-- visibleParts：表示しているパートだけを印刷する（ステップ12-6b） -->
-    <PrintView {score} onclose={() => (printing = false)} {visibleParts} />
+    <!-- maxPages：PDF を何枚に収めるか（指定なしは null）。閉じたときは handlePrintClose で知らせを出す（X枚に収める b） -->
+    <PrintView {score} onclose={handlePrintClose} {visibleParts} maxPages={fitPages.pdf ?? null} />
   {/if}
 
   <!-- 演奏モード（［演奏モード］を押したときだけ出す。［×］・Esc で消す）（演奏モード） -->

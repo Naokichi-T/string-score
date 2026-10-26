@@ -9,6 +9,7 @@
   // （ステップ17-1：楽譜全体の移調の欄を追加）
   // （ステップ20：「小節の長さ」の欄（アウフタクト・最後の小節）を追加。アウフタクトは「小節」タブから移した）
   // （小節の長さの自動判断：「小節の長さ」の欄を消した。どの小節の長さも「小節」タブの「長さ」の欄で変える）
+  // （X枚に収める b：「PDF を何枚に収めるか」の欄を追加。選んだ枚数は楽譜ごとに覚える（保存は親がする））
   // ==========================================================
   import { tick, onMount } from "svelte";
   import { keyAt, KEY_CHOICES } from "#lib/score/model.js"; // 1小節目の調・調の一覧（ステップ17-1）
@@ -22,7 +23,23 @@
   //   ontranspose … ［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
   //                 例：ontranspose(4, "nearest")
   //   （小節の長さの自動判断：pickup・onpickup・shortEnd・onshortend は、「小節の長さ」の欄といっしょに消した）
-  let { score, onsettings = () => {}, focusTitle = false, ontranspose = () => {} } = $props();
+  //   pdfPages   … PDF を何枚に収めるか（指定なしは null）（X枚に収める b）
+  //   onpdfpages … 枚数を選んだときに呼ぶ関数（枚数か、指定なしなら null を渡す）（X枚に収める b）
+  //                例：onpdfpages(2)、onpdfpages(null)
+  let { score, onsettings = () => {}, focusTitle = false, ontranspose = () => {}, pdfPages = null, onpdfpages = () => {} } = $props();
+
+  // 「PDF を何枚に収めるか」の欄で選べる枚数（1〜10枚）（X枚に収める b）
+  const FIT_PAGE_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  // ----------------------------------------------------------
+  // 関数：handlePdfPages
+  // 「PDF を何枚に収めるか」の欄で選んだとき：枚数（指定なしなら null）を親に渡す（X枚に収める b）
+  //   event … 選ぶ欄のイベント（選んだ値は event.currentTarget.value。指定なしは空の文字）
+  // ----------------------------------------------------------
+  function handlePdfPages(event) {
+    const value = event.currentTarget.value;
+    onpdfpages(value === "" ? null : Number(value));
+  }
 
   // ----------------------------------------------------------
   // ここから下は、移調の欄（ステップ17-1）
@@ -260,6 +277,18 @@
       <span class="interval">{intervalText}</span>
     {/if}
   </div>
+
+  <!-- PDF を何枚に収めるか（X枚に収める b） -->
+  <!-- 指定すると、PDF 出力でそのページ数をこえるとき、音符の間隔を詰めて、それでも足りなければ楽譜を縮める -->
+  <div class="pdf-fit">
+    <span class="heading">PDF</span>
+    <select value={pdfPages === null ? "" : String(pdfPages)} onchange={handlePdfPages} title="PDF 出力のページ数がこれより多くなるときは、音符の間隔を詰めたり楽譜を縮めたりして収めます">
+      <option value="">ページ数の指定なし</option>
+      {#each FIT_PAGE_CHOICES as count}
+        <option value={String(count)}>{count}枚に収める</option>
+      {/each}
+    </select>
+  </div>
 </div>
 
 <style>
@@ -292,8 +321,9 @@
   .number {
     width: 70px;
   }
-  /* 移調の欄（ステップ17-1） */
-  .transpose {
+  /* 移調の欄（ステップ17-1）・PDF の枚数の欄（X枚に収める b） */
+  .transpose,
+  .pdf-fit {
     display: flex;
     flex-wrap: wrap; /* 画面が狭いときは折り返す */
     align-items: center;

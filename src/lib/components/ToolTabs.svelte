@@ -21,6 +21,7 @@
   // （ステップ18-1：タブの名前の列の右端に［▲］を置いて、タブの中身をたたんで五線譜を広く見られるようにした）
   // （ステップ22：「音符」タブの2行目、連桁のボタンのとなりに［符尾↑］［符尾↓］を追加）
   // （ステップ24-1：前打音を選んでいるときも、♯♭♮・▲▼・削除を押せるようにする。付点は押せない）
+  // （X枚に収める b：「楽譜の設定」タブに「PDF を何枚に収めるか」の欄を追加。pdfPages・onpdfpages を ScoreSettings へ渡す）
   // ボタンの記号は、五線譜と同じ楽譜用フォント（Bravura）で描く
   // ==========================================================
   import { untrack } from "svelte";
@@ -62,6 +63,8 @@
   //   score        … 楽譜データ（「楽譜の設定」タブで、今の値を出すのに使う）
   //   onsettings   … 「楽譜の設定」タブで値が確定したときに呼ぶ関数（項目の名前と値を渡す）
   //   ontranspose  … 「楽譜の設定」タブの［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
+  //   pdfPages     … PDF を何枚に収めるか（指定なしは null）（「楽譜の設定」タブで使う）（X枚に収める b）
+  //   onpdfpages   … 「PDF を何枚に収めるか」を選んだときに呼ぶ関数（枚数か null を渡す）（X枚に収める b）
   //   canDeleteMeasure … 小節を消せるか（「小節」タブで使う）
   //   onmeasure    … 「小節」タブのボタンが押されたときに呼ぶ関数（"before"・"after"・"delete" を渡す）
   //   currentTime  … 選んでいる小節の拍子 { beats, beatType }（「小節」タブで使う）
@@ -168,6 +171,8 @@
     score,
     onsettings = () => {},
     ontranspose = () => {},
+    pdfPages = null,
+    onpdfpages = () => {},
     canDeleteMeasure = false,
     onmeasure = () => {},
     currentTime = { beats: 4, beatType: 4 },
@@ -509,7 +514,8 @@
       <PlaybackTools parts={score.parts} {mixer} {onmixer} {metronome} {onmetronome} {repeatOn} {repeatText} {onrepeat} />
     {:else if activeTab === "settings"}
       <!-- （ステップ20：アウフタクト・最後の小節の長さも渡していた。小節の長さの自動判断：「小節」タブにまとめたので、渡さなくなった） -->
-      <ScoreSettings {score} {onsettings} {focusTitle} {ontranspose} />
+      <!-- （X枚に収める b：PDF を何枚に収めるか（pdfPages・onpdfpages）も渡す） -->
+      <ScoreSettings {score} {onsettings} {focusTitle} {ontranspose} {pdfPages} {onpdfpages} />
     {/if}
   </div>
 </div>

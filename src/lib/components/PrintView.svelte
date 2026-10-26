@@ -12,6 +12,14 @@
   //   ⑤ 印刷の画面が閉じたら、親に知らせる（onclose）→ 親がこの部品を消す
   //
   // 画面では見えない場所に置き、印刷のときだけ出す（編集の画面は印刷のときに隠す）
+  //
+  // 【X枚に収める】（X枚に収める b）
+  //   maxPages（何枚に収めるか）が指定されていて、ふつうに描くとそれより多くなるときは、
+  //   少しずつ詰めて描き直し、maxPages 枚以内に入った最初の形を使う（なるべく詰めすぎないように）
+  //     ① 音符の間隔を 90% → 80% に詰める（音符の大きさは変わらない）
+  //     ② 間隔 80% のまま、楽譜の大きさを 95% → 90% → 85% … と 5% ずつ縮める（下限は決めない）
+  //        （ただし安全のため、30% まで縮めても入らないときは、そこで止めて知らせる）
+  //   詰めたときは、閉じたあとに「何%にしたか」を知らせる（onclose に渡す）
   // ==========================================================
   import { onMount, tick } from "svelte";
   import { renderScore } from "#lib/score/render.js";
@@ -21,7 +29,10 @@
   //   onclose … 印刷の画面が閉じたときに呼ぶ関数
   //   visibleParts … 表示しているパートの本当の番号の配列（null なら全部）（ステップ12-6b）
   //                  表示しているパートだけを印刷する（全部ならスコア、1つならパート譜になる）
-  let { score, onclose = () => {}, visibleParts = null } = $props();
+  //   maxPages … 何枚に収めるか（指定なしは null）（X枚に収める b）
+  //              「以内」に収める決まりなので、パート譜のように、ふつうに描いてもそれより少ないときは何もしない
+  //   onclose には、知らせること { text, error }（なければ null）を渡す（X枚に収める b）
+  let { score, onclose = () => {}, visibleParts = null, maxPages = null } = $props();
 
   // 印刷する楽譜データ（表示しているパートだけ）（ステップ12-6b）
   const printParts = visibleParts ?? score.parts.map((_, p) => p);
@@ -47,6 +58,19 @@
   const STAFF_HEIGHT_MM = 7;
   const SCALE = (STAFF_HEIGHT_MM * MM) / 40;
   const TITLE_SIZE = 33; // タイトルの文字の大きさ（縮める前。紙の上で、参考と同じ高さ約 5.7mm になる）
+
+  // X枚に収めるときの詰め方（X枚に収める b）
+  const FIT_SPACINGS = [0.9, 0.8]; // ① 試す音符の間隔の割合（順に試す）
+  const FIT_ZOOM_STEP = 0.05; // ② 楽譜の大きさを、1回に何%ずつ縮めるか（0.05 ＝ 5%）
+  const FIT_ZOOM_MIN = 0.3; // ② 安全のための、いちばん小さい大きさ（30%。これでも入らなければあきらめる）
+
+  // 今のページで使っている縮める割合（ふつうは SCALE。X枚に収めるために縮めたときは、それより小さい）（X枚に収める b）
+  // （1ページ目の左上のパート名の位置も、この割合に合わせる）
+  let usedScale = $state(SCALE);
+
+  // 閉じたときに知らせること（なければ null）（X枚に収める b）
+  //   { text: 知らせる文, error: まちがいの知らせか }
+  let notice = null;
 
   // ページの一覧（ステップ13-2：段ごとに切り出す形にした）
   //   { slices: そのページに出す段ごとの SVG の要素の配列, stretch: 段をページの下まで広げるか }
@@ -118,18 +142,112 @@
   //   top    … 見せる範囲の上端
   //   bottom … 見せる範囲の下端
   // viewBox：SVG の中の「どこからどこまで」を見せるかを決める（x y 幅 高さ）
-  // width・height：紙の上での大きさ（ここを SCALE 倍にすると、中身も SCALE 倍に縮む）
+  // width・height：紙の上での大きさ（ここを scale 倍にすると、中身も scale 倍に縮む）
   // （ステップ13-2：1ページ分ではなく、1つの段の分を切り出すのにも使う）
+  //   scale  … 縮める割合（X枚に収める b：縮めたときのために、決まった SCALE ではなく受け取るようにした）
   // ----------------------------------------------------------
-  function makePageSvg(svg, width, top, bottom) {
+  function makePageSvg(svg, width, top, bottom, scale) {
     const copy = svg.cloneNode(true); // 中身ごと写す
     const height = bottom - top;
     copy.setAttribute("viewBox", `0 ${top} ${width} ${height}`);
-    copy.setAttribute("width", String(width * SCALE));
-    copy.setAttribute("height", String(height * SCALE));
+    copy.setAttribute("width", String(width * scale));
+    copy.setAttribute("height", String(height * scale));
     // VexFlow が付けた大きさの指定（style）を消す（上の width・height を使うため）
     copy.removeAttribute("style");
     return copy;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：drawLayout
+  // 決めた「音符の間隔」と「大きさ」で楽譜を描いて、ページに分ける（X枚に収める b）
+  // （前は onMount の中に書いていた ① ② を、何度も試せるように関数にしたもの）
+  //   VF      … VexFlow の部品一式
+  //   spacing … 音符の間隔の割合（1 ならふつう）
+  //   zoom    … 楽譜の大きさの割合（1 ならふつう。0.9 なら、ふつうの 90% に縮める）
+  // 戻り値：{ result, svg, svgWidth, ranges, scale, spacing, zoom }
+  //   result   … renderScore の戻り値（段の上端・下端など）
+  //   svg      … 描いた楽譜の SVG（描いた場所からは外してある。写して使う）
+  //   svgWidth … 楽譜の幅（楽譜の大きさのまま）
+  //   ranges   … ページの一覧（splitPages で作ったもの。ranges.length がページ数）
+  //   scale    … 紙に出すときに縮める割合（SCALE × zoom）
+  // ----------------------------------------------------------
+  function drawLayout(VF, spacing, zoom) {
+    const scale = SCALE * zoom;
+    // ① 紙の幅に合わせて描く（楽譜の大きさのままの幅 ＝ 紙の幅 ÷ 縮める割合）
+    //    小さく縮めるほど、広い幅で描くことになるので、1段に入る小節が増える
+    const width = CONTENT_WIDTH / scale;
+    const draw = document.createElement("div");
+    draw.style.position = "absolute";
+    draw.style.left = "-100000px";
+    document.body.appendChild(draw);
+    // 表示しているパートだけ（ステップ12-6b）。タイトルは大きく、太字にしない（ステップ13-2）
+    // spacing：音符の間隔の割合（X枚に収める b）
+    const result = renderScore(VF, draw, printScore, width, null, null, [], false, { titleSize: TITLE_SIZE, titleBold: false, keepHeader: partLabel !== "", spacing: spacing });
+    const svg = draw.querySelector("svg");
+    // 幅は renderScore が決めたもの（最低限の幅より狭いときは広がる）を使う
+    const svgWidth = Number(svg.getAttribute("width"));
+    draw.remove(); // 描いた場所は、もういらない（SVG は手元に持っている）
+
+    // ② ページに分ける（1ページの高さも、楽譜の大きさに直して比べる）
+    const ranges = splitPages(result.lineTops, result.lineBottoms, result.totalHeight, CONTENT_HEIGHT / scale);
+    return { result, svg, svgWidth, ranges, scale, spacing, zoom };
+  }
+
+  // ----------------------------------------------------------
+  // 関数：fitLayout
+  // maxPages 枚以内に入るように、少しずつ詰めて描く（X枚に収める b）
+  //   VF … VexFlow の部品一式
+  // 戻り値：drawLayout の戻り値（使う形）
+  // 流れ：
+  //   ・まず、ふつうに描く。maxPages の指定がない・maxPages 枚以内なら、それを使う
+  //   ・① 音符の間隔を 90% → 80% にして描く。入ったらそれを使う
+  //   ・② 間隔 80% のまま、大きさを 95% → 90% → … → 30% にして描く。入ったらそれを使う
+  //   ・30% でも入らなければ、30% の形を使って、入らなかったことを知らせる
+  // 詰めたとき・入らなかったときは、notice に知らせる文を入れる
+  // ----------------------------------------------------------
+  function fitLayout(VF) {
+    const first = drawLayout(VF, 1, 1);
+    if (!maxPages || first.ranges.length <= maxPages) return first;
+
+    // ① 音符の間隔を詰める
+    for (const spacing of FIT_SPACINGS) {
+      const tried = drawLayout(VF, spacing, 1);
+      if (tried.ranges.length <= maxPages) {
+        notice = { text: fitText(tried), error: false };
+        return tried;
+      }
+    }
+
+    // ② 間隔をいちばん詰めたまま、楽譜を縮める
+    // （0.05 を何度も引くと 0.8999… のような小さなずれが出るので、何回目かから計算して、小数第2位で丸める）
+    const spacing = FIT_SPACINGS[FIT_SPACINGS.length - 1];
+    let last = null;
+    for (let k = 1; ; k++) {
+      const zoom = Math.round((1 - FIT_ZOOM_STEP * k) * 100) / 100;
+      if (zoom < FIT_ZOOM_MIN) break;
+      last = drawLayout(VF, spacing, zoom);
+      if (last.ranges.length <= maxPages) {
+        notice = { text: fitText(last), error: false };
+        return last;
+      }
+    }
+
+    // いちばん小さくしても入らなかった
+    notice = { text: `PDF を${maxPages}枚に収められませんでした（いちばん小さくしても${last.ranges.length}枚になりました）`, error: true };
+    return last;
+  }
+
+  // ----------------------------------------------------------
+  // 関数：fitText
+  // 詰めて収めたときに知らせる文を作る（X枚に収める b）
+  //   layout … drawLayout の戻り値
+  // 例：「PDF を2枚に収めました（音符の間隔 80%・大きさ 90%）」
+  //     大きさを変えていないときは「（音符の間隔 90%）」だけ
+  // ----------------------------------------------------------
+  function fitText(layout) {
+    const spacingText = `音符の間隔 ${Math.round(layout.spacing * 100)}%`;
+    const zoomText = layout.zoom < 1 ? `・大きさ ${Math.round(layout.zoom * 100)}%` : "";
+    return `PDF を${maxPages}枚に収めました（${spacingText}${zoomText}）`;
   }
 
   // ----------------------------------------------------------
@@ -146,7 +264,8 @@
   // ----------------------------------------------------------
   onMount(() => {
     // 印刷の画面が閉じたら、親に知らせる（印刷しても、キャンセルしても呼ばれる）
-    const handleAfterPrint = () => onclose();
+    // （X枚に収める b：詰めたとき・入らなかったときの知らせ（notice）も渡す）
+    const handleAfterPrint = () => onclose(notice);
     window.addEventListener("afterprint", handleAfterPrint);
 
     (async () => {
@@ -154,28 +273,17 @@
       const VF = (await import("vexflow")).default;
       await document.fonts.ready;
 
-      // ① 紙の幅に合わせて描く（楽譜の大きさのままの幅 ＝ 紙の幅 ÷ 縮める割合）
-      const width = CONTENT_WIDTH / SCALE;
-      const draw = document.createElement("div");
-      draw.style.position = "absolute";
-      draw.style.left = "-100000px";
-      document.body.appendChild(draw);
-      // 表示しているパートだけ（ステップ12-6b）。タイトルは大きく、太字にしない（ステップ13-2）
-      const result = renderScore(VF, draw, printScore, width, null, null, [], false, { titleSize: TITLE_SIZE, titleBold: false, keepHeader: partLabel !== "" });
-      const svg = draw.querySelector("svg");
-      // 幅は renderScore が決めたもの（最低限の幅より狭いときは広がる）を使う
-      const svgWidth = Number(svg.getAttribute("width"));
-
-      // ② ページに分ける（1ページの高さも、楽譜の大きさに直して比べる）
-      const ranges = splitPages(result.lineTops, result.lineBottoms, result.totalHeight, CONTENT_HEIGHT / SCALE);
+      // ①② 紙の幅に合わせて描いて、ページに分ける（X枚に収める b：drawLayout・fitLayout にまとめた）
+      //     maxPages の指定があり、ふつうに描くとそれより多くなるときは、詰めて描き直す
+      const { result, svg, svgWidth, ranges, scale } = fitLayout(VF);
+      usedScale = scale; // パート名の位置を、使った割合に合わせる
 
       // ③ ページごとに、段ごとの SVG を作る（ステップ13-2）
       //    最後のページ以外で、段が2つ以上あれば、段をページの下まで均等に広げる
       pages = ranges.map((page, k) => ({
-        slices: pageSlices(page, result.lineTops, result.lineBottoms).map((slice) => makePageSvg(svg, svgWidth, slice.top, slice.bottom)),
+        slices: pageSlices(page, result.lineTops, result.lineBottoms).map((slice) => makePageSvg(svg, svgWidth, slice.top, slice.bottom, scale)),
         stretch: k < ranges.length - 1 && page.lines.length > 1,
       }));
-      draw.remove(); // 描いたもとの楽譜は、もういらない
 
       // ④ 画面にページが入るのを待ってから、印刷の画面を開く
       await tick();
@@ -200,8 +308,9 @@
         {/each}
       </div>
       <!-- パート名（一部のパートだけを印刷するとき、1ページ目の左上。作曲者と同じ高さ）（ステップ12-6b） -->
+      <!-- （X枚に収める b：縮めたときも作曲者と同じ高さになるように、SCALE ではなく使った割合（usedScale）で位置を決める） -->
       {#if k === 0 && partLabel}
-        <div class="part-label" style:top={`calc(${PAGE_TOP_MM}mm + ${56 * SCALE}px)`} style:left={`calc(${PAGE_LEFT_MM}mm + ${10 * SCALE}px)`}>{partLabel}</div>
+        <div class="part-label" style:top={`calc(${PAGE_TOP_MM}mm + ${56 * usedScale}px)`} style:left={`calc(${PAGE_LEFT_MM}mm + ${10 * usedScale}px)`}>{partLabel}</div>
       {/if}
       <!-- ページ番号（2ページ目から） -->
       {#if k > 0}
