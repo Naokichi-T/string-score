@@ -27,6 +27,11 @@ function placeOutsideSlur(mark, slurLift) {
 // 下向きの符尾の先から、強弱記号の文字の下端までの間（ピクセル）
 const STEM_GAP = 22;
 
+// 五線の中の音でも、五線の外に置く記号の名前（アーティキュレーションのうち）
+//   スタッカート・テヌート・スタッカーティシモは、玉のすぐそば（五線の中）に置く。
+//   アクセントは、市販の楽譜と同じく五線の外に置く（マルカートは VexFlow のままで五線の外）
+const OUTSIDE_STAFF_ARTICULATIONS = new Set(["accent"]);
+
 // ----------------------------------------------------------
 // 関数：addSymbols
 // 音符に、五線の上や音符の近くに付く記号を付ける
@@ -56,6 +61,9 @@ export function addSymbols(VF, staveNote, note, slurLift = 0) {
     if (!symbol) continue; // 表にない名前は無視する
     const articulation = new VF.Articulation(symbol.vf);
     articulation.setPosition(stemUp ? BELOW : ABOVE);
+    // 五線の外に出す記号（アクセント）は、五線の中の音でも線の間に入れず、五線の外に置く
+    //   （VexFlow のままだと、アクセントは五線の線の間に入って、玉やスラーにくっつく）
+    if (OUTSIDE_STAFF_ARTICULATIONS.has(name)) articulation.setBetweenLines(false);
     articulation.followsStem = true; // 符尾の向きで上下が決まる記号（ステップ26）
     staveNote.addModifier(articulation, 0);
   }
