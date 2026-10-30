@@ -2455,7 +2455,8 @@ export function changeTime(score, from, to, time) {
     const now = measureLengthKind(score, m);
     if (now.kind === "normal") continue;
     const newCount = measureLength(score, m) / unit;
-    if (!Number.isInteger(newCount) || newCount >= time.beats) {
+    // （半拍刻みに対応：半拍（0.5）の倍数ならよい）
+    if (!Number.isInteger(newCount * 2) || newCount >= time.beats) {
       return { score: score, error: `${measureName(score, m)}の長さが新しい拍子に合わないので、拍子を変えられません（先に「小節」タブで、その小節の長さを「拍子どおり」にしてください）` };
     }
     newCounts.set(m, { kind: now.kind, count: newCount });
@@ -2592,12 +2593,14 @@ function resizeFromFront(notes, oldLength, newLength, time) {
 // ----------------------------------------------------------
 // 関数：pickupChoices
 // アウフタクトの長さとして選べる拍の数の一覧を返す（ステップ15-1）
-// 1拍から「1小節の拍の数 − 1」拍まで（1小節と同じ長さはアウフタクトではないので入れない）
+// 半拍（0.5拍）から「1小節の拍の数 − 0.5」拍まで、0.5 刻み（1小節と同じ長さはアウフタクトではないので入れない）
+// （半拍刻みに対応：8分音符1つのアウフタクトなどを作れるようにした）
 //   time … 1小節目の拍子
-// 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]、1/4 → []（選べない）
+// 例：4/4 → [0.5, 1, 1.5, 2, 2.5, 3, 3.5]、2/4 → [0.5, 1, 1.5]、1/4 → [0.5]
 // ----------------------------------------------------------
 export function pickupChoices(time) {
-  return Array.from({ length: Math.max(0, time.beats - 1) }, (_, k) => k + 1);
+  // 0.5 は2進数で正確に表せるので、小数でも includes で比べられる
+  return Array.from({ length: Math.max(0, time.beats * 2 - 1) }, (_, k) => (k + 1) / 2);
 }
 
 // （小節の長さの自動判断：「楽譜の設定」タブの欄を消したので、そこで使っていた

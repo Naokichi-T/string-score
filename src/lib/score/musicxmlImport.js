@@ -96,6 +96,7 @@ import {
   ALTERNATE_DURATIONS,
   upgradeWedgeNotes,
   measureNumberLabel, // 小節番号の文字（続きの小節は "(8)"）（途中の短い小節）
+  describeLength, // 短い小節の長さの文字（半拍刻みに対応。知らせの文に使う）
 } from "./model.js";
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, TECHNIQUES, DYNAMICS, HOLD_FINGERS } from "./symbols.js"; // HOLD_FINGERS：保持線に使える指（保持線）
 import { cleanSpanners, cleanAlternates } from "./edit.js";
@@ -2103,12 +2104,13 @@ export function musicXMLToScore(text, fallbackTitle = "") {
   let pickupTicks = 0; // アウフタクトの長さ（ティック）。アウフタクトにしないときは 0
   if (isPickup) {
     const unit = firstTotal / times[0].beats; // 拍子の下の数字の音符1つ分
-    const count = Math.ceil(longestFirst / unit);
+    // （半拍刻みに対応：半拍の単位で切り上げる。4/4 の8分音符1つ → 0.5 拍のアウフタクト）
+    const count = Math.ceil(longestFirst / (unit / 2)) / 2;
     if (count < times[0].beats) {
       measures[0].pickup = count;
       pickupTicks = count * unit;
       if (pickupTicks !== longestFirst) {
-        warnings.push(`1小節目（アウフタクト）の長さが拍の単位で割り切れないので、${times[0].beatType}分音符${count}つ分のアウフタクトにして、前を休符で埋めました`);
+        warnings.push(`1小節目（アウフタクト）の長さが半拍の単位で割り切れないので、${describeLength(times[0].beatType, count)}分のアウフタクトにして、前を休符で埋めました`);
       }
     } else {
       warnings.push("1小節目が短い（アウフタクト）ので、前を休符で埋めて拍子どおりの長さにしました");
@@ -2128,12 +2130,12 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const longestLast = Math.max(0, ...countedLast.map((read) => (read.readable ? read.ticks : lastTotal)));
     if (longestLast > 0 && longestLast < lastTotal) {
       const unit = lastTotal / times[lastIndex].beats; // 拍子の下の数字の音符1つ分
-      const count = Math.ceil(longestLast / unit);
+      const count = Math.ceil(longestLast / (unit / 2)) / 2; // 半拍の単位で切り上げる（半拍刻みに対応）
       if (count < times[lastIndex].beats) {
         measures[lastIndex].short = count;
         endTicks = count * unit;
         if (endTicks !== longestLast) {
-          warnings.push(`最後の小節の長さが拍の単位で割り切れないので、${times[lastIndex].beatType}分音符${count}つ分の小節にして、後ろを休符で埋めました`);
+          warnings.push(`最後の小節の長さが半拍の単位で割り切れないので、${describeLength(times[lastIndex].beatType, count)}分の小節にして、後ろを休符で埋めました`);
         }
       }
     }
@@ -2158,7 +2160,7 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     const longest = Math.max(0, ...countedMid.map((read) => (read.readable ? read.ticks : total)));
     if (longest <= 0 || longest >= total) continue;
     const unit = total / times[i].beats; // 拍子の下の数字の音符1つ分
-    const count = Math.ceil(longest / unit);
+    const count = Math.ceil(longest / (unit / 2)) / 2; // 半拍の単位で切り上げる（半拍刻みに対応）
     if (count >= times[i].beats) continue; // 切り上げると1小節になる：今までどおり拍子どおりの小節にする
     const length = count * unit;
     // 続きにするか：番号に数えない小節の印があるか、前の小節が「前の部分」で、足すとちょうど1小節になるか
@@ -2177,7 +2179,7 @@ export function musicXMLToScore(text, fallbackTitle = "") {
     // 画面と同じ小節番号で書く（続きの小節は "(8)" のように）
     const labels = roundedMeasures.map((i) => measureNumberLabel({ measures: measures }, i));
     const shown = labels.slice(0, 5).join("・") + (labels.length > 5 ? " 小節目 …" : " 小節目");
-    warnings.push(`途中の短い小節で、長さが拍の単位で割り切れないので、切り上げて休符で埋めた小節：${roundedMeasures.length}か所（${shown}）`);
+    warnings.push(`途中の短い小節で、長さが半拍の単位で割り切れないので、切り上げて休符で埋めた小節：${roundedMeasures.length}か所（${shown}）`);
   }
 
   // ⑥ パートのデータを作る

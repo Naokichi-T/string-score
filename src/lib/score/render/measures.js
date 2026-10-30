@@ -13,6 +13,23 @@ import { timeToSignature, keyToVexKey } from "./helpers.js";
 export const LINE_START_PADDING = 12;
 
 // ----------------------------------------------------------
+// 関数：halfBeatsToInteger
+// 拍の数が小数（半拍）の長さを、同じ長さのまま整数の拍子の形に直す（半拍刻みに対応）
+//   time … { beats, beatType }（beats は 0.5 刻みの数）
+// 整数ならそのまま返す。小数のあいだ、拍の数と下の数字を2倍にする
+// 例：{ beats: 3.5, beatType: 4 } → { beats: 7, beatType: 8 }
+// ----------------------------------------------------------
+function halfBeatsToInteger(time) {
+  let beats = time.beats;
+  let beatType = time.beatType;
+  while (!Number.isInteger(beats)) {
+    beats = beats * 2;
+    beatType = beatType * 2;
+  }
+  return beats === time.beats ? time : { ...time, beats: beats, beatType: beatType };
+}
+
+// ----------------------------------------------------------
 // 関数：buildStates
 // 楽譜全体を最初の小節から順に見ていき、小節ごとの「状態」を作る
 //   状態 = その小節の拍子・調・パートごとの音部記号と、
@@ -62,7 +79,10 @@ export function buildStates(score) {
     const isPickup = isContinuation(score, i);
     // 短い最後の小節も、その長さで声部を作る（ステップ20）
     // （途中の短い小節：最後の小節だけでなく、どの小節の short も見る）
-    const voiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : isShortMeasure(score, i) ? { beats: info.short, beatType: time.beatType } : time;
+    const rawVoiceTime = isPickup ? { beats: info.pickup, beatType: time.beatType } : isShortMeasure(score, i) ? { beats: info.short, beatType: time.beatType } : time;
+    // 拍の数が小数（半拍）のときは、VexFlow の声部が小数を扱えないので、拍の数も下の数字も2倍にして整数にする
+    // 例：{ beats: 0.5, beatType: 4 } → { beats: 1, beatType: 8 }（長さは同じ）
+    const voiceTime = halfBeatsToInteger(rawVoiceTime);
 
     states.push({
       time: time,

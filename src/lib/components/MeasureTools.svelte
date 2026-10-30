@@ -15,7 +15,7 @@
   // （小節の長さの自動判断：「長さ」の欄は長さだけを選ぶ形にした。番号に数えるかどうかはアプリが決めて、欄の右に出す）
   // ==========================================================
   import { tick } from "svelte"; // 親が楽譜を変えるのを待つ（途中の短い小節）
-  import { KEY_CHOICES } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）
+  import { KEY_CHOICES, describeLength } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）、長さの文字（半拍刻みに対応）
   import { tempoWordKind } from "#lib/score/tempoWords.js"; // 文字から、テンポの変化の意味を当てる（自由な文字のテンポの指示）
 
   // 親から受け取るもの
@@ -70,9 +70,9 @@
 
   // ===== 小節の長さ（途中の短い小節） =====
 
-  // 選べる拍の数（1拍から「1小節の拍の数 − 1」拍まで。edit.js の pickupChoices と同じ決まり）
-  // 例：4/4 → [1, 2, 3]、6/8 → [1, 2, 3, 4, 5]
-  let lengthCounts = $derived(currentLength ? Array.from({ length: Math.max(0, currentLength.time.beats - 1) }, (_, k) => k + 1) : []);
+  // 選べる拍の数（半拍から「1小節の拍の数 − 0.5」拍まで、0.5 刻み。edit.js の pickupChoices と同じ決まり）
+  // 例：4/4 → [0.5, 1, 1.5, 2, 2.5, 3, 3.5]、2/4 → [0.5, 1, 1.5]
+  let lengthCounts = $derived(currentLength ? Array.from({ length: Math.max(0, currentLength.time.beats * 2 - 1) }, (_, k) => (k + 1) / 2) : []);
 
   // 欄に出す今の値（拍の数。拍子どおりなら 0）（小節の長さの自動判断）
   let lengthValue = $derived(currentLength ? currentLength.count : 0);
@@ -87,10 +87,11 @@
   // 関数：lengthLabel
   // 選ぶ欄に出す長さの文字を返す（小節の長さの自動判断）
   //   count … 拍の数
-  // 例：4/4 で 3 → "4分音符3つ"、6/8 で 5 → "8分音符5つ"
+  // 例：4/4 で 3 → "4分音符3つ"、4/4 で 0.5 → "8分音符1つ"、4/4 で 3.5 → "4分音符3つと8分音符1つ"
+  // （半拍刻みに対応：describeLength で作る）
   // ----------------------------------------------------------
   function lengthLabel(count) {
-    return `${currentLength.time.beatType}分音符${count}つ`;
+    return describeLength(currentLength.time.beatType, count);
   }
 
   // ----------------------------------------------------------
