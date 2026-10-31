@@ -21,7 +21,7 @@ import { tempoAt, JUMP_TEXTS, rehearsalLabel, isMeasureRest, notePitches, samePi
 import { computeAccidentals } from "./accidentals.js";
 import { createNote, vexStemDirection, graceOf } from "./render/notes.js"; // graceOf：前打音の小さな音符（ステップ24-1）
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
-import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo, placeArticulations } from "./render/symbols.js"; // placeArticulations：スタッカートなどの上下を決め直す（ステップ26）
+import { drawDynamic, drawBreath, drawTrillLine, shiftTremolo, placeArticulations, relayoutBeamedMarks } from "./render/symbols.js"; // placeArticulations：スタッカートなどの上下を決め直す（ステップ26）、relayoutBeamedMarks：連桁の音符の記号を積む高さを決め直す
 import { buildStates, addModifiers, measureModifierWidth, LINE_START_PADDING } from "./render/measures.js";
 import { layoutLines } from "./render/layout.js";
 import { drawTie } from "./render/ties.js";
@@ -526,6 +526,9 @@ function drawSystems(VF, context, info, staveYs, isDraft) {
       // 音符はふつう描くときに五線に結び付けられるが、符尾の長さを決めるには五線の位置が要るので、先に結び付ける
       voices.forEach((voice, p) => voice.getTickables().forEach((tickable) => tickable.setStave(staves[p])));
       beamsList.forEach((beams) => beams.forEach((beam) => beam.postFormat()));
+      // 連桁で符尾が伸びたので、連桁の音符の五線の上の記号（指番号など）を積む高さを、伸びたあとの符尾で決め直す
+      // （元の符尾の長さで決まったままだと、低い音の指番号だけ高く置かれて、同じ連桁の中でそろわない）
+      voices.forEach((voice) => voice.getTickables().forEach((tickable) => relayoutBeamedMarks(VF, tickable)));
 
       // 音符と連桁と連符の数字を描く
       voices.forEach((voice, p) => voice.draw(context, staves[p]));

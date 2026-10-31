@@ -185,6 +185,33 @@ export function placeArticulations(VF, staveNote) {
 }
 
 // ----------------------------------------------------------
+// 関数：relayoutBeamedMarks
+// 連桁でつながった音符の、五線の上に積む記号（スタッカートなどの記号・トリルなど・指番号・弓の文字）の
+// 積む高さ（textLine）を、連桁で伸ばしたあとの符尾の長さで決め直す
+// 【なぜ】VexFlow は、記号を積む高さを、音符を並べる（format）ときの「元の符尾の長さ」で決める。
+//   連桁でつなぐと符尾は連桁まで伸びるが、それは並べたあと（postFormat）なので、高さの決め直しに間に合わない。
+//   低い音（符尾が短く、五線の上端に届かない音）では、「記号を五線の上端まで持ち上げる」計算になって、
+//   同じ連桁の中の、高い音（符尾が元から長い音）の記号より、1段（約10px）高く置かれていた
+//   （例：連桁の中の「ラ」の指番号 0 と、「レ」の指番号 0 の高さがずれる）
+//   → 連桁で符尾を伸ばしたあとに、記号を積む高さの計算だけをやり直す（横の位置の計算は触らない）
+//   VF        … VexFlow の部品一式
+//   staveNote … VexFlow の音符（連桁を作って、符尾を伸ばしたあとのもの）
+// ----------------------------------------------------------
+export function relayoutBeamedMarks(VF, staveNote) {
+  if (typeof staveNote.getBeam !== "function" || !staveNote.getBeam()) return; // 連桁のない音符は元のまま
+  if (staveNote.getStemDirection() !== VF.Stem.UP) return; // 符尾が下向きの音符は、符尾が玉の下にあるので関係ない
+  const context = staveNote.getModifierContext();
+  if (!context) return;
+  const members = context.members; // 種類ごとにまとめた記号の入れ物（{ Articulation: [...], Annotation: [...], ... }）
+  // 横の位置の計算に使う状態（leftShift など）は変えないよう、積む高さだけを数える新しい状態でやり直す
+  const state = { leftShift: 0, rightShift: 0, textLine: 0, topTextLine: 0 };
+  // VexFlow が決めるのと同じ順番（記号 → 装飾 → 文字）で、積む高さを決め直す
+  VF.Articulation.format(members["Articulation"] ?? [], state);
+  VF.Ornament.format(members["Ornament"] ?? [], state);
+  VF.Annotation.format(members["Annotation"] ?? [], state);
+}
+
+// ----------------------------------------------------------
 // 関数：fixStemlessHeight
 // 全音符のような符尾のない音符で、見えない符尾の長さを 0 にする
 // 【なぜ】VexFlow の音符は、全音符でも見えない符尾のデータを持っている。
