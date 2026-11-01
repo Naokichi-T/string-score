@@ -147,7 +147,14 @@
   import { scoreToMusicXML, musicXMLFileName } from "#lib/score/musicxml.js";
 
   // 楽譜データ（ページを開いたら、保存してある楽譜に入れ替える）
+  // 型は any にしておく（createEmptyScore の戻り値の形から型が決まると、
+  // あとから足した項目〈gradualText・barline・repeatEnd など〉が「存在しない」と指摘されるため）
+  /** @type {any} */
   let score = $state(createEmptyScore());
+
+  // 新しく作った直後かどうか（goto の state で渡された印。ステップ7-3）
+  // テンプレートの中では型のコメントが効かないので、ここ（script の中）で any にして読む
+  let pageIsNew = $derived(/** @type {any} */ (page.state).isNew === true);
 
   // 読み込みの状態（ステップ7-1）
   //   "loading"  … 読み込み中（楽譜はまだ出さない）
@@ -296,6 +303,7 @@
   // 「X枚に収める」の設定（X枚に収める b）
   //   { pdf: PDF 出力の枚数, perform: 演奏モードの枚数 }（指定なしは null か、項目がない）
   // 楽譜を開いたときに、その楽譜の設定を読み込む（楽譜ごとに覚える）
+  /** @type {{ pdf?: number | null, perform?: number | null }} */
   let fitPages = $state({});
 
   // ----------------------------------------------------------
@@ -537,8 +545,8 @@
     return { tick: inner, highlights: repeatPlan.result.highlights, measureStarts: repeatPlan.result.measureStarts };
   }
 
-  // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は楽器の音A
-  let soundType = $state("instrument");
+  // 音の種類（"instrument"：楽器の音A、"instrumentB"：楽器の音B、"synth"：電子音）。最初は電子音
+  let soundType = $state("synth");
 
   // 再生できるか（電子音ならいつでも、楽器の音なら読み込みが終わってから）
   let canPlay = $derived(soundType === "synth" || soundState === "ready");
@@ -2592,7 +2600,7 @@
     <ToolTabs
       collapsed={tabsCollapsed}
       ontoggle={handleToggleTabs}
-      isNew={page.state.isNew === true}
+      isNew={pageIsNew}
       {duration}
       {dotted}
       {canUse}
