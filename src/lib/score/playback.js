@@ -854,6 +854,80 @@ function makeTempoWarp(score, startMeasure, order) {
 }
 
 // ----------------------------------------------------------
+// 関数：noteSpanInMeasure
+// 小節の中の1つの音符が、小節の頭から何ティック目に始まって、何ティック目に終わるかを返す
+// （区間リピートを音符から音符までにする：くり返す範囲の開始点・終了点を決めるのに使う）
+//   measure   … パートの中の1つの小節のデータ（{ notes: [...] }）
+//   noteIndex … 何番目の音符か（0 から数える）
+// 戻り値：{ start: 始まり, end: 終わり }（ティック）
+//   例：4/4 で4分音符が4つ → 3つ目（noteIndex = 2）なら、2拍分の所に始まり、3拍分の所に終わる
+// ----------------------------------------------------------
+export function noteSpanInMeasure(measure, noteIndex) {
+  let start = 0;
+  for (let j = 0; j < noteIndex; j++) start = start + noteTicks(measure.notes[j]);
+  return { start: start, end: start + noteTicks(measure.notes[noteIndex]) };
+}
+
+// ----------------------------------------------------------
+// 関数：clipEvent
+// 鳴らす音を、開始点〜終了点の中だけに切りつめる（区間リピートを音符から音符までにする）
+//   event    … buildEvents で作った鳴らす音（ティックはテンポで伸び縮みさせる前）
+//   cutStart … 開始点（ティック）
+//   cutEnd   … 終了点（ティック）
+// 戻り値：切りつめた新しい鳴らす音（範囲の中で鳴らないときは null）
+//   ・開始点より前に始まって、開始点でもまだ鳴っている音 → 開始点から鳴らす（合奏の響きが切れないように）
+//   ・終了点をはみ出す音（タイなど）→ 終了点で切る（フェルマータ・グリッサンドは付いていないことにする）
+// ----------------------------------------------------------
+function clipEvent(event, cutStart, cutEnd) {
+  const start = event.startTick;
+  const end = start + event.ticks; // 楽譜の上での終わり
+  const soundEnd = start + event.soundTicks; // 実際に音を出すのをやめる所
+  // 終了点より後ろに始まる音・開始点より前に鳴り終わる音は、鳴らさない
+  if (start >= cutEnd || soundEnd <= cutStart) return null;
+
+  const newStart = Math.max(start, cutStart);
+  const newEnd = Math.min(end, cutEnd);
+  const newSoundEnd = Math.min(soundEnd, cutEnd);
+  const clipped = {
+    ...event,
+    startTick: newStart,
+    ticks: newEnd - newStart,
+    soundTicks: Math.max(newSoundEnd - newStart, 1), // 0 にならないように、少なくとも 1
+  };
+
+  // 前を切った音（途中から鳴らす音）：アルペジオでずらすのはやめる
+  if (start < cutStart) {
+    clipped.rollIndex = 0;
+    if (clipped.glissLastTicks) clipped.glissLastTicks = Math.min(clipped.glissLastTicks, clipped.ticks);
+  }
+  // 後ろを切った音：終了点で終わるので、フェルマータでのばさず、次の音へすべらず、なめらかにつなげない
+  if (end > cutEnd) {
+    clipped.fermataEnd = false;
+    clipped.glissTo = null;
+    clipped.connected = false;
+  }
+  return clipped;
+}
+
+// ----------------------------------------------------------
+// 関数：clipHighlight
+// 緑にする音符を、開始点〜終了点の中だけに切りつめる（区間リピートを音符から音符までにする）
+//   h        … 緑にする音符 { part, measure, note, startTick, endTick, fermataEnd }
+//   cutStart … 開始点（ティック）
+//   cutEnd   … 終了点（ティック）
+// 戻り値：切りつめた新しいもの（範囲の中にないときは null）
+// ----------------------------------------------------------
+function clipHighlight(h, cutStart, cutEnd) {
+  if (h.startTick >= cutEnd || h.endTick <= cutStart) return null;
+  return {
+    ...h,
+    startTick: Math.max(h.startTick, cutStart),
+    endTick: Math.min(h.endTick, cutEnd),
+    fermataEnd: h.endTick > cutEnd ? false : h.fermataEnd, // 終了点で切った音符は、フェルマータでのばさない
+  };
+}
+
+// ----------------------------------------------------------
 // 関数：buildEvents
 // 楽譜データから、鳴らす音の一覧を作る
 //   score        … 楽譜データ
@@ -878,14 +952,22 @@ function makeTempoWarp(score, startMeasure, order) {
 // ・重音は、高さごとに鳴らす音を作って、同時に鳴らす（タイも高さごとにつなぐ）（ステップ14-1）
 // ・アルペジオの重音は、下の音から ARPEGGIO_SECONDS 秒ずつずらして鳴らし始める（ステップ14-4a）
 // ・アルペジオのない3音・4音の重音は、弦楽器の弾き方に近づける（下の2音を短く → 上の2音をのばす）（ステップ14-4a）
+// （区間リピートを音符から音符までにする：startOffset・endOffset を足した）
+//   startOffset  … 始める小節の頭から、何ティック目から鳴らすか（省略したら 0 ＝ 小節の頭から）
+//   endOffset    … 終わりの小節の頭から、何ティック目まで鳴らすか（省略したら null ＝ 小節の終わりまで）
+//                  この2つの外の音・緑・クリック・フェルマータは切り落とし、startOffset の所が 0 ティックになるようにずらす
+//                  ・開始点より前に始まって、開始点でもまだ鳴っている音（ほかのパートの長い音など）は、開始点から鳴らす
+//                  ・終了点をはみ出す音（タイなど）は、終了点で切る
 // ----------------------------------------------------------
-export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) {
+export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null, startOffset = 0, endOffset = null) {
   // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときは範囲をまっすぐ）
   const order = playOrder(score, startMeasure, endMeasure);
   // let：あとで、鳴らすパート・緑にするパートの分だけに入れ替えるため（ステップ12-4a2）
   let events = [];
   let highlights = []; // 緑にする音符の一覧（ステップ6-2）
-  const fermatas = []; // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
+  // フェルマータで止まる所の一覧 { at: 止まる時刻（ティック）, extra: のばす量（ティック） }（ステップ6-3b）
+  // （let：開始点〜終了点の外のものを切り落として、入れ替えるため）
+  let fermatas = [];
 
   // 再生を始める小節から最後の小節までの長さ（ティック）
   // （ステップ15-2：アウフタクトの小節は、アウフタクトの長さで数える）
@@ -893,6 +975,16 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   order.forEach((i) => {
     totalTicks = totalTicks + measureLength(score, i);
   });
+
+  // 鳴らす所の始まり（cutStart）と終わり（cutEnd）（再生を始める小節の頭から何ティック目か。伸び縮みさせる前）
+  // 区間リピートで音符から音符までをくり返すときに、この外を切り落とす
+  //   cutStart … 始める小節の頭から startOffset 進んだ所
+  //   cutEnd   … 最後の小節の頭から endOffset 進んだ所（endOffset が null なら、最後の小節の終わり）
+  const cutStart = startOffset;
+  const lastMeasure = order[order.length - 1];
+  const cutEnd = endOffset === null ? totalTicks : totalTicks - measureLength(score, lastMeasure) + endOffset;
+  // 切り落とす所があるか（ないときは、今までとまったく同じ動きにする）
+  const clipping = cutStart > 0 || cutEnd < totalTicks;
 
   // 小節をたどる並び：始める小節より前（強弱などの状態を数えるだけ）＋ 鳴らす小節の順番（ステップ11-7a）
   const sequence = [];
@@ -1142,6 +1234,16 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
   events = events.filter((event) => audibleParts.has(event.part));
   highlights = highlights.filter((h) => highlightParts.has(h.part));
 
+  // 区間リピートで音符から音符までをくり返すとき：開始点〜終了点の外を切り落とす
+  // （テンポの伸び縮み・フェルマータのずらしより前の、ふつうのティックで切る）
+  if (clipping) {
+    events = events.map((event) => clipEvent(event, cutStart, cutEnd)).filter((event) => event !== null);
+    highlights = highlights.map((h) => clipHighlight(h, cutStart, cutEnd)).filter((h) => h !== null);
+    // フェルマータ・カエスーラ：開始点より後ろで、終了点までに止まるものだけ残す
+    // （開始点ちょうどで止まるものは、開始点より前の音のものなので外す。終了点ちょうどのものは、最後の音ののばしなので残す）
+    fermatas = fermatas.filter((f) => f.at > cutStart && f.at <= cutEnd);
+  }
+
   // テンポの変化のぶん、ティックの数を伸び縮みさせる（ステップ11-6a）
   // （フェルマータでずらす前に行う。フェルマータでのばす量も、その所のテンポに合わせる）
   const warp = makeTempoWarp(score, startMeasure, order);
@@ -1164,7 +1266,8 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     f.extra = f.extra * warp.factorAt(f.at, true); // のばす量（フェルマータの音のテンポで）
     f.at = warp.at(f.at);
   });
-  totalTicks = warp.at(totalTicks);
+  // 最後までの長さ：鳴らす所の終わり（切り落とさないときは、最後の小節の終わり）まで
+  totalTicks = warp.at(cutEnd);
 
   // フェルマータのぶん、時間をずらす（ステップ6-3b）
   const points = mergeFermatas(fermatas);
@@ -1200,15 +1303,33 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     event.soundTicks = Math.max(event.soundTicks - shift, 1);
   });
 
+  // 開始点が 0 ティックになるように、全体を前へずらす（区間リピートで音符から音符までをくり返すとき）
+  // 切り落とさないときは、base は 0 なので何も変わらない
+  // （開始点より前のフェルマータは切り落としてあるので、フェルマータのぶんのずれはない）
+  const base = warp.at(cutStart);
+  if (base !== 0) {
+    events.forEach((event) => {
+      event.startTick = event.startTick - base;
+    });
+    highlights.forEach((h) => {
+      h.startTick = h.startTick - base;
+      h.endTick = h.endTick - base;
+    });
+    totalTicks = totalTicks - base;
+  }
+
   // 小節ごとの始まりの時刻（フェルマータのぶんもずらす）（ステップ12-3b）
   // メトロノームのクリックの時刻も、ここでいっしょに作る（ステップ12-4a）
+  // （区間リピートで小節の途中から始めるとき：最初の小節の始まりは 0 にし、開始点〜終了点の外のクリックは鳴らさない）
   const measureStarts = [];
   const clicks = [];
   let measureTick = 0; // 再生を始めた所から何ティック目か（ずらす前）
   order.forEach((i) => {
     // テンポの変化のぶん伸び縮みさせてから、フェルマータのぶんずらす（ステップ11-6a）
     const measureStart = warp.at(measureTick);
-    measureStarts.push({ measure: i, startTick: measureStart + shiftBefore(points, measureStart, true) });
+    // 開始点より前（小節の途中から始めたときの最初の小節）は 0 にする
+    const measureStartTick = Math.max(0, measureStart + shiftBefore(points, measureStart, true) - base);
+    measureStarts.push({ measure: i, startTick: measureStartTick });
     // この小節の拍の頭ごとにクリックを1つ（1拍目は strong）
     // （ステップ15-2：アウフタクトの小節では、拍子どおりの拍の位置で鳴らす（拍の線と同じ考え方））
     //   offset … 小節の頭が、拍子どおりの1小節の中のどこにあたるか（アウフタクトでなければ 0）
@@ -1220,8 +1341,11 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null) 
     const offset = measureOffset(score, i);
     const first = (beat - (offset % beat)) % beat; // 小節の頭から、最初の拍の頭までの長さ
     for (let b = first; b < length; b = b + beat) {
-      const t = warp.at(measureTick + b);
-      clicks.push({ startTick: t + shiftBefore(points, t, true), strong: (b + offset) % full === 0 });
+      // 開始点より前・終了点から後ろのクリックは鳴らさない（区間リピートで音符から音符までをくり返すとき）
+      const rawTick = measureTick + b;
+      if (rawTick < cutStart || rawTick >= cutEnd) continue;
+      const t = warp.at(rawTick);
+      clicks.push({ startTick: t + shiftBefore(points, t, true) - base, strong: (b + offset) % full === 0 });
     }
     measureTick = measureTick + length;
   });
@@ -1273,15 +1397,20 @@ export function beatTicks(time) {
 //   ・最後までの長さ（totalTicks）も、カウントインの長さだけ長くする
 //   ・countInClicks（カウントインのクリックの一覧）を足す
 //     （メトロノームが切でもカウントインは鳴らすので、clicks とは分けておく）
+// （区間リピートを音符から音符までにする：小節の途中から始めるとき）
+//   startOffset … 始める小節の頭から、何ティック目から鳴らすか（省略したら 0）
+//   アウフタクトと同じく、1小節数えてから、始める所まで続けて数える
+//   例：4/4 で3拍目から始める → 「1 2 3 4 | 1 2」と数えて、3拍目から鳴る
 // ----------------------------------------------------------
-export function addCountIn(result, score, startMeasure) {
+export function addCountIn(result, score, startMeasure, startOffset = 0) {
   const time = timeAt(score, startMeasure);
   // 始める小節のテンポに合わせて、伸び縮みさせる（ステップ11-6a）
   // （拍を数えるのは伸び縮みさせる前の数で行い、クリックの時刻だけ倍にする。小数の足し算の誤差で、拍が1つ増えないようにするため）
   const factor = makeTempoWarp(score, startMeasure, [startMeasure]).factorAt(0);
   const full = measureTicks(time); // 拍子どおりの1小節の長さ
   // 数える長さ（伸び縮みさせる前）：1小節 ＋ アウフタクトが始まる位置まで（アウフタクトでなければ 1小節だけ）（ステップ15-2）
-  const countTicks = full + measureOffset(score, startMeasure);
+  // ＋ 小節の途中から始めるときは、始める所まで（区間リピートを音符から音符までにする）
+  const countTicks = full + measureOffset(score, startMeasure) + startOffset;
   const length = countTicks * factor; // カウントインの長さ
   const beat = beatTicks(time); // 1拍の長さ（伸び縮みさせる前）
 

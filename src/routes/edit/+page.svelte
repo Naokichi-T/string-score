@@ -127,7 +127,7 @@
   import { canBeamTogether, canUnbeam, beamTogether, unbeam } from "#lib/score/beams.js"; // 連桁を手でつなぐ・切る（ステップ19-1）
   import { stemState, canChangeStem, setStem } from "#lib/score/stems.js"; // 符尾の向きを決める（ステップ22）
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
-  import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches } from "#lib/score/playback.js";
+  import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches, noteSpanInMeasure } from "#lib/score/playback.js";
   import {
     loadScore,
     saveScore,
@@ -454,22 +454,42 @@
   // ----------------------------------------------------------
   // 関数：getRepeatRange
   // 今選んでいる所から、くり返す範囲を決める（ステップ12-5b）
-  //   範囲を選んでいる → 範囲にかかる小節まるごと
+  //   範囲を選んでいる → 範囲の最初の音符の頭から、最後の音符の終わりまで（小節の途中からでもよい）
+  //                      （区間リピートを音符から音符までにする。前は範囲にかかる小節まるごとだった）
   //   音を1つ選んでいる → その小節1つ
   //   何も選んでいない → 曲の最初から最後まで
-  // 戻り値：{ start, end }（小節の番号。0 から数える）
+  // 戻り値：{ start, end, startOffset, endOffset, startNote, endNote }
+  //   start・end             … 小節の番号（0 から数える）
+  //   startOffset・endOffset … 始めの小節の頭から何ティック目で始めるか・終わりの小節の頭から何ティック目で終わるか
+  //                            （小節まるごとのときは startOffset が 0、endOffset が null）
+  //   startNote・endNote     … 範囲の最初・最後の音符が何番目か（「再生」タブの文字に使う。範囲でないときは null）
   // ----------------------------------------------------------
   function getRepeatRange() {
-    if (range) return { start: range.start.measure, end: range.end.measure };
-    if (selection) return { start: selection.measure, end: selection.measure };
-    return { start: 0, end: score.measures.length - 1 };
+    if (range) {
+      // 範囲を選んだパートの音符の位置で、開始点・終了点を決める
+      const measures = score.parts[range.part].measures;
+      return {
+        start: range.start.measure,
+        end: range.end.measure,
+        startOffset: noteSpanInMeasure(measures[range.start.measure], range.start.note).start, // 最初の音符の頭
+        endOffset: noteSpanInMeasure(measures[range.end.measure], range.end.note).end, // 最後の音符の終わり
+        startNote: range.start.note,
+        endNote: range.end.note,
+      };
+    }
+    if (selection) return { start: selection.measure, end: selection.measure, startOffset: 0, endOffset: null, startNote: null, endNote: null };
+    return { start: 0, end: score.measures.length - 1, startOffset: 0, endOffset: null, startNote: null, endNote: null };
   }
 
   // 「再生」タブに出す、くり返す範囲の文字（例："3〜5小節目"）（ステップ12-5b）
   // 再生中はくり返している範囲、止まっているときは今選んでいる所から決めた範囲
   // （ステップ15-1：アウフタクトがあるときは、アウフタクトを数えない番号にする。例："アウフタクト〜2小節目"）
+  // （区間リピートを音符から音符までにする：範囲を選んでいるときは、範囲の表示と同じ形。例："3小節目 3つ目〜5小節目 2つ目"）
   let repeatText = $derived.by(() => {
     const r = repeatRange ?? getRepeatRange();
+    if (r.startNote !== null && r.startNote !== undefined) {
+      return `${measureName(score, r.start)} ${r.startNote + 1}つ目〜${measureName(score, r.end)} ${r.endNote + 1}つ目`;
+    }
     if (r.start === r.end) return measureName(score, r.start); // 1小節だけ（"3小節目"・"アウフタクト"）
     // 始まりの小節：アウフタクトなら "アウフタクト"、それ以外は番号だけ
     const startText = r.start === 0 && hasPickup(score) ? "アウフタクト" : String(measureNumber(score, r.start));
@@ -489,13 +509,14 @@
   // ----------------------------------------------------------
   // 関数：startRepeat
   // 区間リピートの2回目からの予約を始める（ステップ12-5b）
-  //   repeat      … くり返す範囲 { start, end }
+  //   repeat      … くり返す範囲（getRepeatRange で作ったもの）
   //   firstTicks  … 最初の回（カウントインを含む）の長さ（ティック）
   //   tickSeconds … 1ティックが何秒か
   // ----------------------------------------------------------
   function startRepeat(repeat, firstTicks, tickSeconds) {
     // 2回目からは、いつも範囲の頭から終わりまで（カウントインなし）
-    const result = buildEvents(score, repeat.start, mixer, repeat.end);
+    // （区間リピートを音符から音符までにする：開始点〜終了点で切る）
+    const result = buildEvents(score, repeat.start, mixer, repeat.end, repeat.startOffset, repeat.endOffset);
     repeatRange = repeat;
     repeatPlan = {
       firstTicks: firstTicks,
@@ -2184,12 +2205,19 @@
     if (!canPlay) return;
     message = "";
 
+    // くり返すときの、開始点・終了点（区間リピートを音符から音符までにする）
+    //   startOffset … 範囲の最初の小節から始めるときだけ、最初の音符の頭から（途中の小節から鳴らし直すときは小節の頭から）
+    //   endOffset   … 範囲の最後の音符の終わりまで（小節まるごとのときは null）
+    const startOffset = repeat && startMeasure === repeat.start ? repeat.startOffset : 0;
+    const endOffset = repeat ? repeat.endOffset : null;
+
     // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す。くり返すときは範囲の終わりまで）
-    let result = buildEvents(score, startMeasure, mixer, repeat ? repeat.end : null);
+    let result = buildEvents(score, startMeasure, mixer, repeat ? repeat.end : null, startOffset, endOffset);
     // カウントインが入っていれば、前に1小節ぶん足す（ステップ12-4b）
+    // （小節の途中から始めるときは、1小節数えてから始める所まで続けて数える）
     let countInClicks = [];
     if (allowCountIn && metronome.countIn) {
-      result = addCountIn(result, score, startMeasure);
+      result = addCountIn(result, score, startMeasure, startOffset);
       countInClicks = result.countInClicks;
     }
     // 鳴らすクリック：カウントイン＋メトロノーム（切のときは鳴らさない）（ステップ12-4a・12-4b）

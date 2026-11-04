@@ -17,7 +17,7 @@
   //   onmetronome … メトロノームの設定が変わったときに呼ぶ関数（変えた項目と、変え終わったかを渡す）（ステップ12-4a）
   //                 例：onmetronome({ on: true })、onmetronome({ volume: 50 }, false)
   //   repeatOn   … 区間リピートが入っているか（ステップ12-5b）
-  //   repeatText … くり返す範囲の文字（例："3〜5小節目"）（ステップ12-5b）
+  //   repeatText … くり返す範囲の文字（例："3〜5小節目"・"3小節目 3つ目〜5小節目 2つ目"）（ステップ12-5b）
   //   onrepeat   … ［区間リピート］が押されたときに呼ぶ関数（ステップ12-5b）
   let { parts = [], mixer = {}, onmixer = () => {}, metronome = { on: false, volume: 70 }, onmetronome = () => {}, repeatOn = false, repeatText = "", onrepeat = () => {} } = $props();
 
@@ -103,7 +103,12 @@
 
   <!-- 区間リピート（押すたびに入・切。入のときは、くり返す範囲を横に出す）（ステップ12-5b） -->
   <div class="part-row">
-    <button class="switch" class:on={repeatOn} onclick={() => onrepeat()} title="選んだ範囲の小節を、止めるまでくり返す（範囲を選んでいなければ、選んでいる小節。何も選んでいなければ曲全体）">
+    <button
+      class="switch"
+      class:on={repeatOn}
+      onclick={() => onrepeat()}
+      title="選んだ範囲の最初の音符から最後の音符までを、止めるまでくり返す（範囲を選んでいなければ、選んでいる小節。何も選んでいなければ曲全体）"
+    >
       区間リピート
     </button>
     {#if repeatOn}
