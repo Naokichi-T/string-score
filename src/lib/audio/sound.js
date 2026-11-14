@@ -640,6 +640,14 @@ function stopScheduler() {
   schedulerTimer = null;
 }
 
+// メトロノームのクリックの音の設定（メトロノームの音を大きくした手直し）
+// 音量 100 のときの、いちばん大きいところの大きさ（前は 0.5。1 を超えると割れるので、楽器の音と重なっても余裕を残す）
+const CLICK_PEAK = 0.8;
+// いちばん大きいまま鳴らす時間（秒）（前は 0 で、すぐに小さくなっていた）
+const CLICK_HOLD = 0.012;
+// 1つのクリックを鳴らす長さ（秒）（前は 0.05。大きいまま鳴らす分だけ少しのばした）
+const CLICK_LENGTH = 0.06;
+
 // ----------------------------------------------------------
 // 関数：playClick
 // メトロノームのクリックを1つ鳴らす（ステップ12-4a）
@@ -651,18 +659,21 @@ function stopScheduler() {
 // ----------------------------------------------------------
 function playClick(time, strong, volume) {
   const ctx = resumeAudio();
-  const length = 0.05; // 鳴らす長さ（秒）。短い「ピッ」
+  const length = CLICK_LENGTH; // 鳴らす長さ（秒）。短い「ピッ」
 
   // 音のもと（なめらかな波）。1拍目は高く、ほかは低く
   const oscillator = ctx.createOscillator();
   oscillator.type = "sine";
   oscillator.frequency.value = strong ? 1760 : 1320;
 
-  // 音量：一瞬で大きくなって、すぐに小さくなる（音量 100 のときに 0.5）
+  // 音量：一瞬で大きくなって、少しだけそのまま鳴らしてから、すぐに小さくなる
+  // （メトロノームの音を大きくした手直し：音量 100 のときの大きさを 0.5 → CLICK_PEAK にして、
+  //   大きいまま CLICK_HOLD 秒鳴らしてから小さくする。音の感じは今までの「ピッ」のまま、はっきり大きく聞こえる）
   const gain = ctx.createGain();
-  const peak = 0.5 * (volume / 100);
+  const peak = CLICK_PEAK * (volume / 100);
   gain.gain.setValueAtTime(0, time);
   gain.gain.linearRampToValueAtTime(peak, time + 0.002);
+  gain.gain.setValueAtTime(peak, time + 0.002 + CLICK_HOLD); // 大きいまま少しだけ鳴らす
   gain.gain.exponentialRampToValueAtTime(0.0001, time + length); // 0 にはできないので、とても小さい数まで下げる
 
   // つなぐ：音のもと → 音量 → スピーカー
