@@ -2,6 +2,8 @@
   import favicon from "#lib/assets/favicon.svg";
   // 指で長押ししたら、ボタンの説明を出す部品（アプリ全体に1つ）（ステップ12-10b）
   import LongPressTip from "#lib/components/LongPressTip.svelte";
+  // 【仮】音が突然鳴らなくなる原因を調べるための、左下の小さな表示（原因がわかったら消す）
+  import AudioDebug from "#lib/components/AudioDebug.svelte";
 
   let { children } = $props();
 
@@ -50,6 +52,9 @@
 
 <!-- 長押しの説明の吹き出し（ステップ12-10b） -->
 <LongPressTip />
+
+<!-- 【仮】音の仕組みの状態と記録（原因がわかったら消す） -->
+<AudioDebug />
 
 <style>
   /* タブレット（タッチ）向けの、アプリ全体の設定（ステップ12-8a） */

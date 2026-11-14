@@ -19,6 +19,7 @@
 
 import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
 import { INSTRUMENTS } from "../score/model.js"; // 楽器ごとの、鳴る高さのずれ（soundOctaves）を見るため（ステップ18-3）
+import { watchAudioContext, logResume, logPlayWhileStopped } from "./audioDebug.js"; // 【仮】音が鳴らなくなる原因を調べる記録
 
 // 音を鳴らすための仕組み（AudioContext）
 // ブラウザは「ユーザーが何か操作したあと」でないと音を鳴らせないが、
@@ -199,6 +200,7 @@ function soundingEvent(event) {
 function getAudioContext() {
   if (!audioContext) {
     audioContext = new AudioContext();
+    watchAudioContext(audioContext, "再生"); // 【仮】状態の変化を記録する
   }
   return audioContext;
 }
@@ -209,8 +211,9 @@ function getAudioContext() {
 // ----------------------------------------------------------
 function resumeAudio() {
   const ctx = getAudioContext();
+  logPlayWhileStopped(ctx, "再生"); // 【仮】鳴らそうとしたときに動いていなければ記録する
   if (ctx.state === "suspended") {
-    ctx.resume();
+    logResume(ctx, "再生", ctx.resume()); // 【仮】再開を頼んだことと結果を記録する（再開の頼み方は今までと同じ）
   }
   return ctx;
 }
