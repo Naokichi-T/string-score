@@ -161,6 +161,33 @@ export function autoGroups(notes, lengths) {
 }
 
 // ----------------------------------------------------------
+// 関数：tupletBeamLengths
+// 連符の中の「連桁のまとまりの長さ」の並びを作る（ステップ28）
+// 連符の中は全部1本でつなぐが、4分音符より長い音符の所では切る
+// （VexFlow の決め方では、まとまりに4分音符が1つでも入ると、まとまりごと連桁がなくなるため。
+//   例：4分音符の3連符が「8分・8分・4分・4分」のとき、8分音符2つはつなぎたい）
+//   notes … 連符の中の音のデータの並び
+// 戻り値：まとまりの長さ（ティック。連符の割合を掛けた実際の長さ）の配列
+//   例：8分・8分・4分・4分 → [8分2つ分, 4分1つ分, 4分1つ分]
+// ----------------------------------------------------------
+export function tupletBeamLengths(notes) {
+  const lengths = [];
+  let run = 0; // 今まとめている、短い音の長さの合計
+  notes.forEach((note) => {
+    if (LONG_DURATIONS.includes(note.duration)) {
+      // 長い音：前のまとまりを閉じて、自分だけで1つのまとまりにする
+      if (run > 0) lengths.push(run);
+      run = 0;
+      lengths.push(noteTicks(note));
+    } else {
+      run = run + noteTicks(note);
+    }
+  });
+  if (run > 0) lengths.push(run);
+  return lengths;
+}
+
+// ----------------------------------------------------------
 // 関数：applyMarks
 // 自動のまとまりに、音符の印（join・break）を当てはめて、最後のまとまりを決める
 //   notes  … 音の並び（連符は入らない）
@@ -262,12 +289,14 @@ export function measureBeamGroups(notes, time, offset = 0, useMarks = true) {
   segmentsOf(notes).forEach((segment) => {
     const indexes = [];
     for (let k = segment.from; k <= segment.to; k++) indexes.push(k);
+    const segmentNotes = indexes.map((k) => notes[k]);
     if (segment.isTuplet) {
-      // 連符の中は全部1本でつなぐ（4分音符以上の連符には連桁がない）
-      if (!LONG_DURATIONS.includes(segment.duration) && indexes.length > 1) result.push(indexes);
+      // 連符の中は全部1本でつなぐ（休符・4分音符より長い音符の所では切れる。画面の createBeams と同じ）
+      // （ステップ28：長さのまじった連符（4分＋8分 など）があるので、1つ分の長さでは決めずに、
+      //   4分音符より長い音の所で切ったまとまり（tupletBeamLengths）で autoGroups に分ける）
+      autoGroups(segmentNotes, tupletBeamLengths(segmentNotes)).forEach((group) => result.push(group.map((k) => indexes[k])));
       return;
     }
-    const segmentNotes = indexes.map((k) => notes[k]);
     const lengths = segmentLengths(starts, gridPoints, segment.from, segment.to, measureEnd);
     const groups = autoGroups(segmentNotes, lengths);
     const finalGroups = useMarks ? applyMarks(segmentNotes, groups) : groups;

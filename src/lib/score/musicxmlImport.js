@@ -52,8 +52,9 @@
 // 【連符の読み方】（ステップ10-6）
 //   <time-modification> のある音は連符の音。長さは <type>（音符の形）と連符の数から決める
 //   （ファイルの <duration> は、割り切れずに丸めてあることがあるので使わない）
-//   連符の数（2〜12）・付点なし・1つの連符の中が全部同じ長さ、のときだけ読める
-//   それ以外の連符（付点の連符・長さがまちまちの連符など）がある小節は、休符にする
+//   連符の数（2〜12）で、付点は1つまで
+//   （ステップ28：付点の音・長さのまじった連符も読む。1つ分の長さは assignTupletUnits で決める）
+//   長さの合計が連符1つ分にならない連符がある小節は、休符にする
 //
 // 【このアプリで扱えないもの】（ステップ8-4b）
 //   読めない長さの音（64分音符・倍全音符・付点の32分音符・読めない連符など）がある小節 … 小節ごと休符にする
@@ -582,13 +583,20 @@ function readNote(noteElement, divisions) {
     const actual = Number(childText(modification, "actual-notes"));
     const normal = Number(childText(modification, "normal-notes"));
     const type = childText(noteElement, "type"); // 音符の形（"eighth" など）
-    const dotted = childElements(noteElement, "dot").length > 0;
-    // このアプリで使える連符か（2〜12連符・使える音符の形・付点なし）
-    const usable = actual >= 2 && actual <= 12 && normal >= 1 && DURATION_ORDER.includes(type) && !dotted;
+    const dots = childElements(noteElement, "dot").length;
+    // このアプリで使える連符か（2〜12連符・使える音符の形・付点は1つまで）
+    // （ステップ28：連符の中の付点の音も読む。前は付点の音があると読めなかった）
+    const usable = actual >= 2 && actual <= 12 && normal >= 1 && DURATION_ORDER.includes(type) && dots <= 1;
     if (!usable) return { note: null, ticks: ticks };
     tuplet = { actual: actual, normal: normal };
-    shape = { duration: type, dots: 0 };
-    ticks = (durationToTicks(type, 0) * normal) / actual;
+    // 連符の1つ分の長さ（<normal-type>）が書いてあれば覚える（ステップ28）
+    //   例：8分音符の3連符の中の付点8分音符 → <normal-type>eighth</normal-type>
+    //   書いていない音は、小節を読み終わってから assignTupletUnits で決める
+    //   （<normal-dot>（1つ分が付点の音符）は、このアプリでは扱えないので、書いていないのと同じにする）
+    const normalType = childText(modification, "normal-type");
+    if (normalType && DURATION_ORDER.includes(normalType) && !childElement(modification, "normal-dot")) tuplet.unit = normalType;
+    shape = { duration: type, dots: dots };
+    ticks = (durationToTicks(type, dots) * normal) / actual;
     if (!Number.isInteger(ticks)) return { note: null, ticks: ticks }; // 念のため（整数にならない連符は使えない）
   }
 
@@ -598,7 +606,10 @@ function readNote(noteElement, divisions) {
   const restElement = childElement(noteElement, "rest");
   if (restElement) {
     const rest = { rest: true, duration: shape.duration, dots: shape.dots };
-    if (tuplet) rest.tuplet = tuplet;
+    if (tuplet) {
+      rest.tuplet = tuplet;
+      rest.tupletEdge = tupletEdges(noteElement); // 連符の始まり・終わりの印（あとで assignTupletUnits が使って消す）（ステップ28）
+    }
     // 小節まるごとの休符（<rest measure="yes"/>）なら、その印を付ける（全休符で描く）（ステップ13-3）
     // （小節の中にこの休符1つだけにならなかったときは、fitMeasure で印を外す）
     if (restElement.getAttribute("measure") === "yes") rest.measureRest = true;
@@ -620,8 +631,104 @@ function readNote(noteElement, divisions) {
   if (isDiamondNote(noteElement)) note.pitch.diamond = true;
   // 臨時記号が書いてあれば、注意の記号の印を付ける（重音の2つ目からの音も、この関数で読むので、高さごとに付く）（注意の臨時記号）
   markCourtesy(noteElement, note.pitch);
-  if (tuplet) note.tuplet = tuplet; // 連符の印（ステップ10-6）
+  if (tuplet) {
+    note.tuplet = tuplet; // 連符の印（ステップ10-6）
+    note.tupletEdge = tupletEdges(noteElement); // 連符の始まり・終わりの印（あとで assignTupletUnits が使って消す）（ステップ28）
+  }
   return { note: note, ticks: ticks };
+}
+
+// ----------------------------------------------------------
+// 関数：tupletEdges
+// 音の <notations> の中の <tuplet type="start">・<tuplet type="stop"> を読む（ステップ28）
+// （連符の始まりと終わりがわかると、長さのまじった連符の「1つ分の長さ」を決めやすいため）
+//   noteElement … <note>
+// 戻り値：{ start: 始まりの印があるか, stop: 終わりの印があるか }
+// ----------------------------------------------------------
+function tupletEdges(noteElement) {
+  const edges = { start: false, stop: false };
+  childElements(noteElement, "notations").forEach((notations) => {
+    childElements(notations, "tuplet").forEach((element) => {
+      if (element.getAttribute("type") === "start") edges.start = true;
+      if (element.getAttribute("type") === "stop") edges.stop = true;
+    });
+  });
+  return edges;
+}
+
+// ----------------------------------------------------------
+// 関数：assignTupletUnits
+// 小節の連符の音に、連符の「1つ分の長さ」（tuplet.unit）を決めて付ける（ステップ28）
+// （このアプリの連符は、長さの合計が「1つ分 × actual」になるごとに区切るので、1つ分の長さが要る）
+//   notes … 小節の音の並び（読み込んだもの。tupletEdge の一時的な印が付いている）
+// 【決め方】
+//   同じ数字（actual・normal）の連符の音が続く所（始まり・終わりの印があれば、そこで分ける）ごとに
+//   ① <normal-type> が書いてある音があれば、その長さ
+//   ② 始まりと終わりの印で1つの連符だとわかれば、長さの合計 ÷ actual
+//   ③ どちらもなければ、短い長さから順に「1つ分 × actual」ずつにちょうど区切れる長さを探す
+//      例：8分音符の3連符が2つ（8分×6）→ 16分音符の3つ分では区切れない → 8分音符
+//   決まらないときは、音ごとに自分の長さを1つ分にする（前と同じ。そろっていない連符として、小節ごと休符になる）
+// 最後に、一時的な印 tupletEdge を消す（notes を直接書き換える）
+// ----------------------------------------------------------
+function assignTupletUnits(notes) {
+  let i = 0;
+  while (i < notes.length) {
+    const first = notes[i];
+    if (!first.tuplet) {
+      i = i + 1;
+      continue;
+    }
+    // 同じ数字の連符の音が続く所を探す（終わりの印のあと・始まりの印の前で分ける）
+    let j = i;
+    while (j + 1 < notes.length) {
+      const next = notes[j + 1];
+      if (!next.tuplet || next.tuplet.actual !== first.tuplet.actual || next.tuplet.normal !== first.tuplet.normal) break;
+      if (notes[j].tupletEdge?.stop || next.tupletEdge?.start) break;
+      j = j + 1;
+    }
+    const run = notes.slice(i, j + 1);
+    const actual = first.tuplet.actual;
+
+    // ① <normal-type> が書いてある音の長さ（全部同じときだけ使う）
+    const written = [...new Set(run.map((note) => note.tuplet.unit).filter((unit) => unit))];
+    let unit = written.length === 1 ? written[0] : null;
+
+    // ② 始まりと終わりの印で1つの連符だとわかるとき：長さの合計 ÷ actual
+    if (!unit && first.tupletEdge?.start && notes[j].tupletEdge?.stop) {
+      const total = run.reduce((sum, note) => sum + durationToTicks(note.duration, note.dots ?? 0), 0);
+      unit = DURATION_ORDER.find((duration) => durationToTicks(duration, 0) * actual === total) ?? null;
+    }
+
+    // ③ ちょうど区切れる長さを、短いほうから探す
+    if (!unit) {
+      unit = [...DURATION_ORDER].reverse().find((duration) => splitsExactly(run, durationToTicks(duration, 0) * actual)) ?? null;
+    }
+
+    // 決めた長さを付ける（決まらなければ、音ごとに自分の長さ）
+    run.forEach((note) => {
+      note.tuplet.unit = unit ?? note.duration;
+    });
+    i = j + 1;
+  }
+  // 一時的な印を消す
+  notes.forEach((note) => delete note.tupletEdge);
+}
+
+// ----------------------------------------------------------
+// 関数：splitsExactly
+// 音の並びを、前から capacity の長さずつに、ちょうど区切れるか調べる（assignTupletUnits で使う）（ステップ28）
+//   run      … 連符の音の並び
+//   capacity … 1つの連符の長さ（連符にする前の長さで）
+// 戻り値：true / false
+// ----------------------------------------------------------
+function splitsExactly(run, capacity) {
+  let filled = 0;
+  for (const note of run) {
+    filled = filled + durationToTicks(note.duration, note.dots ?? 0);
+    if (filled > capacity) return false; // 連符の途中で、はみ出した
+    if (filled === capacity) filled = 0; // ちょうど1つの連符になった
+  }
+  return filled === 0;
 }
 
 // ----------------------------------------------------------
@@ -1733,9 +1840,13 @@ function readPart(partElement, counter, skipped) {
       // <backup>（声部をさかのぼる印）は見ない（2つ目の声部は使わないため）
     }
 
+    // 連符の1つ分の長さを決める（ステップ28）
+    assignTupletUnits(measure.notes);
+
     // 連符がそろっているか調べる（ステップ10-6）
-    // 1つの連符の中で長さがまちまち・数が足りない連符は、このアプリでは扱えないので、小節ごと休符にする
-    if (measure.readable && tupletGroups(measure.notes).some((g) => g.end - g.start + 1 !== g.actual)) {
+    // 長さが足りない・はみ出した連符は、このアプリでは扱えないので、小節ごと休符にする
+    // （ステップ28：長さのまじった連符も読めるようにしたので、数ではなく長さの合計で調べる）
+    if (measure.readable && tupletGroups(measure.notes).some((g) => g.filled !== g.capacity)) {
       measure.readable = false;
     }
 

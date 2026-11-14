@@ -101,7 +101,7 @@ export function replaceAt(score, selection, newNote) {
   if (old.tuplet) {
     const newScore = cloneScore(score);
     const notes = newScore.parts[selection.part].measures[selection.measure].notes;
-    notes[selection.note] = { ...newNote, duration: old.duration, dots: 0, tuplet: { ...old.tuplet } };
+    notes[selection.note] = { ...newNote, duration: old.duration, dots: old.dots ?? 0, tuplet: { ...old.tuplet } }; // 付点も前の音のまま（連符の中にも付点の音がある）（ステップ28）
     return newScore;
   }
 

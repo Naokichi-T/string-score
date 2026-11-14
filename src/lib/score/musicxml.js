@@ -509,6 +509,12 @@ function noteXml(note, accidental, tieStop, divisions, tupletMark, measureRest =
     lines.push("        <time-modification>");
     lines.push(`          <actual-notes>${tupletMark.actual}</actual-notes>`);
     lines.push(`          <normal-notes>${tupletMark.normal}</normal-notes>`);
+    // 音の形が連符の1つ分の長さとちがうとき（8分音符の3連符の中の付点8分音符・16分音符など）は、
+    // 「normal 個分」が何の音符の数かを <normal-type> で書く（ステップ28）
+    //   例：8分＋付点8分＋16分 の3連符 → 付点8分・16分の音に <normal-type>eighth</normal-type>
+    if (tupletMark.unit && tupletMark.unit !== note.duration) {
+      lines.push(`          <normal-type>${tupletMark.unit}</normal-type>`);
+    }
     lines.push("        </time-modification>");
   }
 
@@ -1172,9 +1178,12 @@ function partXml(score, p, divisions) {
         tupletMark = {
           actual: group.actual,
           normal: group.normal,
+          unit: group.unit, // 連符の1つ分の長さ（音の形とちがうときに <normal-type> を書く）（ステップ28）
           start: k === group.start,
           stop: k === group.end,
-          bracket: !["eighth", "16th", "32nd"].includes(group.duration) || members.some((n) => n.rest), // 32分音符はステップ15-5
+          // ステップ28：長さのまじった連符があるので、1つ分の長さではなく、中の音で決める
+          //   （4分音符より長い音・休符が1つでもあれば、連桁で全部つながらないので括弧を付ける）
+          bracket: members.some((n) => n.rest || ["whole", "half", "quarter"].includes(n.duration)),
         };
       }
 

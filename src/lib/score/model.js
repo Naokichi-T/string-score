@@ -35,7 +35,8 @@
 //             { rest: true, duration: 'quarter', dots: 0 },
 //             // 連符の中の音には tuplet を付ける（ステップ10-2）
 //             // 例：8分音符の3連符 = 「8分音符2つ分の長さに、8分音符を3つ入れる」
-//             { pitch: { step: 'D', alter: 0, octave: 4 }, duration: 'eighth', dots: 0, tie: false, tuplet: { actual: 3, normal: 2 } },
+//             { pitch: { step: 'D', alter: 0, octave: 4 }, duration: 'eighth', dots: 0, tie: false, tuplet: { actual: 3, normal: 2, unit: 'eighth' } },
+//             // 連符の中は長さがまじってもよい（8分＋付点8分＋16分 で、8分音符の3連符1つ分）（ステップ28）
 //             // 重音（1つの音符に高さが2つ以上）には chord を付ける（ステップ14-1）
 //             //   pitch … いちばん低い音
 //             //   chord … その上に重ねる音（低い順）
@@ -364,11 +365,14 @@ export function noteTicks(note) {
 // ==========================================================
 // ここから下は、連符の関数（ステップ10-2）
 // 【連符のデータの決まり】
-//   ・連符の中の音（休符も）には、全部に tuplet: { actual, normal } を付ける
+//   ・連符の中の音（休符も）には、全部に tuplet: { actual, normal, unit } を付ける
 //       actual … 連符の数字（3連符なら 3）
 //       normal … 何個分の長さに入れるか（3連符なら 2）
-//   ・1つの連符の中の音は、全部同じ長さ（付点なし）
-//   ・連符の音は小節の中で順に並び、actual 個ずつで1つの連符になる
+//       unit   … 連符の「1つ分」の長さの名前（8分音符の3連符なら "eighth"）（ステップ28）
+//                （ステップ28 より前に保存した楽譜には unit がない。そのときは音の長さを1つ分とみなす）
+//   ・連符の音は小節の中で順に並び、長さの合計が「1つ分 × actual」になったら1つの連符になる（ステップ28）
+//       例：8分音符の3連符 → 8分音符3つ分（8分＋付点8分＋16分 のように、長さがまじってもよい）
+//     （ステップ28 より前は「actual 個ずつ」で区切っていた。長さがそろっていれば、どちらでも同じ区切りになる）
 // ==========================================================
 
 // ----------------------------------------------------------
@@ -389,12 +393,37 @@ export function tupletNormal(actual) {
 }
 
 // ----------------------------------------------------------
+// 関数：tupletUnit
+// 連符の中の音について、その連符の「1つ分」の長さの名前を返す（ステップ28）
+// （unit がない古いデータは、その音の長さを1つ分とみなす。古いデータは全部同じ長さなので、これで合う）
+//   note … 連符の中の音のデータ
+// 戻り値：長さの名前（"eighth" など）
+// ----------------------------------------------------------
+export function tupletUnit(note) {
+  return note.tuplet.unit ?? note.duration;
+}
+
+// ----------------------------------------------------------
+// 関数：tupletRawTicks
+// 連符の中の音の「連符にする前の長さ」（ティック）を返す（ステップ28）
+// （連符の割合 normal ÷ actual を掛ける前の長さ。連符の中で長さを数えるときに使う）
+//   例：付点8分音符 → 8分音符の 1.5倍（3連符でも、そのまま）
+// ----------------------------------------------------------
+export function tupletRawTicks(note) {
+  return durationToTicks(note.duration, note.dots ?? 0);
+}
+
+// ----------------------------------------------------------
 // 関数：tupletGroups
 // 小節の音の並びから、連符のまとまりを探す
 //   notes … 小節の音の並び
-// 戻り値：[{ start: 最初の音の番号, end: 最後の音の番号, actual, normal, duration: 1つ分の長さの名前 }, ...]
-// tuplet の付いた音が続く所を、actual 個ずつに区切る
-// （数字や長さが変わったら、そこから新しい連符にする）
+// 戻り値：[{ start: 最初の音の番号, end: 最後の音の番号, actual, normal,
+//            duration: 1つ分の長さの名前（unit と同じ。前からの名前を残している）, unit: 1つ分の長さの名前,
+//            capacity: 連符いっぱいの長さ（連符にする前の長さで。1つ分 × actual）,
+//            filled: 入っている音の長さの合計（連符にする前の長さで） }, ...]
+// tuplet の付いた音が続く所を、長さの合計が capacity になるごとに区切る（ステップ28：数ではなく長さで区切る）
+// （数字や1つ分の長さが変わったら、そこから新しい連符にする）
+// filled が capacity に足りない連符は「そろっていない連符」（読み込みのときに調べる）
 // ----------------------------------------------------------
 export function tupletGroups(notes) {
   const groups = [];
@@ -405,17 +434,64 @@ export function tupletGroups(notes) {
       current = null;
       return;
     }
-    // 今の連符の続きにできるか（同じ数字・同じ長さで、まだ actual 個そろっていない）
-    const canContinue = current && current.actual === note.tuplet.actual && current.normal === note.tuplet.normal && current.duration === note.duration && j - current.start < current.actual;
+    const unit = tupletUnit(note);
+    const raw = tupletRawTicks(note);
+    // 今の連符の続きにできるか（同じ数字・同じ1つ分の長さで、まだいっぱいになっていない）
+    const canContinue = current && current.actual === note.tuplet.actual && current.normal === note.tuplet.normal && current.unit === unit && current.filled < current.capacity;
     if (canContinue) {
       current.end = j;
+      current.filled = current.filled + raw;
     } else {
       // 新しい連符を始める
-      current = { start: j, end: j, actual: note.tuplet.actual, normal: note.tuplet.normal, duration: note.duration };
+      current = {
+        start: j,
+        end: j,
+        actual: note.tuplet.actual,
+        normal: note.tuplet.normal,
+        duration: unit,
+        unit: unit,
+        capacity: durationToTicks(unit, 0) * note.tuplet.actual,
+        filled: raw,
+      };
       groups.push(current);
     }
   });
   return groups;
+}
+
+// ----------------------------------------------------------
+// 関数：tupletRests
+// 連符の中のすき間を埋める休符の並びを作る（ステップ28）
+//   start  … すき間の始まり（連符の頭から、連符にする前の長さで数えたティック）
+//   length … すき間の長さ（連符にする前の長さで）
+//   tuplet … 休符に付ける連符の印（{ actual, normal, unit }）
+// 1つ分の長さより長い休符は使わない。休符の長さで割り切れる位置にだけ置く（拍の中の休符の並べ方と同じ考え方）
+//   例：8分音符の3連符で、16分音符1つ分の所から 16分＋8分 のすき間 → 16分休符・8分休符
+// 戻り値：休符の並び（連符の印付き）
+// ----------------------------------------------------------
+export function tupletRests(start, length, tuplet) {
+  const unitTicks = DURATION_TICKS[tuplet.unit];
+  const rests = [];
+  let position = start;
+  const end = start + length;
+  while (position < end) {
+    let placed = false;
+    // 長い休符から順に、置けるものを探す
+    for (const duration of DURATION_ORDER) {
+      const ticks = DURATION_TICKS[duration];
+      const withinUnit = ticks <= unitTicks; // 1つ分より長くない
+      const fits = position + ticks <= end; // はみ出さない
+      const aligned = position % ticks === 0; // その休符の長さで割り切れる位置
+      if (withinUnit && fits && aligned) {
+        rests.push({ rest: true, duration: duration, dots: 0, tuplet: { ...tuplet } });
+        position = position + ticks;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) break; // 32分音符より細かいすき間（ふつうは起きない）
+  }
+  return rests;
 }
 
 // ----------------------------------------------------------

@@ -123,7 +123,7 @@
   import { reflowTime } from "#lib/score/reflow.js"; // 拍子を変えたときに、入りきらない音を後ろへ流し直す（ステップ18-4） // 楽譜全体の移調（ステップ17-1）
   import { createHistory, record, undo, redo } from "#lib/score/history.js";
   import { copyNotes, pasteNotes, expandToTuplets } from "#lib/score/clipboard.js";
-  import { tupletError, makeTuplet, removeTuplet } from "#lib/score/tuplets.js";
+  import { tupletError, makeTuplet, removeTuplet, tupletResizeError, resizeInTuplet } from "#lib/score/tuplets.js"; // 連符の中の長さを変える（ステップ28）
   import { canBeamTogether, canUnbeam, beamTogether, unbeam } from "#lib/score/beams.js"; // 連桁を手でつなぐ・切る（ステップ19-1）
   import { stemState, canChangeStem, setStem } from "#lib/score/stems.js"; // 符尾の向きを決める（ステップ22）
   import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
@@ -940,6 +940,8 @@
   function canUse(d, dots) {
     if (!selection) return true;
     if (graceSelected) return false; // 前打音の長さは変えられない（ステップ24-1）
+    // 連符の中の音は、連符の中に入るかで調べる（上書き・挿入のどちらのモードでも同じ）（ステップ28）
+    if (selectedInTuplet) return tupletResizeError(score, selection, d, dots) === "";
     // 挿入モードでは「長さを変えて後ろをずらせるか」で調べる
     if (mode === "insert") return canResize(score, selection, d, dots);
     return canFit(score, selection, d, dots);
@@ -968,6 +970,16 @@
   // 変えられたら true を返す
   // ----------------------------------------------------------
   function changeLength(d, dots) {
+    // 連符の中の音：連符の中だけで長さを変える（上書き・挿入のどちらのモードでも同じ）（ステップ28）
+    if (selectedInTuplet) {
+      const error = tupletResizeError(score, selection, d, dots);
+      if (error) {
+        message = error;
+        return false;
+      }
+      commit(resizeInTuplet(score, selection, d, dots));
+      return true;
+    }
     if (mode === "insert") {
       const result = resizeAt(score, selection, d, dots);
       if (result.error) {
@@ -1092,11 +1104,7 @@
       message = "前打音の長さは変えられません（主音を選ぶと変えられます）";
       return;
     }
-    // 連符の中の音を選んでいるときは、長さを変えない（ステップ10-3）
-    if (selectedInTuplet) {
-      message = "連符の中の音の長さは変えられません（［連符を解除］すると変えられます）";
-      return;
-    }
+    // 連符の中の音を選んでいるときも、連符の中に入る長さなら変えられる（changeLength の中で連符の中だけで変える）（ステップ28）
     // 今の付点のまま入らないなら、付点を外す
     let dots = dotted ? 1 : 0;
     if (selection && !canUse(d, dots)) dots = 0;
@@ -1136,9 +1144,17 @@
       return;
     }
 
-    // 連符の中の音には付点を付けられない（ステップ10-3）
+    // 連符の中の音にも付点を付けられる（連符の中に入るときだけ。changeLength の中で連符の中だけで変える）（ステップ28）
     if (note.tuplet) {
-      message = "連符の中の音には付点を付けられません";
+      const tupletDots = (note.dots ?? 0) > 0 ? 0 : 1;
+      const error = tupletResizeError(score, selection, note.duration, tupletDots);
+      if (error) {
+        message = error.startsWith("その長さ") ? "付点を付けると連符の中に入りきりません" : error;
+        return;
+      }
+      changeLength(note.duration, tupletDots);
+      duration = note.duration;
+      dotted = tupletDots === 1;
       return;
     }
 

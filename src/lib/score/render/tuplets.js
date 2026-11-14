@@ -8,7 +8,7 @@
 
 import { tupletGroups, noteTicks, TICKS_PER_16TH } from "../model.js";
 import { timeToString } from "./helpers.js";
-import { autoGroups, applyMarks, hasMarks } from "../beams.js"; // 連桁の印（ステップ19-1）
+import { autoGroups, applyMarks, hasMarks, tupletBeamLengths } from "../beams.js"; // 連桁の印（ステップ19-1）・連符の中のまとまり（ステップ28）
 
 // 全音符1つ分のティック（VexFlow の長さは「全音符の何分のいくつか」で書くため）
 const WHOLE_TICKS = 16 * TICKS_PER_16TH;
@@ -62,7 +62,7 @@ export function createTuplets(VF, notes, staveNotes) {
 //   小節を「連符」と「連符でない所」に区切って、区切りごとに連桁を作る
 //     ・連符でない所 … 今までと同じように、拍子に合わせてつなぐ
 //     ・連符         … 連符の中を全部1本でつなぐ（12連符のように1拍より長くても切らない）
-//                      4分音符以上の連符は、連桁がないので何もしない
+//                      休符・4分音符より長い音符の所では切れる（ステップ28：長さのまじった連符のため）
 //   （ステップ19-1：連符でない所に連桁の印（beam: "join"・"break"）があるときは、
 //     自動のまとまりを beams.js で計算して印を当てはめ、そのまとまりで連桁を作る。
 //     印がない所は、今までどおり VexFlow の generateBeams で作る（見た目を変えないため））
@@ -106,10 +106,11 @@ export function createBeams(VF, notes, staveNotes, time, offset = 0, stemDirs = 
 
     let lengths; // つなぐまとまりの長さの並び（ティック）
     if (segment.isTuplet) {
-      // 4分音符以上の連符には連桁がない
-      if (!["eighth", "16th", "32nd"].includes(segment.duration)) return; // 32分音符はステップ15-5
-      // 連符の中は全部1本でつなぐ
-      lengths = [segmentEnd - segmentStart];
+      // 連符の中は全部1本でつなぐ（休符・4分音符より長い音符の所では切れる）
+      // （ステップ28：連符の中に長さのまじった音があるので、1つ分の長さでは決めない。
+      //   4分音符より長い音の所でまとまりを分けて、4分音符の3連符でも中の8分音符どうしはつながるようにする。
+      //   4分音符だけの連符は、VexFlow がつながない）
+      lengths = tupletBeamLengths(notes.slice(segment.from, segment.to + 1));
     } else {
       // 拍子の区切りのうち、この区切りの中にあるものでまとまりを分ける
       const points = [segmentStart, ...gridPoints.filter((p) => p > segmentStart && p < segmentEnd), segmentEnd];
