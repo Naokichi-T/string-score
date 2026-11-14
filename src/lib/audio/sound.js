@@ -15,6 +15,11 @@
 //   ・ページを開いたら、選んでいる方の楽器の音だけを読み込む（電子音のときは A）
 //   ・もう一方は、初めて選んだときに読み込む（一度読み込んだら、切り替えても読み直さない）
 //   ・B は、のばすときにくり返す範囲（ループ）の情報を、自分で作ったファイルから読み込む
+// （タブレットで再生の音が途切れるのを直した手直し：少し先の音だけを順に予約する）
+//   ・前は［再生］を押した瞬間に、曲の最後までの音を全部予約していた。予約した音は鳴る前から音の仕組みの中にいて、
+//     長い曲・4パートの曲では数が多くなり、タブレットでは計算が追いつかずに「プチプチ」と途切れていた
+//   ・今は、音の一覧を「予約待ちの列」に入れておき、予約係が SCHEDULE_INTERVAL 秒ごとに起きて、
+//     今から SCHEDULE_AHEAD 秒先までの音だけを予約する（音の仕組みの中にいる音が、いつも少しだけになる）
 // ==========================================================
 
 import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
@@ -47,6 +52,22 @@ let endTimer = null;
 
 // 再生を始めた時刻（AudioContext の時計で。再生していないときは null）（ステップ6-2）
 let playStartTime = null;
+
+// ----------------------------------------------------------
+// 少し先の音だけを順に予約するための設定と部品（タブレットで音が途切れるのを直した手直し）
+// ----------------------------------------------------------
+// 今から何秒先までの音を予約しておくか
+// （画面の動きなどで予約係が一瞬遅れても、音が抜けないように、余裕を持たせて 2 秒）
+const SCHEDULE_AHEAD = 2;
+// 予約係が何秒ごとに起きるか
+const SCHEDULE_INTERVAL = 0.25;
+// 鳴らす時刻をこれ以上すぎてしまった音は、予約せずに捨てる（秒）
+// （画面を隠している間などに予約係が止まっていたとき、戻ったとたんに遅れた音がまとめて鳴らないようにする）
+const LATE_LIMIT = 0.1;
+// 予約待ちの列（鳴らす時刻の早い順）：[{ time: 鳴らす時刻（AudioContext の時計で）, schedule: 予約する関数 }, ...]
+let pendingItems = [];
+// 予約係のタイマー（動いていないときは null）
+let schedulerTimer = null;
 
 // ----------------------------------------------------------
 // 関数：getPlaybackTime
@@ -496,62 +517,127 @@ export function scheduleMore(events, clicks, offsetTicks, tickSeconds, clickVolu
 //   tickSeconds … 1ティックが何秒か
 //   clickVolume … クリックの音量（0〜100）
 // 止めるための関数は stopFunctions に入れる（stopPlayback でまとめて止める）
+// （タブレットで音が途切れるのを直した手直し：ここではすぐに予約せず、予約待ちの列に入れる。
+//   予約係（pumpSchedule）が、今から SCHEDULE_AHEAD 秒先までの音だけを、少しずつ予約する）
 // ----------------------------------------------------------
 function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
   // 今選んでいる楽器の音（電子音のときは null）
+  // （予約するときではなく、ここで決めておく。再生の途中で音の種類を変えても、その回の再生は同じ音で鳴らすため）
   const instruments = currentInstruments();
+  const type = soundType;
 
   // グリッサンドの音（ステップ11-5b）
   // ・電子音：分けずに1つの音のまま鳴らし、playSynth の中で高さをなめらかに変える
   // ・楽器の音：録音の音は鳴らしたあとで高さを変えられないので、半音ずつのかけらに分ける
   // （ステップ18-3：先に、書いた高さを鳴る高さに直す。コントラバスは1オクターブ下げる）
   const sounding = events.map(soundingEvent);
-  const list = soundType === "synth" ? sounding : sounding.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
+  const list = type === "synth" ? sounding : sounding.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
 
-  list.forEach((event) => {
-    const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
-    const duration = event.soundTicks * tickSeconds; // 鳴らす長さ（スタッカートなどは playback.js で決めてある）
+  // 音を、予約待ちの列に入れる（まだ予約しない）
+  const items = list.map((event) => ({
+    time: startTime + event.startTick * tickSeconds, // 鳴らし始める時刻
+    schedule: () => scheduleNote(event, startTime, tickSeconds, type, instruments),
+  }));
 
-    // 電子音を選んでいるときは、電子音で予約する
-    if (soundType === "synth") {
-      // グリッサンドなら、すべる先の高さと、すべり始める時刻も渡す（ステップ11-5b）
-      const glide = event.glissTo ? { pitch: event.glissTo, startTime: startTime + glissStartTick(event) * tickSeconds } : null;
-      stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide));
-      return;
-    }
-
-    // 楽器の音：つなげる音（スラーの中・テヌート）は、いつもの余韻のまま次の音に重ねて、なめらかにする
-    // つなげない音は、余韻を短くして、余韻と「すき間」のぶんだけ早く止める
-    // （ただし、短くしすぎないように、もとの長さの半分は鳴らす）
-    let soundDuration = duration;
-    let release = undefined; // undefined なら smplr のいつもの余韻（0.3 秒）
-    if (event.ornamentPiece && !event.connected) {
-      // トリルなどで分けた短いかけら：長さはそのまま鳴らし、余韻だけ短くして、次のかけらと重ならないようにする（ステップ11-3a）
-      release = SHORT_RELEASE;
-    } else if (!event.connected) {
-      soundDuration = Math.max(duration * 0.5, duration - SHORT_RELEASE - NOTE_GAP);
-      release = SHORT_RELEASE;
-    }
-
-    // ピチカートなら、ピチカートの録音で鳴らす（ステップ6-3c）
-    // 録音が無音になっている高さは、チェロの録音で鳴らす（ステップ18-3）
-    const sampler = samplerFor(instruments, event.instrument, event.pizz, pitchToMidi(event.pitch));
-    const stop = sampler.start({
-      note: pitchToMidi(event.pitch),
-      velocity: event.velocity,
-      detune: DETUNE_CENTS,
-      time: time,
-      duration: soundDuration,
-      ampRelease: release,
-    });
-    stopFunctions.push(stop);
-  });
-
-  // メトロノームのクリックを予約する（ステップ12-4a）
+  // メトロノームのクリックも、予約待ちの列に入れる（ステップ12-4a）
   clicks.forEach((click) => {
     const time = startTime + click.startTick * tickSeconds;
-    stopFunctions.push(playClick(time, click.strong, clickVolume));
+    items.push({ time: time, schedule: () => stopFunctions.push(playClick(time, click.strong, clickVolume)) });
   });
+
+  // 列に足して、時刻の早い順に並べ直す（区間リピートの続きを足すときも、ここを通る）
+  pendingItems = [...pendingItems, ...items].sort((a, b) => a.time - b.time);
+
+  // すぐに1回予約してから、予約係を動かす
+  pumpSchedule();
+  startScheduler();
+}
+
+// ----------------------------------------------------------
+// 関数：scheduleNote
+// 音を1つ予約する（タブレットで音が途切れるのを直した手直し：scheduleEvents の中にあった処理を分けた）
+//   event       … 鳴らす音（鳴る高さに直したもの）
+//   startTime   … 頭の時刻（AudioContext の時計で）
+//   tickSeconds … 1ティックが何秒か
+//   type        … 音の種類（"synth"・"instrument"・"instrumentB"）
+//   instruments … 読み込んだ楽器の音（電子音のときは null）
+// 止めるための関数は stopFunctions に入れる
+// ----------------------------------------------------------
+function scheduleNote(event, startTime, tickSeconds, type, instruments) {
+  const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
+  const duration = event.soundTicks * tickSeconds; // 鳴らす長さ（スタッカートなどは playback.js で決めてある）
+
+  // 電子音を選んでいるときは、電子音で予約する
+  if (type === "synth") {
+    // グリッサンドなら、すべる先の高さと、すべり始める時刻も渡す（ステップ11-5b）
+    const glide = event.glissTo ? { pitch: event.glissTo, startTime: startTime + glissStartTick(event) * tickSeconds } : null;
+    stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide));
+    return;
+  }
+
+  // 楽器の音：つなげる音（スラーの中・テヌート）は、いつもの余韻のまま次の音に重ねて、なめらかにする
+  // つなげない音は、余韻を短くして、余韻と「すき間」のぶんだけ早く止める
+  // （ただし、短くしすぎないように、もとの長さの半分は鳴らす）
+  let soundDuration = duration;
+  let release = undefined; // undefined なら smplr のいつもの余韻（0.3 秒）
+  if (event.ornamentPiece && !event.connected) {
+    // トリルなどで分けた短いかけら：長さはそのまま鳴らし、余韻だけ短くして、次のかけらと重ならないようにする（ステップ11-3a）
+    release = SHORT_RELEASE;
+  } else if (!event.connected) {
+    soundDuration = Math.max(duration * 0.5, duration - SHORT_RELEASE - NOTE_GAP);
+    release = SHORT_RELEASE;
+  }
+
+  // ピチカートなら、ピチカートの録音で鳴らす（ステップ6-3c）
+  // 録音が無音になっている高さは、チェロの録音で鳴らす（ステップ18-3）
+  const sampler = samplerFor(instruments, event.instrument, event.pizz, pitchToMidi(event.pitch));
+  const stop = sampler.start({
+    note: pitchToMidi(event.pitch),
+    velocity: event.velocity,
+    detune: DETUNE_CENTS,
+    time: time,
+    duration: soundDuration,
+    ampRelease: release,
+  });
+  stopFunctions.push(stop);
+}
+
+// ----------------------------------------------------------
+// 関数：pumpSchedule
+// 予約待ちの列から、今から SCHEDULE_AHEAD 秒先までの音を取り出して予約する
+// （タブレットで音が途切れるのを直した手直し）
+// ・鳴らす時刻を LATE_LIMIT 秒より多くすぎてしまった音は、予約せずに捨てる
+// ・列が空になったら、予約係を止める
+// ----------------------------------------------------------
+function pumpSchedule() {
+  if (!audioContext) return;
+  const now = audioContext.currentTime;
+  while (pendingItems.length > 0 && pendingItems[0].time < now + SCHEDULE_AHEAD) {
+    const item = pendingItems.shift();
+    if (item.time < now - LATE_LIMIT) continue; // 遅れすぎた音は鳴らさない
+    item.schedule();
+  }
+  if (pendingItems.length === 0) stopScheduler();
+}
+
+// ----------------------------------------------------------
+// 関数：startScheduler
+// 予約係を動かす（SCHEDULE_INTERVAL 秒ごとに pumpSchedule を呼ぶ）
+// すでに動いているとき・予約待ちの音がないときは何もしない
+// ----------------------------------------------------------
+function startScheduler() {
+  if (schedulerTimer !== null || pendingItems.length === 0) return;
+  schedulerTimer = setInterval(pumpSchedule, SCHEDULE_INTERVAL * 1000);
+}
+
+// ----------------------------------------------------------
+// 関数：stopScheduler
+// 予約係を止める
+// ----------------------------------------------------------
+function stopScheduler() {
+  if (schedulerTimer === null) return;
+  clearInterval(schedulerTimer);
+  schedulerTimer = null;
 }
 
 // ----------------------------------------------------------
@@ -600,6 +686,9 @@ function playClick(time, strong, volume) {
 // 再生中の音を全部止める（まだ鳴っていない予約も取り消す）
 // ----------------------------------------------------------
 export function stopPlayback() {
+  // 予約係を止めて、まだ予約していない音も捨てる（タブレットで音が途切れるのを直した手直し）
+  stopScheduler();
+  pendingItems = [];
   stopFunctions.forEach((stop) => stop());
   stopFunctions = [];
   playStartTime = null;
