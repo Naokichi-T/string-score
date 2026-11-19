@@ -12,8 +12,15 @@
   // （ステップ18-6：タブレットのときだけ、右端に［？］（タブレットでの使い方）を出す）
   // （演奏モード：［PDF 出力］の右に［演奏モード］（楽譜だけを画面いっぱいに出す）を足した）
   //   画面の幅が狭いとき（1140px 以下）は、右のボタンの文字を短くする（1024px の幅で上のバーがはみ出さないように）
-  //   例：「MusicXML 書き出し」→「MusicXML」、「PDF 出力」→「PDF」、「演奏モード」→「演奏」
+  //   例：「演奏モード」→「演奏」
   //   長い文字（.long）と短い文字（.short）の両方を書いておき、CSS でどちらを見せるかを切り替える
+  // （MP3 書き出しの手順1：［MusicXML 書き出し］［PDF 出力］を、［書き出し ▾］のメニュー1つにまとめた）
+  //   ・［書き出し ▾］を押すと、すぐ下にメニューが開く（もう一度押すと閉じる）
+  //   ・項目を選ぶと、メニューを閉じてから、今までのボタンと同じ動き（onexport・onprint）をする
+  //   ・メニューの外を押したとき・Esc を押したときも閉じる
+  //   ・メニューを開いている間は、Space（再生）や矢印キー（音符の選択）などのキーは楽譜に効かせない
+  //     （⌘P だけは今までどおり効かせる。メニューは閉じる）
+  //   ・あとで「音声（MP3）」の項目を足す予定（手順3）
   // ==========================================================
 
   // 親から受け取るもの
@@ -31,8 +38,8 @@
   //   onstop     … 停止ボタンが押されたときに呼ぶ関数
   //   onsoundtype … 音の種類が選ばれたときに呼ぶ関数（"instrument"・"instrumentB"・"synth" のどれかを渡す）
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
-  //   onexport   … ［MusicXML 書き出し］ボタンが押されたときに呼ぶ関数（ステップ8-1）
-  //   onprint    … ［PDF 出力］ボタンが押されたときに呼ぶ関数（ステップ9）
+  //   onexport   … 書き出しのメニューで［MusicXML］が選ばれたときに呼ぶ関数（ステップ8-1）
+  //   onprint    … 書き出しのメニューで［PDF（印刷）］が選ばれたときに呼ぶ関数（ステップ9）
   //   onperform  … ［演奏モード］ボタンが押されたときに呼ぶ関数（演奏モード）
   //   showHelp   … ［？］を出すか（タブレットのときだけ true）（ステップ18-6）
   //   onhelp     … ［？］が押されたときに呼ぶ関数（ステップ18-6）
@@ -58,6 +65,15 @@
     onperform = () => {},
   } = $props();
 
+  // 書き出しのメニューを開いているか（MP3 書き出しの手順1）
+  let exportMenuOpen = $state(false);
+
+  // ［書き出し ▾］のボタンとメニューを包んでいる枠（メニューの外が押されたかを調べるのに使う）
+  let exportMenuArea = $state(null);
+
+  // メニューを開いている間に押したとき、画面がスクロールしないようにするキー（矢印キーと Space）
+  const MENU_SCROLL_KEYS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "];
+
   // ----------------------------------------------------------
   // 関数：handleSoundTypeChange
   // 音の種類の欄が変わったとき：選ばれた値を親に渡す
@@ -67,7 +83,87 @@
     // 選んだあとは欄の選択を外す（Space キーで再生できるようにするため）
     event.target.blur();
   }
+
+  // ----------------------------------------------------------
+  // 関数：toggleExportMenu
+  // ［書き出し ▾］が押されたとき：メニューを開く（開いていれば閉じる）（MP3 書き出しの手順1）
+  // ----------------------------------------------------------
+  function toggleExportMenu(event) {
+    exportMenuOpen = !exportMenuOpen;
+    // 閉じたときは、ボタンの選択を外す（Space キーで再生できるように。選んだままだと、Space でメニューがまた開くため）
+    if (!exportMenuOpen) event.currentTarget.blur();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：closeExportMenu
+  // 書き出しのメニューを閉じる（MP3 書き出しの手順1）
+  // メニューの中で選ばれていたボタンがあれば、選択も外す（Space キーで再生できるようにするため）
+  // ----------------------------------------------------------
+  function closeExportMenu() {
+    exportMenuOpen = false;
+    // 今選ばれているもの（ボタンなど）が、メニューの枠の中にあるときだけ外す
+    const active = document.activeElement;
+    if (active && exportMenuArea && exportMenuArea.contains(active)) active.blur();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：chooseExport
+  // メニューの項目が選ばれたとき：メニューを閉じてから、その項目の動きをする（MP3 書き出しの手順1）
+  //   action … 呼ぶ関数（onexport・onprint）
+  // ----------------------------------------------------------
+  function chooseExport(action) {
+    closeExportMenu();
+    action();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleWindowPointerDown
+  // 画面のどこかが押されたとき：メニューの外なら、メニューを閉じる（MP3 書き出しの手順1）
+  // （マウスのクリックと、タブレットのタッチの両方で呼ばれる）
+  // ----------------------------------------------------------
+  function handleWindowPointerDown(event) {
+    if (!exportMenuOpen) return;
+    // ［書き出し ▾］のボタンやメニューの中が押されたときは、ここでは閉じない（ボタンとメニューの項目に任せる）
+    if (exportMenuArea && exportMenuArea.contains(event.target)) return;
+    closeExportMenu();
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleWindowKeydownCapture
+  // キーが押されたとき：メニューを開いている間だけ、楽譜に効かせないようにする（MP3 書き出しの手順1）
+  // 「捕まえる順番（capture）」で受け取るので、編集ページの handleKeydown より先に呼ばれる
+  //   ・Esc        … メニューを閉じる
+  //   ・⌘P（Ctrl＋P）… メニューを閉じて、そのまま編集ページに渡す（印刷用のページを出す）
+  //   ・ほかのキー  … 編集ページに渡さない（Space の再生・矢印キーの音符の選択などを効かせない）
+  //                  ただし、Tab（選ぶ項目を移す）・Enter（選んでいる項目を押す）などのブラウザのふつうの動きはそのまま
+  // ----------------------------------------------------------
+  function handleWindowKeydownCapture(event) {
+    if (!exportMenuOpen) return;
+
+    // ⌘P（Ctrl＋P）：メニューを閉じて、編集ページに渡す
+    const command = event.ctrlKey || event.metaKey;
+    if (command && (event.key === "p" || event.key === "P")) {
+      closeExportMenu();
+      return;
+    }
+
+    // ここから下のキーは、編集ページに渡さない
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      // Esc：メニューを閉じる
+      event.preventDefault();
+      closeExportMenu();
+    } else if (MENU_SCROLL_KEYS.includes(event.key) && !(event.key === " " && event.target.tagName === "BUTTON")) {
+      // 矢印キー・Space（ボタンの上ではないとき）：画面がスクロールしないようにする
+      // （ボタンの上の Space は、そのボタンを押すブラウザのふつうの動きなので止めない）
+      event.preventDefault();
+    }
+  }
 </script>
+
+<!-- メニューの外が押されたとき・キーが押されたときを、ページ全体で受け取る（MP3 書き出しの手順1） -->
+<svelte:window onpointerdown={handleWindowPointerDown} onkeydowncapture={handleWindowKeydownCapture} />
 
 <header class="top-bar">
   <!-- アプリの名前（押すとトップページに戻る） -->
@@ -118,14 +214,28 @@
     {:else}
       <span class="save-status">✓ 保存済み</span>
     {/if}
-    <!-- 画面が狭いときは短い文字（.short）を見せる（演奏モード） -->
-    <button onclick={() => onexport()} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">
-      <span class="long">MusicXML 書き出し</span><span class="short">MusicXML</span>
-    </button>
-    <button onclick={() => onprint()} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">
-      <span class="long">PDF 出力</span><span class="short">PDF</span>
-    </button>
+
+    <!-- 書き出しのメニュー（MP3 書き出しの手順1：［MusicXML 書き出し］［PDF 出力］をここにまとめた） -->
+    <!-- ボタンとメニューを1つの枠で包んで、メニューをボタンのすぐ下に出す -->
+    <div class="menu-area" bind:this={exportMenuArea}>
+      <button class:open={exportMenuOpen} onclick={toggleExportMenu} title="MusicXML・PDF の書き出しを選ぶ" aria-haspopup="menu" aria-expanded={exportMenuOpen}> 書き出し ▾ </button>
+
+      {#if exportMenuOpen}
+        <div class="menu" role="menu">
+          <!-- MusicXML（今までの［MusicXML 書き出し］と同じ動き） -->
+          <button role="menuitem" onclick={() => chooseExport(onexport)} title="今の楽譜を MusicXML のファイル（タイトル.musicxml）として保存する">
+            <span class="item-name">MusicXML</span><span class="item-hint">.musicxml</span>
+          </button>
+          <!-- PDF（今までの［PDF 出力］と同じ動き） -->
+          <button role="menuitem" onclick={() => chooseExport(onprint)} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">
+            <span class="item-name">PDF（印刷）</span><span class="item-hint">⌘P</span>
+          </button>
+        </div>
+      {/if}
+    </div>
+
     <!-- 楽譜だけを画面いっぱいに出して、ページをめくりながら見る（演奏モード） -->
+    <!-- 画面が狭いときは短い文字（.short）を見せる（演奏モード） -->
     <button onclick={() => onperform()} title="楽譜だけを画面いっぱいに出して、ページをめくりながら演奏する（Esc か ×で戻る）">
       <span class="long">演奏モード</span><span class="short">演奏</span>
     </button>
@@ -202,12 +312,62 @@
     font-size: 14px;
     padding: 0 4px;
   }
+
+  /* ---------- 書き出しのメニュー（MP3 書き出しの手順1） ---------- */
+  /* ボタンとメニューを包む枠（メニューの位置の基準にする） */
+  .menu-area {
+    position: relative;
+  }
+  /* メニューを開いている間の［書き出し ▾］（押されたままに見えるように、少し濃くする） */
+  .menu-area > button.open {
+    background: #e5e7eb;
+  }
+  /* メニューの箱：ボタンのすぐ下・右端をそろえて出し、楽譜の上に重ねる */
+  .menu {
+    position: absolute;
+    top: calc(100% + 4px); /* ボタンの下に 4px あける */
+    right: 0;
+    z-index: 50; /* 楽譜やタブより上に出す */
+    min-width: 200px;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column; /* 項目を縦に並べる */
+  }
+  /* メニューの項目：横いっぱいのボタンにして、名前を左・ヒントを右に置く */
+  .menu button {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    height: 44px; /* タブレットで指で押しやすい高さ */
+    padding: 0 14px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu button:hover,
+  .menu button:focus-visible {
+    background: #eef2ff; /* うすい青 */
+  }
+  .item-hint {
+    font-size: 12px;
+    color: #6b7280; /* うすいグレーの文字 */
+  }
+
   /* ボタンの短い文字は、ふだんは見せない（演奏モード） */
   .short {
     display: none;
   }
   /* 画面の幅が狭いとき（1140px 以下）：ボタンの文字を短くして、グループの間も少しつめる（演奏モード）
-     （1024px の幅（古い iPad・iPad mini の横向きなど）で、上のバーの右のボタンがはみ出さないようにするため） */
+     （1024px の幅（古い iPad・iPad mini の横向きなど）で、上のバーの右のボタンがはみ出さないようにするため）
+     ［書き出し ▾］はもともと短いので、そのまま（MP3 書き出しの手順1） */
   @media (max-width: 1140px) {
     .long {
       display: none;
