@@ -27,6 +27,7 @@
   // （［書き出し ▾］のメニューにまとめた手直し：メニューから印刷したときの案内の文のボタンの名前を直した）
   // （テンポの言葉を増やした手直し c：［文字…］で「急に遅く・急に速く・曲の頭へ」を付けるときは、範囲を選んでいても
   //   範囲の頭の小節だけに付け、点線は引かない（再生でも、その小節の頭で急に変わるだけなので））
+  // （テンポの言葉を増やした手直し d：「小節」タブ・「楽譜の設定」タブの［♩= を出さない］を、テンポ変更・1小節目のテンポに反映する）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -1761,6 +1762,13 @@
       return;
     }
 
+    // ♩＝ を出さない（1小節目のテンポ）："true" か "false" で届く（テンポの言葉を増やした手直し d）
+    // （出すときは印を消す。setTempoChange と同じく、1小節目の印は score.tempoHidden に持つ）
+    if (field === "tempoHidden") {
+      commit(setTempoChange(score, 0, score.tempo, score.tempoText ?? "", trimmed === "true"));
+      return;
+    }
+
     if (field === "title") {
       // タイトル：空にしたら「無題」に戻す
       commit(setScoreInfo(score, "title", trimmed === "" ? "無題" : trimmed));
@@ -1940,7 +1948,8 @@
   //   wordText  … 速度記号の文字（空でもよい）
   // 1小節目なら、「楽譜の設定」のテンポ・速度記号が変わる
   // ----------------------------------------------------------
-  function handleTempoChange(tempoText, wordText) {
+  // （テンポの言葉を増やした手直し d：3つ目の hidden で、♩＝ を出さないかも受け取る）
+  function handleTempoChange(tempoText, wordText, hidden = false) {
     if (tempoMeasure === null) return;
     message = "";
     const trimmed = String(tempoText).trim();
@@ -1951,7 +1960,7 @@
     }
     // commit で範囲選択が消えるので、覚えておいて元に戻す（テンポを変えても音の並びは変わらないので、範囲はずれない）
     const end = rangeEnd;
-    commit(setTempoChange(score, tempoMeasure, tempo, wordText.trim()));
+    commit(setTempoChange(score, tempoMeasure, tempo, wordText.trim(), hidden));
     rangeEnd = end;
   }
 

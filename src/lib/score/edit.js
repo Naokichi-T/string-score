@@ -8,6 +8,7 @@
 // こうしておくと、
 //   ・画面の描き直しが確実に起きる（新しいデータに入れ替わるので）
 //   ・「元に戻す」のために、前の楽譜データをそのまま取っておける
+// （テンポの言葉を増やした手直し d：setTempoChange で「♩＝ を出さない」印 tempoHidden も変えられるようにし、小節を消すときも印を移す）
 // ==========================================================
 
 import {
@@ -1732,18 +1733,23 @@ export function setScoreInfo(score, field, value) {
 //   i         … 何小節目か（0 から）
 //   tempo     … ♩＝○○ の数字（20〜300 のチェックは呼ぶ側で済ませておく）
 //   tempoText … 速度記号（"Andante" など。なければ空の文字）
-// 1小節目（i が 0）なら、楽譜全体のテンポ（score.tempo・score.tempoText）を変える
+//   tempoHidden … true なら、楽譜に ♩＝○○ を出さず、速度記号の文字だけ出す（テンポの言葉を増やした手直し d）
+// 1小節目（i が 0）なら、楽譜全体のテンポ（score.tempo・score.tempoText・score.tempoHidden）を変える
 // 戻り値：新しい楽譜データ（今のテンポと同じなら元の楽譜データのまま）
 // ----------------------------------------------------------
-export function setTempoChange(score, i, tempo, tempoText) {
+export function setTempoChange(score, i, tempo, tempoText, tempoHidden = false) {
   // 今のテンポ（前の小節から続いているものも含む）と同じなら、何もしない
+  // （テンポの言葉を増やした手直し d：♩＝ を出さない印も比べる）
   const now = tempoAt(score, i);
-  if (now.tempo === tempo && now.tempoText === tempoText) return score;
+  if (now.tempo === tempo && now.tempoText === tempoText && now.tempoHidden === tempoHidden) return score;
 
   const newScore = cloneScore(score);
   if (i === 0) {
     newScore.tempo = tempo;
     newScore.tempoText = tempoText;
+    // ♩＝ を出さない印（出すときは、印を消しておく）（テンポの言葉を増やした手直し d）
+    if (tempoHidden) newScore.tempoHidden = true;
+    else delete newScore.tempoHidden;
   } else {
     newScore.measures[i].tempo = tempo;
     if (tempoText) {
@@ -1751,6 +1757,9 @@ export function setTempoChange(score, i, tempo, tempoText) {
     } else {
       delete newScore.measures[i].tempoText; // 速度記号なし
     }
+    // ♩＝ を出さない印（テンポの言葉を増やした手直し d）
+    if (tempoHidden) newScore.measures[i].tempoHidden = true;
+    else delete newScore.measures[i].tempoHidden;
   }
   return newScore;
 }
@@ -1766,6 +1775,7 @@ export function removeTempoChange(score, i) {
   const newScore = cloneScore(score);
   delete newScore.measures[i].tempo;
   delete newScore.measures[i].tempoText;
+  delete newScore.measures[i].tempoHidden; // ♩＝ を出さない印も消す（テンポの言葉を増やした手直し d）
   return newScore;
 }
 
@@ -2343,6 +2353,7 @@ export function deleteMeasures(score, from, to) {
     if (nextInfo.tempo === undefined && (from === 0 || tempoAt(newScore, from - 1).tempo !== tempoAfter.tempo || tempoAt(newScore, from - 1).tempoText !== tempoAfter.tempoText)) {
       nextInfo.tempo = tempoAfter.tempo;
       if (tempoAfter.tempoText) nextInfo.tempoText = tempoAfter.tempoText;
+      if (tempoAfter.tempoHidden) nextInfo.tempoHidden = true; // ♩＝ を出さない印も移す（テンポの言葉を増やした手直し d）
     }
     // 音部記号：パートごとに同じ考え方
     newScore.parts.forEach((part) => {
@@ -2373,8 +2384,12 @@ export function deleteMeasures(score, from, to) {
   if (firstInfo.tempo !== undefined) {
     newScore.tempo = firstInfo.tempo;
     newScore.tempoText = firstInfo.tempoText ?? "";
+    // ♩＝ を出さない印も移す（テンポの言葉を増やした手直し d）
+    if (firstInfo.tempoHidden) newScore.tempoHidden = true;
+    else delete newScore.tempoHidden;
     delete firstInfo.tempo;
     delete firstInfo.tempoText;
+    delete firstInfo.tempoHidden;
   }
   // ③-3 片方の端だけ消された rit.・accel. を外す（残っている組だけで、印を付け直す）（ステップ11-6b）
   setGradualMarks(newScore.measures, gradualRanges(newScore.measures));

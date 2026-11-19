@@ -16,6 +16,8 @@
   // （テンポの言葉を増やした手直し c：［文字…］の「再生では」のボタンに「急に遅く・急に速く・曲の頭へ」を足し、
   //   今の「遅くする・速くする」は「だんだん遅く・だんだん速く」に名前を変えた。文字の候補も増やした。
   //   文字を打ったときは、言葉の表で当たった種類（急に速く など）のボタンを自動で選ぶ）
+  // （テンポの言葉を増やした手直し d：テンポの欄に［♩= を出さない］のチェックを足した。
+  //   チェックして［変える］を押すと、楽譜には速度記号の文字だけ出す（再生は数字どおり）。速度記号が空のときは押せない）
   // ==========================================================
   import { tick } from "svelte"; // 親が楽譜を変えるのを待つ（途中の短い小節）
   import { KEY_CHOICES, describeLength } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）、長さの文字（半拍刻みに対応）
@@ -34,9 +36,11 @@
   //   onkey       … 調を選んだときに呼ぶ関数（新しい調の数字を渡す）
   //   currentClef … 選んでいるパート・小節の音部記号（何も選んでいないときは null。ボタンを青くするのに使う）
   //   onclef      … 音部記号のボタンが押されたときに呼ぶ関数（"treble"・"alto"・"tenor"・"bass" を渡す）
-  //   currentTempo … 選んでいる小節のテンポ { measure, tempo, tempoText, isChange }（何も選んでいないときは null）（ステップ11-6a）
+  //   currentTempo … 選んでいる小節のテンポ { measure, tempo, tempoText, tempoHidden, isChange }（何も選んでいないときは null）（ステップ11-6a）
+  //                  （テンポの言葉を増やした手直し d：tempoHidden（♩＝ を出さない印）も入る）
   //                  isChange … その小節でテンポが変わっているか（true なら［元に戻す］を押せる）
   //   ontempo      … ［変える］が押されたときに呼ぶ関数（数字の文字と、速度記号の文字を渡す）（ステップ11-6a）
+  //                  （テンポの言葉を増やした手直し d：3つ目に、♩＝ を出さないか（true・false）も渡す）
   //   onremovetempo … ［元に戻す］が押されたときに呼ぶ関数（ステップ11-6a）
   //   currentGradual … 選んでいる小節（範囲なら最初の小節）の rit.・accel.・a tempo（ボタンを青くするのに使う）（ステップ11-6b）
   //                    { gradual: その小節から始まる "rit" か "accel"（なければ null）, aTempo: a tempo が付いているか }
@@ -116,11 +120,14 @@
   // テンポの欄に入っている文字（ステップ11-6a）
   let tempoNumber = $state("");
   let tempoWord = $state("");
+  // ［♩= を出さない］のチェック（テンポの言葉を増やした手直し d）
+  let tempoHidden = $state(false);
 
   // 選んでいる小節が変わったら（テンポが変わったときも）、欄の中身を、その小節の今のテンポにする（ステップ11-6a）
   $effect(() => {
     tempoNumber = currentTempo ? String(currentTempo.tempo) : "";
     tempoWord = currentTempo ? currentTempo.tempoText : "";
+    tempoHidden = currentTempo ? !!currentTempo.tempoHidden : false; // （テンポの言葉を増やした手直し d）
   });
 
   // ===== 自由な文字のテンポの指示（rall.・allargando など） =====
@@ -270,12 +277,21 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：applyTempo
+  // ［変える］が押されたとき（欄で Enter を押したときも）：数字・速度記号・♩＝ を出さないか を親に渡す（テンポの言葉を増やした手直し d）
+  // 速度記号が空なら、♩＝ を出さないチェックは外したことにする（文字がないと、楽譜に何も出なくなるため）
+  // ----------------------------------------------------------
+  function applyTempo() {
+    ontempo(tempoNumber, tempoWord, tempoHidden && tempoWord.trim() !== "");
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleTempoKeydown
   // テンポの欄で Enter が押されたら、［変える］と同じことをする（ステップ11-6a）
   // （日本語の変換を決めるための Enter では動かないようにする）
   // ----------------------------------------------------------
   function handleTempoKeydown(event) {
-    if (event.key === "Enter" && !event.isComposing) ontempo(tempoNumber, tempoWord);
+    if (event.key === "Enter" && !event.isComposing) applyTempo();
   }
 
   // よく使う拍子（ボタンにして並べる）
@@ -485,7 +501,12 @@
       </datalist>
       <span class="label">♩＝</span>
       <input class="tempo-number" type="number" min="20" max="300" step="1" bind:value={tempoNumber} disabled={!currentTempo} onkeydown={handleTempoKeydown} title="テンポ（20〜300）" />
-      <button disabled={!currentTempo} onclick={() => ontempo(tempoNumber, tempoWord)} title="選んでいる小節の頭から、テンポを変える（範囲を選んでいるときは、範囲の最初の小節から）"> 変える </button>
+      <!-- ♩= を出さない（速度記号の文字だけ出す）（テンポの言葉を増やした手直し d） -->
+      <label class="hide-metronome" title="楽譜に ♩＝○○ を出さず、速度記号の文字だけ出す（再生は数字どおり）。速度記号が空のときは使えない。チェックしたら［変える］を押す">
+        <input type="checkbox" bind:checked={tempoHidden} disabled={!currentTempo || tempoWord.trim() === ""} />
+        ♩= を出さない
+      </label>
+      <button disabled={!currentTempo} onclick={applyTempo} title="選んでいる小節の頭から、テンポを変える（範囲を選んでいるときは、範囲の最初の小節から）"> 変える </button>
       <button disabled={!currentTempo?.isChange} onclick={() => onremovetempo()} title="選んでいる小節のテンポ変更を消す（前の小節のテンポが続く）"> 元に戻す </button>
     </div>
 
@@ -695,6 +716,20 @@
   }
   .tempo-word {
     width: 96px; /* 後で直す候補の手直し：110px → 96px につめた（「速度記号」の文字は入る） */
+  }
+  /* ［♩= を出さない］のチェック（テンポの言葉を増やした手直し d） */
+  .hide-metronome {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    white-space: nowrap; /* 文字を途中で折り返さない */
+    cursor: pointer;
+  }
+  .hide-metronome input {
+    width: 18px; /* 指で押しやすい大きさ */
+    height: 18px;
+    margin: 0;
   }
   .tempo-number {
     width: 64px;

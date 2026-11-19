@@ -1,6 +1,7 @@
 // ==========================================================
 // model.js
 // 楽譜データの「形」の説明と、表示・計算に使う表をまとめたファイル
+// （テンポの言葉を増やした手直し d：テンポに「♩＝ を出さない」印 tempoHidden を足した（tempoAt・showsMetronome））
 // ==========================================================
 //
 // 【楽譜データの形】
@@ -9,6 +10,9 @@
 //   composer: '作曲者',
 //   tempoText: 'Allegro',            // 速度記号（なければ空の文字）
 //   tempo: 80,                       // ♩＝80
+//   tempoHidden: true,               // 楽譜に ♩＝80 を出さず、速度記号の文字だけ出す（なければ出す）（テンポの言葉を増やした手直し d）
+//                                    // （速度記号の文字がないときは、印があっても ♩＝ を出す）
+//                                    // 途中のテンポ変更（measures[i].tempo）にも、同じ印 measures[i].tempoHidden を書ける
 //   measures: [                      // 楽譜全体の小節の情報（全パート共通）
 //     { time: { beats: 4, beatType: 4 }, key: 0 }, // 拍子・調が変わる小節だけ書く
 //     {}                                           // 変更なしの小節は空
@@ -511,14 +515,27 @@ export function timeAt(score, i) {
 // i 小節目（0 から数える）のテンポを返す（ステップ11-6a）
 // テンポが変わる小節には measures[i].tempo（と、あれば tempoText）が書いてある
 // 1小節目のテンポは、楽譜全体の score.tempo・score.tempoText（「楽譜の設定」タブで変えるもの）
-// 戻り値：{ tempo: ♩＝○○ の数字, tempoText: 速度記号（なければ空の文字） }
+// 戻り値：{ tempo: ♩＝○○ の数字, tempoText: 速度記号（なければ空の文字）, tempoHidden: ♩＝ を出さない印 }
+// （テンポの言葉を増やした手直し d：♩＝ を出さない印 tempoHidden も返すようにした（なければ false））
 // ----------------------------------------------------------
 export function tempoAt(score, i) {
   for (let k = i; k >= 1; k--) {
     const info = score.measures[k];
-    if (info.tempo !== undefined) return { tempo: info.tempo, tempoText: info.tempoText ?? "" };
+    if (info.tempo !== undefined) return { tempo: info.tempo, tempoText: info.tempoText ?? "", tempoHidden: !!info.tempoHidden };
   }
-  return { tempo: score.tempo, tempoText: score.tempoText ?? "" };
+  return { tempo: score.tempo, tempoText: score.tempoText ?? "", tempoHidden: !!score.tempoHidden };
+}
+
+// ----------------------------------------------------------
+// 関数：showsMetronome
+// テンポの ♩＝○○ を楽譜に出すかを返す（テンポの言葉を増やした手直し d）
+// 「♩＝ を出さない」の印があって、速度記号の文字もあるときだけ出さない
+// （文字がないのに出さないと、楽譜に何も書かれず、速さが変わることが分からなくなるため）
+//   tempo … tempoAt の結果（か、楽譜データ）{ tempoText, tempoHidden }
+// 戻り値：出すなら true
+// ----------------------------------------------------------
+export function showsMetronome(tempo) {
+  return !(tempo.tempoHidden && tempo.tempoText);
 }
 
 // ----------------------------------------------------------

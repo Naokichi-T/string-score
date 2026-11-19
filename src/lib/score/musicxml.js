@@ -46,6 +46,7 @@
 // 【連符の書き方】（ステップ10-5）
 //   連符の音には <time-modification>（3連符なら「2個分に3個」）を書く
 //   連符の最初の音に <tuplet type="start">、最後の音に <tuplet type="stop"> を書く（<notations> の中）
+// （テンポの言葉を増やした手直し d：「♩＝ を出さない」テンポは <metronome> を書かない。急に遅く・急に速く・曲の頭へ も id に書き、鳴る速さを <sound tempo> にも書く）
 // ==========================================================
 
 import {
@@ -66,6 +67,7 @@ import {
   measureNumber,
   isContinuation, // 続きの小節か（途中の短い小節）
   measureOffset,
+  showsMetronome, // ♩＝ を楽譜に出すか（テンポの言葉を増やした手直し d）
 } from "./model.js";
 import { measureBeamGroups, beamXmlValues } from "./beams.js"; // 連桁のつなぎ方（ステップ19-2）
 import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き（ステップ22）
@@ -73,6 +75,7 @@ import { measureStemDirections } from "./stems.js"; // 決めた符尾の向き�
 import { computeAccidentals, needsGraceAccidental } from "./accidentals.js"; // needsGraceAccidental：前打音に臨時記号を書くか（注意の臨時記号）
 import { BOWINGS, ARTICULATIONS, STRING_MARKS, BREATHS, ORNAMENTS, FERMATA, GLISSANDO, TECHNIQUES, DYNAMICS, ARPEGGIO } from "./symbols.js";
 import { GRADUAL_ID_PREFIX } from "./tempoWords.js"; // rit.・自由な文字の <direction> に付ける id の始まり（自由な文字のテンポの指示）
+import { suddenTempoRate } from "./tempoWords.js"; // 急に速く・急に遅く の倍率（鳴る速さを <sound tempo> に書くため）（テンポの言葉を増やした手直し d）
 
 // 4分音符1つ分のティック
 const QUARTER_TICKS = 4 * TICKS_PER_16TH;
@@ -300,8 +303,10 @@ function tempoMarksXml(score, i) {
   // （自由な文字のテンポの指示：<direction> に id（例：string-score-gradual-rit-7）を付けて、再生での扱いを書いておく。
   //   ほかのアプリは id を気にしないので、ふつうの文字として読む。このアプリと音程チェックアプリは id を見て、
   //   言葉の表にない文字（dolce など）や、自分で選んだ扱い（allargando を「速くする」など）もそのまま読み直せる）
+  // （テンポの言葉を増やした手直し d：急に遅く・急に速く・曲の頭へ（slower・faster・tempoPrimo）も、同じ形で id に書く。
+  //   この3つは、ほかのアプリでも同じ速さで鳴るように、その小節で鳴る速さを <sound tempo> にも書く）
   if (info.gradual) {
-    const text = info.gradualText ?? (info.gradual === "rit" ? "rit." : "accel.");
+    const text = info.gradualText ?? DEFAULT_GRADUAL_TEXTS[info.gradual] ?? info.gradual;
     lines.push(`      <direction placement="above" id="${GRADUAL_ID_PREFIX}${info.gradual}-${i + 1}">`);
     lines.push("        <direction-type>");
     lines.push(`          <words font-style="italic">${escapeXml(text)}</words>`);
@@ -311,9 +316,48 @@ function tempoMarksXml(score, i) {
       lines.push(`          <dashes type="start" number="1"/>`);
       lines.push("        </direction-type>");
     }
+    // 急に変わる・曲の頭へ：その小節で鳴る速さ（テンポの言葉を増やした手直し d）
+    if (SUDDEN_KINDS.includes(info.gradual)) {
+      lines.push(`        <sound tempo="${soundingTempoAt(score, i)}"/>`);
+    }
     lines.push("      </direction>");
   }
   return lines;
+}
+
+// 自由な文字がないときに書く文字（ふつうは文字があるので使わない。念のため）（テンポの言葉を増やした手直し d）
+const DEFAULT_GRADUAL_TEXTS = { rit: "rit.", accel: "accel.", slower: "Meno mosso", faster: "Più mosso", tempoPrimo: "Tempo I" };
+
+// その小節の頭で、急に速さが変わる扱い（鳴る速さを <sound tempo> に書く）（テンポの言葉を増やした手直し d）
+const SUDDEN_KINDS = ["slower", "faster", "tempoPrimo"];
+
+// ----------------------------------------------------------
+// 関数：soundingTempoAt
+// i 小節目の頭で鳴る速さ（♩＝○○ の数字）を計算する（テンポの言葉を増やした手直し d）
+// 再生（playback.js の makeTempoWarp）と同じ決め方で、1小節目から順にたどる（くり返しはたどらない）
+//   ・♩＝ の変更        … その数字にして、急に変わった分を 1 に戻す
+//   ・曲の頭へ           … 1小節目の ♩＝ にして、急に変わった分を 1 に戻す
+//   ・急に速く・急に遅く … 急に変わった分に倍率をかける（rit.・accel. の分は、ここで 1 に戻るので数えない）
+//   score … 楽譜データ
+//   i     … 何小節目か（0 から）
+// 戻り値：鳴る速さ（整数に丸めたもの）
+// ----------------------------------------------------------
+function soundingTempoAt(score, i) {
+  let tempo = score.tempo;
+  let sudden = 1;
+  for (let k = 0; k <= i; k++) {
+    const info = score.measures[k];
+    if (k > 0 && info.tempo !== undefined) {
+      tempo = info.tempo;
+      sudden = 1;
+    }
+    if (info.gradual === "tempoPrimo") {
+      tempo = score.tempo;
+      sudden = 1;
+    }
+    if (info.gradual === "faster" || info.gradual === "slower") sudden = sudden * suddenTempoRate(info.gradual, info.gradualText ?? "");
+  }
+  return Math.round(tempo * sudden);
 }
 
 // ----------------------------------------------------------
@@ -416,6 +460,9 @@ function jumpEndXml(info) {
 // ----------------------------------------------------------
 // 関数：tempoXml
 // テンポ（速度記号と ♩ = ○○）の <direction> を作る（1小節目の一番上のパートにだけ書く）
+// （テンポの言葉を増やした手直し d：「♩＝ を出さない」テンポなら、<metronome>（♩＝ の表示）を書かず、
+//   速度記号の文字と、再生の速さ <sound tempo> だけを書く。MuseScore などでも、文字だけが出て同じ速さで鳴る）
+//   score … 楽譜データ、または tempoAt の結果 { tempo, tempoText, tempoHidden }
 // 戻り値：XML の行の配列
 // ----------------------------------------------------------
 function tempoXml(score) {
@@ -427,13 +474,15 @@ function tempoXml(score) {
     lines.push(`          <words font-weight="bold">${escapeXml(score.tempoText)}</words>`);
     lines.push("        </direction-type>");
   }
-  // ♩ = ○○ の表示
-  lines.push("        <direction-type>");
-  lines.push("          <metronome>");
-  lines.push("            <beat-unit>quarter</beat-unit>");
-  lines.push(`            <per-minute>${score.tempo}</per-minute>`);
-  lines.push("          </metronome>");
-  lines.push("        </direction-type>");
+  // ♩ = ○○ の表示（♩＝ を出さないテンポでは書かない）（テンポの言葉を増やした手直し d）
+  if (showsMetronome(score)) {
+    lines.push("        <direction-type>");
+    lines.push("          <metronome>");
+    lines.push("            <beat-unit>quarter</beat-unit>");
+    lines.push(`            <per-minute>${score.tempo}</per-minute>`);
+    lines.push("          </metronome>");
+    lines.push("        </direction-type>");
+  }
   // 再生の速さ（表示とは別に、ほかのアプリが再生するときの速さ）
   lines.push(`        <sound tempo="${score.tempo}"/>`);
   lines.push("      </direction>");

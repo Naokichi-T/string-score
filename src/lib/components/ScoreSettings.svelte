@@ -10,6 +10,7 @@
   // （ステップ20：「小節の長さ」の欄（アウフタクト・最後の小節）を追加。アウフタクトは「小節」タブから移した）
   // （小節の長さの自動判断：「小節の長さ」の欄を消した。どの小節の長さも「小節」タブの「長さ」の欄で変える）
   // （X枚に収める b：「PDF を何枚に収めるか」の欄を追加。選んだ枚数は楽譜ごとに覚える（保存は親がする））
+  // （テンポの言葉を増やした手直し d：テンポの横に［♩= を出さない］のチェックを足した（押したらすぐ変える。速度記号が空のときは押せない））
   // ==========================================================
   import { tick, onMount } from "svelte";
   import { keyAt, KEY_CHOICES } from "#lib/score/model.js"; // 1小節目の調・調の一覧（ステップ17-1）
@@ -19,6 +20,7 @@
   //   score      … 楽譜データ（入力欄に今の値を出すのに使う）
   //   onsettings … 確定したときに呼ぶ関数（項目の名前と、入力された文字を渡す）
   //                例：onsettings("title", "春の歌")、onsettings("tempo", "120")
+  //                （テンポの言葉を増やした手直し d：onsettings("tempoHidden", "true") のように、♩＝ を出さないか も渡す）
   //   focusTitle … true なら、出てきたときにタイトルの入力欄にカーソルを入れて、文字を全部選ぶ（ステップ7-3）
   //   ontranspose … ［移調する］が押されたときに呼ぶ関数（行き先の調と向きを渡す）（ステップ17-1）
   //                 例：ontranspose(4, "nearest")
@@ -253,6 +255,13 @@
     <input class="number" type="number" min="20" max="300" step="1" value={score.tempo} onchange={(event) => handleChange("tempo", event)} onkeydown={handleKeydown} />
   </label>
 
+  <!-- ♩= を出さない（1小節目のテンポ。楽譜には速度記号の文字だけ出す）（テンポの言葉を増やした手直し d） -->
+  <!-- 押したらすぐ変える。速度記号が空のときは押せない（文字がないと、楽譜に何も出なくなるため） -->
+  <label class="hide-metronome" title="楽譜に ♩＝○○ を出さず、速度記号の文字だけ出す（再生は数字どおり）。速度記号が空のときは使えない">
+    <input type="checkbox" checked={!!score.tempoHidden} disabled={!score.tempoText} onchange={(event) => onsettings("tempoHidden", event.currentTarget.checked ? "true" : "false")} />
+    ♩= を出さない
+  </label>
+
   <!-- 移調（楽譜全体。全パート・全小節を動かして、調号も変える）（ステップ17-1） -->
   <div class="transpose">
     <span class="heading">移調</span>
@@ -311,6 +320,18 @@
     border: 1px solid #ccc;
     border-radius: 4px;
     box-sizing: border-box;
+  }
+  /* ［♩= を出さない］のチェック（テンポの言葉を増やした手直し d）：上の input の高さ・枠を、チェックの箱には付けない */
+  .hide-metronome {
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .hide-metronome input {
+    width: 18px; /* 指で押しやすい大きさ */
+    height: 18px;
+    padding: 0;
+    margin: 0;
   }
   .text {
     width: 200px;
