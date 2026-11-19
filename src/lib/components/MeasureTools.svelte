@@ -13,6 +13,9 @@
   // （自由な文字のテンポの指示：［文字…］のボタンと、文字を入れる欄を追加）
   // （途中の短い小節：選んでいる小節の「長さ」の欄を追加（前の部分・続き））
   // （小節の長さの自動判断：「長さ」の欄は長さだけを選ぶ形にした。番号に数えるかどうかはアプリが決めて、欄の右に出す）
+  // （テンポの言葉を増やした手直し c：［文字…］の「再生では」のボタンに「急に遅く・急に速く・曲の頭へ」を足し、
+  //   今の「遅くする・速くする」は「だんだん遅く・だんだん速く」に名前を変えた。文字の候補も増やした。
+  //   文字を打ったときは、言葉の表で当たった種類（急に速く など）のボタンを自動で選ぶ）
   // ==========================================================
   import { tick } from "svelte"; // 親が楽譜を変えるのを待つ（途中の短い小節）
   import { KEY_CHOICES, describeLength } from "#lib/score/model.js"; // 調の一覧（ステップ17-1）、長さの文字（半拍刻みに対応）
@@ -123,12 +126,47 @@
   // ===== 自由な文字のテンポの指示（rall.・allargando など） =====
 
   // 文字の候補（入力欄に文字を入れると、前が同じ候補が出る）
-  const GRADUAL_WORDS = ["rall.", "allarg.", "allargando", "ritenuto", "poco rit.", "molto rit.", "poco a poco rit.", "calando", "morendo", "smorzando", "stringendo", "poco a poco accel."];
+  // （テンポの言葉を増やした手直し c：Più mosso・Tempo I などを足した）
+  const GRADUAL_WORDS = [
+    // だんだん遅く・だんだん速く
+    "rall.",
+    "allarg.",
+    "allargando",
+    "ritenuto",
+    "poco rit.",
+    "molto rit.",
+    "poco a poco rit.",
+    "calando",
+    "morendo",
+    "smorzando",
+    "stringendo",
+    "poco a poco accel.",
+    "animando",
+    // 急に速く・急に遅く（テンポの言葉を増やした手直し c）
+    "Più mosso",
+    "poco più mosso",
+    "Meno mosso",
+    "poco meno mosso",
+    "Più lento",
+    "Largamente",
+    "stretto",
+    // 曲の頭の速さに戻す（テンポの言葉を増やした手直し c）
+    "Tempo I",
+    "Tempo primo",
+    // 速さは変えない（テンポの言葉を増やした手直し c）
+    "l'istesso tempo",
+    "rubato",
+  ];
 
   // 再生での扱いのボタン（type は、楽譜データの gradual に入れるもの）
   const GRADUAL_EFFECTS = [
-    { type: "rit", name: "遅くする", title: "再生では、rit. と同じように、だんだん遅くする" },
-    { type: "accel", name: "速くする", title: "再生では、accel. と同じように、だんだん速くする" },
+    // （テンポの言葉を増やした手直し c：「遅くする・速くする」の名前を「だんだん遅く・だんだん速く」に変え、
+    //   「急に遅く・急に速く・曲の頭へ」を足した）
+    { type: "rit", name: "だんだん遅く", title: "再生では、rit. と同じように、だんだん遅くする" },
+    { type: "accel", name: "だんだん速く", title: "再生では、accel. と同じように、だんだん速くする" },
+    { type: "slower", name: "急に遅く", title: "再生では、付けた小節の頭から急に遅くする（Meno mosso など。poco なら少し、molto なら大きく）" },
+    { type: "faster", name: "急に速く", title: "再生では、付けた小節の頭から急に速くする（Più mosso など。poco なら少し、molto なら大きく）" },
+    { type: "tempoPrimo", name: "曲の頭へ", title: "再生では、付けた小節の頭から、曲の頭の速さ（1小節目の ♩=）に戻す（Tempo I など）" },
     { type: "none", name: "変えない", title: "再生では、速さを変えない（文字を書くだけ）" },
   ];
 
@@ -183,17 +221,19 @@
   // 関数：handleGradualInput
   // 文字を打つたびに呼ぶ：自分で扱いを選んでいなければ、言葉の表から再生での扱いを自動で選ぶ
   // （表にない言葉は「変えない」）
+  // （テンポの言葉を増やした手直し c：だんだん遅く・速く だけでなく、急に遅く・急に速く・曲の頭へ も自動で選ぶ）
   // ----------------------------------------------------------
   function handleGradualInput() {
     if (effectChosen) return;
     const kind = tempoWordKind(gradualText);
-    gradualEffect = kind === "rit" || kind === "accel" ? kind : "none";
+    // ボタンにある種類ならそのボタン、それ以外（表にない言葉・a tempo）は「変えない」
+    gradualEffect = GRADUAL_EFFECTS.some((effect) => effect.type === kind) ? kind : "none";
   }
 
   // ----------------------------------------------------------
   // 関数：chooseEffect
   // 再生での扱いのボタンが押されたとき：その扱いにして、あとは自動で変えないようにする
-  //   type … "rit"・"accel"・"none"
+  //   type … "rit"・"accel"・"slower"・"faster"・"tempoPrimo"・"none"（テンポの言葉を増やした手直し c：3つ増えた）
   // ----------------------------------------------------------
   function chooseEffect(type) {
     gradualEffect = type;

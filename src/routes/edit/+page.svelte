@@ -25,6 +25,8 @@
   // （ステップ27：付点の音（休符）を入れたら、付点のボタンを外す）
   // （MP3 書き出しの手順3：書き出しのメニューの［音声（MP3）］で、今の再生の設定どおりの音を MP3 にしてダウンロードする）
   // （［書き出し ▾］のメニューにまとめた手直し：メニューから印刷したときの案内の文のボタンの名前を直した）
+  // （テンポの言葉を増やした手直し c：［文字…］で「急に遅く・急に速く・曲の頭へ」を付けるときは、範囲を選んでいても
+  //   範囲の頭の小節だけに付け、点線は引かない（再生でも、その小節の頭で急に変わるだけなので））
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -1989,18 +1991,24 @@
   //          空の文字（""）なら、その小節から始まる範囲を外す（［外す］）
   //          自由な文字のときの type は、再生での扱い（"rit"・"accel"・"none"）
   //          範囲を選んでいれば範囲の終わりまで点線を引き、音1つなら文字だけ書く
+  //          （テンポの言葉を増やした手直し c：type に "slower"・"faster"・"tempoPrimo" も入る。
+  //            このときは範囲を選んでいても、範囲の頭の小節だけに付け、点線は引かない）
   // ----------------------------------------------------------
   function handleGradual(type, text = null) {
     if (tempoMeasure === null) return;
     message = "";
-    const to = range ? range.end.measure : tempoMeasure; // 範囲の終わりの小節
+    // 急に変わる・曲の頭へ の扱いか（範囲を作らず、頭の小節だけに付ける）（テンポの言葉を増やした手直し c）
+    const atHeadOnly = type === "slower" || type === "faster" || type === "tempoPrimo";
+    // 範囲の終わりの小節（急に変わる・曲の頭へ のときは、頭の小節だけ）
+    const to = range && !atHeadOnly ? range.end.measure : tempoMeasure;
     const end = rangeEnd;
     if (text === null) {
       commit(toggleGradual(score, tempoMeasure, to, type));
     } else if (text.trim() === "") {
       commit(removeGradual(score, tempoMeasure));
     } else {
-      commit(setGradualText(score, tempoMeasure, to, text, type, range !== null));
+      // 点線を引くのは、範囲を選んでいて、だんだん変わる（か、変えない）扱いのときだけ
+      commit(setGradualText(score, tempoMeasure, to, text, type, range !== null && !atHeadOnly));
     }
     rangeEnd = end;
   }
