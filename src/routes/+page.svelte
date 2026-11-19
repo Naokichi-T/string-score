@@ -6,6 +6,8 @@
   // （ステップ7-3：［＋ 新しい楽譜］で楽器の数を選んで作る）
   // （ステップ8-3：［MusicXML を読み込む］で、ファイルから新しい楽譜を作る）
   // （ステップ23：いちばん下に、姉妹アプリ「バイオリン音程チェック」の紹介を追加）
+  // （姉妹アプリの紹介にビオラ版を追加：同じ青い枠の中に、バイオリン版 → ビオラ版の順に上下に並べる）
+  // （［書き出し ▾］のメニューにまとめた手直し：使い方の文の［PDF 出力］［MusicXML 書き出し］を、今のボタンの名前に直した）
   // ==========================================================
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
@@ -245,14 +247,14 @@
       </li>
       <li>
         <span class="step-title">書き出す</span>
-        <span class="step-text">［PDF 出力］で印刷用の楽譜に、［MusicXML 書き出し］でほかの楽譜アプリで開けるファイルにします。</span>
+        <span class="step-text">上のバーの［書き出し ▾］から、［PDF（印刷）］で印刷用の楽譜に、［MusicXML］でほかの楽譜アプリで開けるファイルにします。</span>
       </li>
     </ol>
 
     <!-- 保存についての注意（楽譜をなくさないように） -->
     <div class="notice">
       <p class="notice-title">⚠ 楽譜はこのブラウザの中に自動で保存されます</p>
-      <p>ほかの端末・ほかのブラウザでは見られません。ブラウザのデータを消すと楽譜も消えるので、大事な楽譜は［MusicXML 書き出し］でファイルにしておいてください。</p>
+      <p>ほかの端末・ほかのブラウザでは見られません。ブラウザのデータを消すと楽譜も消えるので、大事な楽譜は［書き出し ▾］→［MusicXML］でファイルにしておいてください。</p>
     </div>
 
     <!-- Q&A のページへのリンク（ステップ17-5） -->
@@ -260,12 +262,25 @@
   </section>
 
   <!-- 姉妹アプリの紹介（ステップ23） -->
+  <!-- （ビオラ版を追加：1つの青い枠の中に、見出し1つと、アプリごとの小さなまとまり（.sister-item）を上下に並べる） -->
   <!-- target="_blank"：新しいタブで開く（楽譜作成アプリのタブはそのまま残す） -->
   <!-- rel="noopener"：開いた先のページから、このページを動かせないようにする（新しいタブで開くときの決まりごと） -->
   <section class="sister-app">
-    <p class="sister-title">🎻 バイオリンの音程練習に</p>
-    <p class="sister-text">弾いた音の高さが合っているかを判定するアプリです。チューナー・指板の図・メトロノームもあります（スマホ向け）。</p>
-    <a class="sister-link" href="https://violin-pitch.vercel.app/" target="_blank" rel="noopener">バイオリン音程チェックを開く →</a>
+    <p class="sister-title">🎻 音程練習のアプリ（姉妹アプリ）</p>
+
+    <!-- バイオリン版 -->
+    <div class="sister-item">
+      <p class="sister-name">バイオリン音程チェック</p>
+      <p class="sister-text">弾いた音の高さが合っているかを判定するアプリです。チューナー・指板の図・メトロノームもあります（スマホ向け）。</p>
+      <a class="sister-link" href="https://violin-pitch.vercel.app/" target="_blank" rel="noopener">バイオリン音程チェックを開く →</a>
+    </div>
+
+    <!-- ビオラ版（姉妹アプリの紹介にビオラ版を追加） -->
+    <div class="sister-item">
+      <p class="sister-name">ビオラ音程チェック</p>
+      <p class="sister-text">弾いた音の高さが合っているかを判定するアプリです。チューナー・指板の図・メトロノームもあります。楽譜はアルト記号・ト音記号・テノール記号で入力できます（スマホ向け）。</p>
+      <a class="sister-link" href="https://viola-pitch.vercel.app/" target="_blank" rel="noopener">ビオラ音程チェックを開く →</a>
+    </div>
   </section>
 </main>
 
@@ -471,6 +486,18 @@
     font-weight: bold;
     font-size: 15px;
     margin-bottom: 4px; /* 見出しと説明の間を少し空ける */
+  }
+  /* アプリごとのまとまり（姉妹アプリの紹介にビオラ版を追加） */
+  /* 2つ目からは、上にうすい青の線を引いて、前のアプリと区切る */
+  .sister-item + .sister-item {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #bfdbfe;
+  }
+  /* アプリの名前（見出しより少し小さい太字） */
+  .sister-name {
+    font-weight: bold;
+    color: #111;
   }
   .sister-text {
     color: #333;
