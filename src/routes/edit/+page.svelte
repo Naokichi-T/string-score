@@ -23,6 +23,7 @@
   // （ステップ24-1：前打音を1つの音として選べるようにする（クリック・← →）。選んだ前打音の高さ・♯♭♮・削除）
   // （ステップ24-2：前打音を選んで［重音］を入にすると、前打音に音を足す。前打音にも指番号を付けられる）
   // （ステップ27：付点の音（休符）を入れたら、付点のボタンを外す）
+  // （MP3 書き出しの手順3：書き出しのメニューの［音声（MP3）］で、今の再生の設定どおりの音を MP3 にしてダウンロードする）
   // ==========================================================
   import { onMount } from "svelte";
   import { page } from "$app/state";
@@ -36,6 +37,8 @@
   import PrintView from "#lib/components/PrintView.svelte";
   import PerformView from "#lib/components/PerformView.svelte"; // 楽譜だけを画面いっぱいに出す（演奏モード）
   import TabletGuide from "#lib/components/TabletGuide.svelte"; // タブレットでの使い方の窓（ステップ18-6）
+  import ExportAudioDialog from "#lib/components/ExportAudioDialog.svelte"; // MP3 を作っている間の窓（MP3 書き出しの手順3）
+  import { audioBufferToMp3, mp3FileName } from "#lib/audio/mp3.js"; // 音のデータを MP3 にする（MP3 書き出しの手順3）
   import {
     createEmptyScore,
     keyAt,
@@ -126,7 +129,8 @@
   import { tupletError, makeTuplet, removeTuplet, tupletResizeError, resizeInTuplet } from "#lib/score/tuplets.js"; // 連符の中の長さを変える（ステップ28）
   import { canBeamTogether, canUnbeam, beamTogether, unbeam } from "#lib/score/beams.js"; // 連桁を手でつなぐ・切る（ステップ19-1）
   import { stemState, canChangeStem, setStem } from "#lib/score/stems.js"; // 符尾の向きを決める（ステップ22）
-  import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime } from "#lib/audio/sound.js";
+  // renderEvents：鳴らさずに、曲を最後まで音のデータにする（MP3 書き出しの手順3）
+  import { playPitch, loadInstruments, isLoaded, playEvents, scheduleMore, stopPlayback, setSoundType, getPlaybackTime, renderEvents } from "#lib/audio/sound.js";
   import { buildEvents, secondsPerTick, isPizzAt, addCountIn, soundingPitches, noteSpanInMeasure } from "#lib/score/playback.js";
   import {
     loadScore,
@@ -2302,8 +2306,30 @@
   }
 
   // ----------------------------------------------------------
+  // 関数：downloadBlob
+  // ファイルのかたまり（Blob）を、決めた名前でダウンロードさせる
+  // （MP3 書き出しの手順3：handleExport の中にあった処理を、MP3 でも使えるように分けた。中身は今までと同じ）
+  //   blob     … ダウンロードさせるファイルのかたまり
+  //   fileName … 保存するときの名前（例："メヌエット.musicxml"）
+  // ----------------------------------------------------------
+  function downloadBlob(blob, fileName) {
+    // かたまりを指す一時的な URL を作り、見えないリンクを押したことにしてダウンロードさせる
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName; // download：開くのではなく、この名前で保存させる
+    document.body.appendChild(link); // ページに一度入れてから押す（入れないと名前が付かないブラウザがある）
+    link.click();
+    link.remove();
+
+    // 使い終わった一時的な URL を消す（メモリを空けるため）
+    // すぐ消すとダウンロードが始まる前に消えてしまうことがあるので、少し（1秒）待ってから消す
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ----------------------------------------------------------
   // 関数：handleExport
-  // ［MusicXML 書き出し］が押されたとき：今の楽譜を MusicXML のファイルにしてダウンロードする（ステップ8-1）
+  // 書き出しのメニューで［MusicXML］が押されたとき：今の楽譜を MusicXML のファイルにしてダウンロードする（ステップ8-1）
   // ファイルの名前は「タイトル.musicxml」
   // ----------------------------------------------------------
   function handleExport() {
@@ -2313,18 +2339,100 @@
     // 文字を「ファイルのかたまり（Blob）」にする（type は MusicXML のファイルの種類の名前）
     const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
 
-    // かたまりを指す一時的な URL を作り、見えないリンクを押したことにしてダウンロードさせる
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = musicXMLFileName(score.title); // download：開くのではなく、この名前で保存させる
-    document.body.appendChild(link); // ページに一度入れてから押す（入れないと名前が付かないブラウザがある）
-    link.click();
-    link.remove();
+    // ダウンロードさせる（MP3 書き出しの手順3：downloadBlob に分けた）
+    downloadBlob(blob, musicXMLFileName(score.title));
+  }
 
-    // 使い終わった一時的な URL を消す（メモリを空けるため）
-    // すぐ消すとダウンロードが始まる前に消えてしまうことがあるので、少し（1秒）待ってから消す
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // MP3 を作っている間の状態（作っていないときは null）（MP3 書き出しの手順3）
+  //   { stage: "render"（音を作っている）か "encode"（MP3 に変えている）, progress: MP3 に変える進み具合 0〜1 }
+  // null でないときは、ExportAudioDialog（作っている間の窓）を出す
+  let exportingAudio = $state(null);
+
+  // MP3 を作る回の番号（MP3 書き出しの手順3）
+  // 作り始めるたびと、［やめる］・Esc が押されたときに 1 増やす。
+  // 作っている途中で番号が変わっていたら「やめた（か、新しい回が始まった）」ので、その回の結果は捨てる
+  // （やめたあとすぐにもう一度押しても、前の回の作りかけがダウンロードされたり、新しい窓を閉じたりしないようにするため）
+  // 画面には出さないので、ふつうの変数にする
+  let exportAudioRun = 0;
+
+  // ----------------------------------------------------------
+  // 関数：handleExportAudio
+  // 書き出しのメニューで［音声（MP3）］が押されたとき：今の再生の設定どおりの音を MP3 にしてダウンロードする（MP3 書き出しの手順3）
+  // 流れ：
+  //   1. 再生中なら止める
+  //   2. 再生と同じように、鳴らす音の一覧を作る
+  //      ・1小節目から最後まで（楽譜のくり返し・D.C. はたどる。区間リピート・選んでいる範囲は気にしない）
+  //      ・「再生」タブの音量・ミュート・ソロ（mixer）、メトロノームの入・切、カウントインは今の設定どおり
+  //   3. 作っている間の窓を出して、sound.js の renderEvents で音のデータを作る
+  //   4. mp3.js の audioBufferToMp3 で MP3 に変える（進み具合を窓に出す）
+  //   5. 「タイトル.mp3」をダウンロードさせて、窓を閉じる
+  // 途中で［やめる］が押されたら、作りかけを捨てて窓を閉じる
+  // ----------------------------------------------------------
+  async function handleExportAudio() {
+    // 作っている途中なら、二重に作らない／再生できないとき（楽器の音の読み込み中など）は作らない
+    if (exportingAudio || !canPlay) return;
+    message = "";
+
+    // 1. 再生中なら止める
+    handleStop();
+
+    // 2. 鳴らす音の一覧を作る（playFrom と同じ作り方。1小節目から最後まで）
+    let result = buildEvents(score, 0, mixer);
+    let countInClicks = [];
+    if (metronome.countIn) {
+      result = addCountIn(result, score, 0, 0);
+      countInClicks = result.countInClicks;
+    }
+    const clicks = [...countInClicks, ...(metronome.on ? result.clicks : [])];
+    if (result.events.length === 0 && clicks.length === 0) {
+      message = "鳴らす音がありません（休符だけか、全部のパートが鳴らない設定です）";
+      return;
+    }
+    const tickSeconds = secondsPerTick(score.tempo);
+    // ファイルの名前は、始めたときのタイトルで決めておく
+    const fileName = mp3FileName(score.title);
+
+    // 3. 作っている間の窓を出して、音のデータを作る
+    exportAudioRun += 1;
+    const run = exportAudioRun; // この回の番号
+    const cancelled = () => run !== exportAudioRun; // この回が、やめられた（か、新しい回が始まった）か
+    exportingAudio = { stage: "render", progress: 0 };
+    try {
+      const buffer = await renderEvents(result.events, result.totalTicks, tickSeconds, clicks, metronome.volume);
+      if (cancelled()) return; // 作っている間にやめるように頼まれたら、捨てる
+
+      // 4. MP3 に変える（進み具合を窓に出す）
+      exportingAudio = { stage: "encode", progress: 0 };
+      const blob = await audioBufferToMp3(
+        buffer,
+        (progress) => {
+          if (!cancelled()) exportingAudio = { stage: "encode", progress: progress };
+        },
+        cancelled,
+      );
+      if (!blob || cancelled()) return; // 途中でやめたときは何もしない
+
+      // 5. ダウンロードさせる
+      downloadBlob(blob, fileName);
+    } catch (error) {
+      // 作れなかったとき（楽器の音を読み込めなかった など）：原因を調べるために記録を残して、知らせる
+      console.error("MP3 を作れませんでした", error);
+      if (!cancelled()) message = "MP3 を作れませんでした（もう一度試してください）";
+    } finally {
+      // うまくいっても・失敗しても、窓を閉じる
+      // （やめた回は、［やめる］のときにもう閉じている。新しい回の窓を閉じないように、この回のときだけ閉じる）
+      if (!cancelled()) exportingAudio = null;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 関数：handleCancelExportAudio
+  // 作っている間の窓で［やめる］・Esc が押されたとき：回の番号を進めて（＝今の回をやめた印）、窓を閉じる（MP3 書き出しの手順3）
+  // （音を作る計算そのものは途中で止められないので、終わったあとに結果を捨てる）
+  // ----------------------------------------------------------
+  function handleCancelExportAudio() {
+    exportAudioRun += 1;
+    exportingAudio = null;
   }
 
   // 印刷用のページを作っているか（true の間だけ PrintView を出す）（ステップ9）
@@ -2469,6 +2577,8 @@
     if (isPhone) return;
     // 演奏モードの間も何もしない（キーは演奏モードの部品が受け取る。見えない楽譜を変えないため）（演奏モード）
     if (performing) return;
+    // MP3 を作っている間も何もしない（Esc は窓が受け取る。作っている間に楽譜を変えないため）（MP3 書き出しの手順3）
+    if (exportingAudio) return;
 
     // Ctrl キー（Mac は ⌘ キー）を押しているか
     const command = event.ctrlKey || event.metaKey;
@@ -2636,6 +2746,7 @@
       onsoundtype={handleSoundType}
       onexport={handleExport}
       onprint={handlePrint}
+      onexportaudio={handleExportAudio}
       onperform={handlePerform}
       showHelp={isTablet}
       onhelp={() => (guideOpen = true)}
@@ -2769,6 +2880,11 @@
   <!-- タブレットでの使い方の窓（ステップ18-6） -->
   {#if guideOpen}
     <TabletGuide onclose={handleCloseGuide} />
+  {/if}
+
+  <!-- MP3 を作っている間の窓（MP3 書き出しの手順3） -->
+  {#if exportingAudio}
+    <ExportAudioDialog stage={exportingAudio.stage} progress={exportingAudio.progress} oncancel={handleCancelExportAudio} />
   {/if}
 
   <!-- 印刷用のページ（［PDF 出力］を押したときだけ出す。印刷の画面が閉じたら消す）（ステップ9） -->

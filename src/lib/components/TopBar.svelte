@@ -20,7 +20,9 @@
   //   ・メニューの外を押したとき・Esc を押したときも閉じる
   //   ・メニューを開いている間は、Space（再生）や矢印キー（音符の選択）などのキーは楽譜に効かせない
   //     （⌘P だけは今までどおり効かせる。メニューは閉じる）
-  //   ・あとで「音声（MP3）」の項目を足す予定（手順3）
+  // （MP3 書き出しの手順3：メニューに［音声（MP3）］を足した）
+  //   ・押すと onexportaudio を呼ぶ（今の再生の設定どおりの音を、MP3 のファイルにする）
+  //   ・再生できないとき（楽器の音の読み込み中・読み込めなかったとき）は、灰色にして押せないようにし、右に理由を書く
   // ==========================================================
 
   // 親から受け取るもの
@@ -40,6 +42,7 @@
   //   saveState  … 保存の状態（"saved"：保存済み、"error"：保存できなかった）
   //   onexport   … 書き出しのメニューで［MusicXML］が選ばれたときに呼ぶ関数（ステップ8-1）
   //   onprint    … 書き出しのメニューで［PDF（印刷）］が選ばれたときに呼ぶ関数（ステップ9）
+  //   onexportaudio … 書き出しのメニューで［音声（MP3）］が選ばれたときに呼ぶ関数（MP3 書き出しの手順3）
   //   onperform  … ［演奏モード］ボタンが押されたときに呼ぶ関数（演奏モード）
   //   showHelp   … ［？］を出すか（タブレットのときだけ true）（ステップ18-6）
   //   onhelp     … ［？］が押されたときに呼ぶ関数（ステップ18-6）
@@ -62,6 +65,7 @@
     saveState = "saved",
     onexport = () => {},
     onprint = () => {},
+    onexportaudio = () => {},
     onperform = () => {},
   } = $props();
 
@@ -70,6 +74,12 @@
 
   // ［書き出し ▾］のボタンとメニューを包んでいる枠（メニューの外が押されたかを調べるのに使う）
   let exportMenuArea = $state(null);
+
+  // ［音声（MP3）］の右に書く文字（MP3 書き出しの手順3）
+  // 作れるときはファイルの種類、作れないときはその理由
+  //   ・電子音なら、いつでも作れる（canPlay が true）
+  //   ・楽器の音で、読み込み中なら「音を読み込み中」、読み込めなかったら「音を読み込めません」
+  let audioHint = $derived(canPlay ? ".mp3" : soundState === "error" ? "音を読み込めません" : "音を読み込み中");
 
   // メニューを開いている間に押したとき、画面がスクロールしないようにするキー（矢印キーと Space）
   const MENU_SCROLL_KEYS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "];
@@ -102,7 +112,8 @@
   function closeExportMenu() {
     exportMenuOpen = false;
     // 今選ばれているもの（ボタンなど）が、メニューの枠の中にあるときだけ外す
-    const active = document.activeElement;
+    // （/** @type … */ は VSCode 向けの書き方（JSDoc）。「画面の部品（HTMLElement）なので blur が使える」と教える。動きは変わらない）
+    const active = /** @type {HTMLElement | null} */ (document.activeElement);
     if (active && exportMenuArea && exportMenuArea.contains(active)) active.blur();
   }
 
@@ -218,7 +229,7 @@
     <!-- 書き出しのメニュー（MP3 書き出しの手順1：［MusicXML 書き出し］［PDF 出力］をここにまとめた） -->
     <!-- ボタンとメニューを1つの枠で包んで、メニューをボタンのすぐ下に出す -->
     <div class="menu-area" bind:this={exportMenuArea}>
-      <button class:open={exportMenuOpen} onclick={toggleExportMenu} title="MusicXML・PDF の書き出しを選ぶ" aria-haspopup="menu" aria-expanded={exportMenuOpen}> 書き出し ▾ </button>
+      <button class:open={exportMenuOpen} onclick={toggleExportMenu} title="MusicXML・PDF・MP3 の書き出しを選ぶ" aria-haspopup="menu" aria-expanded={exportMenuOpen}> 書き出し ▾ </button>
 
       {#if exportMenuOpen}
         <div class="menu" role="menu">
@@ -229,6 +240,15 @@
           <!-- PDF（今までの［PDF 出力］と同じ動き） -->
           <button role="menuitem" onclick={() => chooseExport(onprint)} title="印刷の画面を開く（送り先で「PDF に保存」を選ぶと PDF になる）">
             <span class="item-name">PDF（印刷）</span><span class="item-hint">⌘P</span>
+          </button>
+          <!-- 音声（MP3）（MP3 書き出しの手順3）：再生できないときは押せない（右に理由を書く） -->
+          <button
+            role="menuitem"
+            disabled={!canPlay}
+            onclick={() => chooseExport(onexportaudio)}
+            title="今の再生の設定（音の種類・パートの音量・メトロノーム）どおりの音を、MP3 のファイル（タイトル.mp3）にする"
+          >
+            <span class="item-name">音声（MP3）</span><span class="item-hint">{audioHint}</span>
           </button>
         </div>
       {/if}
@@ -352,9 +372,14 @@
     text-align: left;
     cursor: pointer;
   }
-  .menu button:hover,
+  .menu button:hover:not(:disabled),
   .menu button:focus-visible {
     background: #eef2ff; /* うすい青 */
+  }
+  /* 押せない項目（MP3 書き出しの手順3：楽器の音の読み込み中など）：文字をうすくして、押せない印のカーソルにする */
+  .menu button:disabled {
+    color: #9ca3af; /* うすいグレー */
+    cursor: not-allowed;
   }
   .item-hint {
     font-size: 12px;

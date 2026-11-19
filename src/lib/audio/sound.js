@@ -27,6 +27,9 @@
 //   ・楽器の音の読み込みは buildInstrumentSet に分けた（どの音の仕組みの上で読み込むかを渡せる）
 //   ・手順3の MP3 書き出しでは、鳴らさない音の仕組み（OfflineAudioContext）を渡して、全部の音を一度に作る予定
 //     （予約係はスピーカー用の再生だけで使う）
+// （MP3 書き出しの手順3：renderEvents を足した。鳴らさない音の仕組みで、曲を最後まで音のデータにする）
+//   ・MP3 に変えるのは mp3.js（ここでは音のデータ（AudioBuffer）を作るところまで）
+//   ・scheduleNote は、止める関数を返すだけにした（stopFunctions に入れるのは、再生のときの scheduleEvents）
 // ==========================================================
 
 import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
@@ -551,17 +554,14 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
   const instruments = currentInstruments();
   const type = soundType;
 
-  // グリッサンドの音（ステップ11-5b）
-  // ・電子音：分けずに1つの音のまま鳴らし、playSynth の中で高さをなめらかに変える
-  // ・楽器の音：録音の音は鳴らしたあとで高さを変えられないので、半音ずつのかけらに分ける
-  // （ステップ18-3：先に、書いた高さを鳴る高さに直す。コントラバスは1オクターブ下げる）
-  const sounding = events.map(soundingEvent);
-  const list = type === "synth" ? sounding : sounding.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
+  // 鳴る高さに直し、楽器の音ならグリッサンドを半音ずつのかけらに分ける（MP3 書き出しの手順3：soundingList に分けた）
+  const list = soundingList(events, type);
 
   // 音を、予約待ちの列に入れる（まだ予約しない）
+  // （MP3 書き出しの手順3：scheduleNote は止める関数を返すようにしたので、ここで stopFunctions に入れる）
   const items = list.map((event) => ({
     time: startTime + event.startTick * tickSeconds, // 鳴らし始める時刻
-    schedule: () => scheduleNote(event, startTime, tickSeconds, type, instruments),
+    schedule: () => stopFunctions.push(scheduleNote(event, startTime, tickSeconds, type, instruments)),
   }));
 
   // メトロノームのクリックも、予約待ちの列に入れる（ステップ12-4a）
@@ -579,6 +579,22 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
 }
 
 // ----------------------------------------------------------
+// 関数：soundingList
+// 鳴らす音の一覧を、実際に予約する形に直す（MP3 書き出しの手順3：scheduleEvents の中にあった処理を分けた）
+//   events … 鳴らす音の一覧（buildEvents で作ったもの。高さは楽譜に書いた高さ）
+//   type   … 音の種類（"synth"・"instrument"・"instrumentB"）
+// ・書いた高さを鳴る高さに直す（コントラバスは1オクターブ下げる）（ステップ18-3）
+// ・グリッサンドの音（ステップ11-5b）
+//   電子音：分けずに1つの音のまま鳴らし、playSynth の中で高さをなめらかに変える
+//   楽器の音：録音の音は鳴らしたあとで高さを変えられないので、半音ずつのかけらに分ける
+// 戻り値：直した音の一覧
+// ----------------------------------------------------------
+function soundingList(events, type) {
+  const sounding = events.map(soundingEvent);
+  return type === "synth" ? sounding : sounding.flatMap((event) => (event.glissTo ? glissandoPieces(event) : [event]));
+}
+
+// ----------------------------------------------------------
 // 関数：scheduleNote
 // 音を1つ予約する（タブレットで音が途切れるのを直した手直し：scheduleEvents の中にあった処理を分けた）
 //   event       … 鳴らす音（鳴る高さに直したもの）
@@ -588,7 +604,9 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
 //   instruments … 読み込んだ楽器の音（電子音のときは null）
 //   context     … 音を作る仕組み（省略したら、スピーカー用の仕組み）（MP3 書き出しの手順2）
 //                 楽器の音は、読み込んだときの仕組みで鳴るので、電子音のときだけ使う
-// 止めるための関数は stopFunctions に入れる
+// 戻り値：途中で止めるための関数
+// （MP3 書き出しの手順3：前は中で stopFunctions に入れていたが、返すだけにした。
+//   再生のときは呼んだ側（scheduleEvents）が stopFunctions に入れる。MP3 を作るときは止めないので入れない）
 // ----------------------------------------------------------
 function scheduleNote(event, startTime, tickSeconds, type, instruments, context = null) {
   const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
@@ -598,8 +616,7 @@ function scheduleNote(event, startTime, tickSeconds, type, instruments, context 
   if (type === "synth") {
     // グリッサンドなら、すべる先の高さと、すべり始める時刻も渡す（ステップ11-5b）
     const glide = event.glissTo ? { pitch: event.glissTo, startTime: startTime + glissStartTick(event) * tickSeconds } : null;
-    stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide, context));
-    return;
+    return playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide, context);
   }
 
   // 楽器の音：つなげる音（スラーの中・テヌート）は、いつもの余韻のまま次の音に重ねて、なめらかにする
@@ -627,7 +644,64 @@ function scheduleNote(event, startTime, tickSeconds, type, instruments, context 
     duration: soundDuration,
     ampRelease: release,
   });
-  stopFunctions.push(stop);
+  return stop;
+}
+
+// ----------------------------------------------------------
+// MP3 書き出しのための設定（MP3 書き出しの手順3）
+// ----------------------------------------------------------
+// 作る音のデータの、1秒あたりのこまかさ（CD・MP3 でふつうの 44100）
+const RENDER_SAMPLE_RATE = 44100;
+// 作る音のデータのチャンネルの数（2 = ステレオ）
+const RENDER_CHANNELS = 2;
+// 曲の頭に入れる、ほんの少しの無音（秒）（最初の音の立ち上がりが切れないように）
+const RENDER_LEAD = 0.05;
+// 曲の終わりに残す、最後の音の余韻（秒）
+const RENDER_TAIL = 1;
+
+// ----------------------------------------------------------
+// 関数：renderEvents
+// 鳴らす音の一覧を、スピーカーで鳴らさずに、最後まで音のデータ（AudioBuffer）にする（MP3 書き出しの手順3）
+//   events      … 鳴らす音の一覧（buildEvents で作ったもの）
+//   totalTicks  … 最後までの長さ（ティック）
+//   tickSeconds … 1ティックが何秒か
+//   clicks      … メトロノームのクリックの一覧（カウントインも含む。入れないときは空の配列）
+//   clickVolume … クリックの音量（0〜100）
+// 音の種類は、今選んでいるもの（楽器の音A／楽器の音B／電子音）で作る
+// 流れ：
+//   1. 鳴らさない音の仕組み（OfflineAudioContext）を、曲の長さ＋前後の余白の分だけ作る
+//   2. 楽器の音なら、その仕組みの上に楽器を読み込む（一度読み込んだ録音はブラウザに残っているので、速く終わる）
+//   3. 全部の音とクリックを、一度に予約する（予約係は使わない。鳴らさないので、計算が追いつかない心配がないため）
+//   4. 最後まで音を作る（startRendering。曲の長さを待たずに、できるだけ速く作る）
+// 戻り値：作った音のデータ（AudioBuffer）を返す Promise
+//         楽器の音を選んでいて、スピーカー用の読み込みがまだ終わっていないときは、失敗（エラー）にする
+// ----------------------------------------------------------
+export async function renderEvents(events, totalTicks, tickSeconds, clicks = [], clickVolume = 70) {
+  // 始めたときの音の種類で、最後まで作る（途中で上のバーを切り替えても変えない）
+  const type = soundType;
+  if (type !== "synth" && !instrumentsByType[type]) {
+    throw new Error("楽器の音の読み込みが終わっていません");
+  }
+
+  // 1. 鳴らさない音の仕組みを作る（長さは「サンプルの数」で決める）
+  const seconds = RENDER_LEAD + totalTicks * tickSeconds + RENDER_TAIL;
+  const length = Math.ceil(seconds * RENDER_SAMPLE_RATE);
+  const ctx = new OfflineAudioContext(RENDER_CHANNELS, length, RENDER_SAMPLE_RATE);
+
+  // 2. 楽器の音なら、この仕組みの上に楽器を読み込む（電子音は読み込みがいらない）
+  const instruments = type === "synth" ? null : await buildInstrumentSet(ctx, KITS[type]);
+
+  // 3. 全部の音とクリックを予約する（頭の時刻は RENDER_LEAD 秒）
+  const startTime = RENDER_LEAD;
+  soundingList(events, type).forEach((event) => {
+    scheduleNote(event, startTime, tickSeconds, type, instruments, ctx);
+  });
+  clicks.forEach((click) => {
+    playClick(startTime + click.startTick * tickSeconds, click.strong, clickVolume, ctx);
+  });
+
+  // 4. 最後まで音を作る
+  return await ctx.startRendering();
 }
 
 // ----------------------------------------------------------
