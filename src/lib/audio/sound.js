@@ -20,6 +20,13 @@
 //     長い曲・4パートの曲では数が多くなり、タブレットでは計算が追いつかずに「プチプチ」と途切れていた
 //   ・今は、音の一覧を「予約待ちの列」に入れておき、予約係が SCHEDULE_INTERVAL 秒ごとに起きて、
 //     今から SCHEDULE_AHEAD 秒先までの音だけを予約する（音の仕組みの中にいる音が、いつも少しだけになる）
+// （MP3 書き出しの手順2：音を作る仕組み（AudioContext）を、外から渡せるようにした下準備。鳴り方は変えていない）
+//   ・電子音（playSynth）・メトロノームのクリック（playClick）・楽譜の音1つの予約（scheduleNote）は、
+//     最後の引数 ctx で「どの音の仕組みで作るか」を受け取る。渡さなければ、今までどおりスピーカー用の仕組みを使う
+//   ・つなぎ先は、その仕組みのスピーカー口（ctx.destination）。スピーカー用のときは今までと同じ所
+//   ・楽器の音の読み込みは buildInstrumentSet に分けた（どの音の仕組みの上で読み込むかを渡せる）
+//   ・手順3の MP3 書き出しでは、鳴らさない音の仕組み（OfflineAudioContext）を渡して、全部の音を一度に作る予定
+//     （予約係はスピーカー用の再生だけで使う）
 // ==========================================================
 
 import { pitchToMidi, glissandoPieces, glissStartTick } from "../score/playback.js";
@@ -166,12 +173,14 @@ function currentInstruments() {
 //   instrument  … 楽器（"violin" など）
 //   pizz        … true ならピチカートの録音
 //   midi        … 鳴らす高さ（MIDI の番号。鳴る高さに直したもの）
+//   type        … 音の種類（"instrument"・"instrumentB"。省略したら今選んでいるもの）（MP3 書き出しの手順2）
+//                 （再生を始めたときの音の種類で決めるため。途中で切り替えても、その回の再生と同じ録音のセットで調べる）
 // ・録音が無音になっている高さ（SILENT_FROM）は、チェロの録音で鳴らす
 // ・読み込んでいない楽器（ふつうはない）も、チェロの録音で鳴らす（止まらないようにするため）
 // ----------------------------------------------------------
-function samplerFor(instruments, instrument, pizz, midi) {
+function samplerFor(instruments, instrument, pizz, midi, type = soundType) {
   if (pizz) return instruments.pizz;
-  const silentFrom = SILENT_FROM[KITS[soundType]]?.[instrument];
+  const silentFrom = SILENT_FROM[KITS[type]]?.[instrument];
   if (silentFrom !== undefined && midi >= silentFrom) return instruments.cello;
   return instruments[instrument] ?? instruments.cello;
 }
@@ -256,8 +265,59 @@ function loopDataUrl(name) {
 }
 
 // ----------------------------------------------------------
+// 関数：buildInstrumentSet
+// 決めた音の仕組み（ctx）の上で、バイオリン・ビオラ・チェロ・コントラバスと、ピチカートの録音した音を読み込む
+// （MP3 書き出しの手順2：loadInstruments の中身をここに分けた。中身は今までと同じ）
+//   ctx … 音の仕組み（スピーカー用の AudioContext。手順3では、鳴らさない音の仕組み（OfflineAudioContext）も渡す）
+//   kit … 録音のセットの名前（"FluidR3_GM" か "MusyngKite"）
+// 戻り値：全部の読み込みが終わったら、{ violin: …, viola: …, cello: …, contrabass: …, pizz: … } を返す Promise
+// ----------------------------------------------------------
+async function buildInstrumentSet(ctx, kit) {
+  // smplr はブラウザの中でしか動かないので、ここで読み込む
+  const { Soundfont } = await import("smplr");
+
+  // 4つの楽器をいっしょに読み込み始める（ステップ18-3：コントラバスを追加）
+  const loaded = {};
+  const waits = Object.entries(SOUNDFONT_NAMES).map(([key, name]) => {
+    // 読み込みの設定
+    const options = {
+      instrument: name,
+      kit: kit, // 録音のセット（"FluidR3_GM" か "MusyngKite"。音の感じが違う）
+      extraGain: extraGainFor(kit, key), // 音の種類ごとの音量合わせ（ステップ13-5）
+      // くり返しの情報を読み込む（録音より長い音を、録音の一部をくり返してのばすため）
+      // ・録音はどの音も 3.1 秒しかないので、読み込まないと、それより長い音が途中で消える
+      loadLoopData: true,
+    };
+    // 楽器の音B（MusyngKite）は、自分で作ったくり返しの情報を使う（ステップ12-2）
+    // （いつもの情報だと、くり返す範囲が短くて「ラララ」と聞こえたため）
+    if (kit === "MusyngKite") {
+      options.loopDataUrl = loopDataUrl(name);
+    }
+    const instrument = Soundfont(ctx, options);
+    loaded[key] = instrument;
+    return instrument.ready; // 読み込みが終わるのを待つ
+  });
+
+  // ピチカートの音も読み込む（ステップ6-3c）
+  // はじいた音は自然に消えていく音なので、くり返しの情報は読み込まない（読み込むと、ずっと鳴り続けてしまう）
+  const pizzInstrument = Soundfont(ctx, {
+    instrument: PIZZ_SOUNDFONT_NAME,
+    kit: kit,
+    extraGain: extraGainFor(kit, "pizz"), // 音の種類ごとの音量合わせ（ステップ13-5）
+    loadLoopData: false,
+  });
+  loaded.pizz = pizzInstrument;
+  waits.push(pizzInstrument.ready);
+
+  // 全部の読み込みが終わるのを待ってから返す（途中の楽器で鳴らさないため）
+  await Promise.all(waits);
+  return loaded;
+}
+
+// ----------------------------------------------------------
 // 関数：loadInstruments
 // バイオリン・ビオラ・チェロ・コントラバスと、ピチカートの録音した音を、インターネットから読み込む
+// （スピーカー用の音の仕組みの上で読み込む。中身は buildInstrumentSet）（MP3 書き出しの手順2）
 //   type … どちらの楽器の音を読み込むか（"instrument"：楽器の音A、"instrumentB"：楽器の音B）（ステップ12-2）
 // （同じ type で2回目からは同じ Promise を返す。読み込みは1回だけ）
 // 戻り値：読み込みが終わったら完了する Promise
@@ -269,45 +329,7 @@ export function loadInstruments(type = "instrument") {
   const kit = KITS[type];
 
   const loading = (async () => {
-    // smplr はブラウザの中でしか動かないので、ここで読み込む
-    const { Soundfont } = await import("smplr");
-    const ctx = getAudioContext();
-
-    // 4つの楽器をいっしょに読み込み始める（ステップ18-3：コントラバスを追加）
-    const loaded = {};
-    const waits = Object.entries(SOUNDFONT_NAMES).map(([key, name]) => {
-      // 読み込みの設定
-      const options = {
-        instrument: name,
-        kit: kit, // 録音のセット（"FluidR3_GM" か "MusyngKite"。音の感じが違う）
-        extraGain: extraGainFor(kit, key), // 音の種類ごとの音量合わせ（ステップ13-5）
-        // くり返しの情報を読み込む（録音より長い音を、録音の一部をくり返してのばすため）
-        // ・録音はどの音も 3.1 秒しかないので、読み込まないと、それより長い音が途中で消える
-        loadLoopData: true,
-      };
-      // 楽器の音B（MusyngKite）は、自分で作ったくり返しの情報を使う（ステップ12-2）
-      // （いつもの情報だと、くり返す範囲が短くて「ラララ」と聞こえたため）
-      if (kit === "MusyngKite") {
-        options.loopDataUrl = loopDataUrl(name);
-      }
-      const instrument = Soundfont(ctx, options);
-      loaded[key] = instrument;
-      return instrument.ready; // 読み込みが終わるのを待つ
-    });
-
-    // ピチカートの音も読み込む（ステップ6-3c）
-    // はじいた音は自然に消えていく音なので、くり返しの情報は読み込まない（読み込むと、ずっと鳴り続けてしまう）
-    const pizzInstrument = Soundfont(ctx, {
-      instrument: PIZZ_SOUNDFONT_NAME,
-      kit: kit,
-      extraGain: extraGainFor(kit, "pizz"), // 音の種類ごとの音量合わせ（ステップ13-5）
-      loadLoopData: false,
-    });
-    loaded.pizz = pizzInstrument;
-    waits.push(pizzInstrument.ready);
-
-    await Promise.all(waits);
-
+    const loaded = await buildInstrumentSet(getAudioContext(), kit);
     // 全部終わってから使えるようにする（途中の楽器で鳴らさないため）
     instrumentsByType[type] = loaded;
   })();
@@ -351,10 +373,12 @@ export function pitchToFrequency(pitch) {
 //   pluck     … true なら、はじいたような音（ピチカート）にする（ステップ6-3c）
 //   glide     … グリッサンドですべるときだけ { pitch: 行く先の高さ, startTime: すべり始める時刻 }（ステップ11-5b）
 //               すべり始める時刻から音の終わりまで、周波数をなめらかに変える（すべらないときは null）
+//   context   … 音を作る仕組み（省略したら、スピーカー用の仕組み）（MP3 書き出しの手順2）
 // 戻り値：途中で止めるための関数
 // ----------------------------------------------------------
-function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluck = false, glide = null) {
-  const ctx = resumeAudio();
+function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluck = false, glide = null, context = null) {
+  // 仕組みを渡されなければ、スピーカー用の仕組みを使う（一時停止していたら再開する）（MP3 書き出しの手順2）
+  const ctx = context ?? resumeAudio();
   const start = startTime ?? ctx.currentTime;
   // ピチカートは、楽譜の長さより早く自然に消える（長くても PIZZ_SYNTH_DECAY 秒まで）
   const end = pluck ? start + Math.min(duration, PIZZ_SYNTH_DECAY) : start + duration;
@@ -399,7 +423,8 @@ function playSynth(pitch, duration = 0.5, startTime = null, velocity = 100, pluc
     gain.gain.linearRampToValueAtTime(0, end); // 最後に少しずつ小さくする
   }
 
-  // つなぐ：音のもと → フィルター → 音量 → スピーカー
+  // つなぐ：音のもと → フィルター → 音量 → その仕組みのスピーカー口（ctx.destination）
+  // （スピーカー用の仕組みならスピーカー、手順3の鳴らさない仕組みなら、作った音のデータへ行く）
   oscillator.connect(filter);
   filter.connect(gain);
   gain.connect(ctx.destination);
@@ -561,9 +586,11 @@ function scheduleEvents(events, clicks, startTime, tickSeconds, clickVolume) {
 //   tickSeconds … 1ティックが何秒か
 //   type        … 音の種類（"synth"・"instrument"・"instrumentB"）
 //   instruments … 読み込んだ楽器の音（電子音のときは null）
+//   context     … 音を作る仕組み（省略したら、スピーカー用の仕組み）（MP3 書き出しの手順2）
+//                 楽器の音は、読み込んだときの仕組みで鳴るので、電子音のときだけ使う
 // 止めるための関数は stopFunctions に入れる
 // ----------------------------------------------------------
-function scheduleNote(event, startTime, tickSeconds, type, instruments) {
+function scheduleNote(event, startTime, tickSeconds, type, instruments, context = null) {
   const time = startTime + event.startTick * tickSeconds; // 鳴らし始める時刻
   const duration = event.soundTicks * tickSeconds; // 鳴らす長さ（スタッカートなどは playback.js で決めてある）
 
@@ -571,7 +598,7 @@ function scheduleNote(event, startTime, tickSeconds, type, instruments) {
   if (type === "synth") {
     // グリッサンドなら、すべる先の高さと、すべり始める時刻も渡す（ステップ11-5b）
     const glide = event.glissTo ? { pitch: event.glissTo, startTime: startTime + glissStartTick(event) * tickSeconds } : null;
-    stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide));
+    stopFunctions.push(playSynth(event.pitch, duration, time, event.velocity, event.pizz, glide, context));
     return;
   }
 
@@ -590,7 +617,8 @@ function scheduleNote(event, startTime, tickSeconds, type, instruments) {
 
   // ピチカートなら、ピチカートの録音で鳴らす（ステップ6-3c）
   // 録音が無音になっている高さは、チェロの録音で鳴らす（ステップ18-3）
-  const sampler = samplerFor(instruments, event.instrument, event.pizz, pitchToMidi(event.pitch));
+  // （MP3 書き出しの手順2：無音の高さを調べる録音のセットは、この回の再生の音の種類 type で決める）
+  const sampler = samplerFor(instruments, event.instrument, event.pizz, pitchToMidi(event.pitch), type);
   const stop = sampler.start({
     note: pitchToMidi(event.pitch),
     velocity: event.velocity,
@@ -655,10 +683,12 @@ const CLICK_LENGTH = 0.06;
 //   time   … 鳴らす時刻（AudioContext の時計で）
 //   strong … true なら1拍目の高い音、false ならほかの拍の低い音
 //   volume … 音量（0〜100）
+//   context … 音を作る仕組み（省略したら、スピーカー用の仕組み）（MP3 書き出しの手順2）
 // 戻り値：途中で止めるための関数
 // ----------------------------------------------------------
-function playClick(time, strong, volume) {
-  const ctx = resumeAudio();
+function playClick(time, strong, volume, context = null) {
+  // 仕組みを渡されなければ、スピーカー用の仕組みを使う（一時停止していたら再開する）（MP3 書き出しの手順2）
+  const ctx = context ?? resumeAudio();
   const length = CLICK_LENGTH; // 鳴らす長さ（秒）。短い「ピッ」
 
   // 音のもと（なめらかな波）。1拍目は高く、ほかは低く
@@ -676,7 +706,7 @@ function playClick(time, strong, volume) {
   gain.gain.setValueAtTime(peak, time + 0.002 + CLICK_HOLD); // 大きいまま少しだけ鳴らす
   gain.gain.exponentialRampToValueAtTime(0.0001, time + length); // 0 にはできないので、とても小さい数まで下げる
 
-  // つなぐ：音のもと → 音量 → スピーカー
+  // つなぐ：音のもと → 音量 → その仕組みのスピーカー口（ctx.destination）（MP3 書き出しの手順2）
   oscillator.connect(gain);
   gain.connect(ctx.destination);
   oscillator.start(time);
