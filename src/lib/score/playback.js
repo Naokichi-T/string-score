@@ -22,12 +22,15 @@
 //   pizz: false,              // ピチカートで鳴らすか（pizz. から arco までの音なら true）
 //   velocity: 80              // 音の強さ（0〜127。強弱記号とアクセントから決める）
 // }
+// （テンポの言葉を増やした手直し b：Più mosso などの「急に速く・急に遅く」と、Tempo primo などの「曲の頭の速さに戻す」を、
+//   再生の速さに効かせるようにした（makeTempoWarp）。急に変える量は tempoWords.js の suddenTempoRate で決める）
 // ==========================================================
 
 import { measureTicks, measureLength, measureOffset, noteTicks, timeAt, keyAt, TICKS_PER_16TH, notePitches, hasDiamond, INSTRUMENTS, isAlternate } from "./model.js";
 import { HARMONIC_SOUNDS } from "./symbols.js";
 import { keyAlters } from "./accidentals.js";
 import { mixerOf, isAudible } from "./mixer.js";
+import { suddenTempoRate } from "./tempoWords.js"; // 急に速く・急に遅く で、速さに何倍をかけるか（テンポの言葉を増やした手直し b）
 
 // ----------------------------------------------------------
 // 強弱記号ごとの音の強さ（0〜127。MIDI と同じ決め方）
@@ -748,6 +751,15 @@ const WARP_STEPS = 16;
 //   ・範囲のあと：その速さのまま（a tempo かテンポ変更が来るまで）
 //   ・a tempo・テンポ変更：その小節のテンポ（tempoAt と同じもの）に戻る
 // （ステップ11-7a：小節を、くり返しをたどった順番（order）で並べる。くり返しで戻ったときは、1回目にその小節に来たときの速さに戻す）
+// （テンポの言葉を増やした手直し b：今の速さを、次の3つのかけ算で決めるようにした）
+//     今の速さ ＝ 直前の ♩= の速さ（tempo）× 急に変わった分（sudden）× rit.・accel. で変わった分（rate）
+//   ・♩= の変更                 … tempo をその数字に、sudden・rate を 1 に戻す
+//   ・曲の頭の速さに戻す（tempoPrimo：Tempo primo など）… tempo を曲の頭の ♩= に、sudden・rate を 1 に戻す
+//   ・a tempo                    … rate だけ 1 に戻す（急に変わった分は残す。meno mosso の中の rit. → a tempo なら meno mosso の速さへ）
+//   ・急に速く・急に遅く（faster・slower：Più mosso など）
+//                                … rit.・accel. で変わった分（rate）をいったん 1 に戻してから、sudden に倍率をかける
+//                                  （続けて書かれると重なる。例：Più mosso → Più mosso なら 1.15 × 1.15）
+//                                  （範囲で付けてあっても、範囲の頭の小節で急に変えるだけ（だんだん変えない））
 //   score        … 楽譜データ
 //   startMeasure … 再生を始める小節（ここを 0 ティックとして数える）
 //   order        … 鳴らす小節の順番（playOrder で作ったもの）
@@ -760,6 +772,7 @@ function makeTempoWarp(score, startMeasure, order) {
   // 細かい区切りごとの { from: 伸び縮みさせる前の始まり, warpedFrom: 伸び縮みさせたあとの始まり, factor: 倍率 }
   const segments = [];
   let tempo = score.tempo; // 今のテンポ（テンポ変更をたどる）
+  let sudden = 1; // 急に速く・急に遅く で変わった速さの割合（1 なら変わっていない）（テンポの言葉を増やした手直し b）
   let rate = 1; // rit.・accel. で変わった速さの割合（1 なら元の速さ）
   let gradual = null; // 今の rit.・accel. の範囲 { startTick, length, fromRate, toRate, to }（なければ null）
   let tick = 0; // 曲の頭から何ティック目か（伸び縮みさせる前）
@@ -770,7 +783,7 @@ function makeTempoWarp(score, startMeasure, order) {
   const sequence = [];
   for (let i = 0; i < startMeasure; i++) sequence.push(i);
   sequence.push(...order);
-  const firstVisit = new Map(); // 小節の番号 → 1回目にその小節に来たときの { tempo, rate }（くり返しで戻ったときに使う）
+  const firstVisit = new Map(); // 小節の番号 → 1回目にその小節に来たときの { tempo, sudden, rate }（くり返しで戻ったときに使う）
 
   sequence.forEach((i, s) => {
     const info = score.measures[i];
@@ -780,6 +793,7 @@ function makeTempoWarp(score, startMeasure, order) {
     if (s > 0 && i !== sequence[s - 1] + 1 && firstVisit.has(i)) {
       const saved = firstVisit.get(i);
       tempo = saved.tempo;
+      sudden = saved.sudden; // 急に変わった分も、1回目に来たときに戻す（テンポの言葉を増やした手直し b）
       rate = saved.rate;
       gradual = null;
     }
@@ -790,9 +804,30 @@ function makeTempoWarp(score, startMeasure, order) {
       rate = 1;
       gradual = null;
     }
+    // ♩= の変更では、急に変わった分も 1 に戻す（新しい数字の速さそのものにする）（テンポの言葉を増やした手直し b）
+    // （a tempo では戻さない：meno mosso の中で rit. → a tempo なら、meno mosso の速さに戻るため）
+    if (i > 0 && info.tempo !== undefined) sudden = 1;
+
+    // 曲の頭の速さに戻す（Tempo primo など）：曲の頭の ♩= にして、急に変わった分も rit.・accel. の分も 1 に戻す
+    // （テンポの言葉を増やした手直し b）
+    if (info.gradual === "tempoPrimo") {
+      tempo = score.tempo;
+      sudden = 1;
+      rate = 1;
+      gradual = null;
+    }
+
+    // 急に速く・急に遅く（Più mosso など）：rit.・accel. で変わった分をいったん戻してから、倍率をかける
+    // （倍率は、書いた文字の poco・molto などを見て決める。文字がなければ、ふつうの量）（テンポの言葉を増やした手直し b）
+    if (info.gradual === "faster" || info.gradual === "slower") {
+      sudden = sudden * suddenTempoRate(info.gradual, info.gradualText ?? "");
+      rate = 1;
+      gradual = null;
+    }
 
     // rit.・accel. の始まり：終わりの小節を探して、範囲の長さを数える
-    if (info.gradual) {
+    // （テンポの言葉を増やした手直し b：急に変わる・曲の頭に戻す の印は、上で済ませたので、ここでは範囲を作らない）
+    if (info.gradual && info.gradual !== "tempoPrimo" && info.gradual !== "faster" && info.gradual !== "slower") {
       let to = i;
       while (to < score.measures.length - 1 && !score.measures[to].gradualEnd) to = to + 1;
       let rangeLength = 0;
@@ -803,7 +838,7 @@ function makeTempoWarp(score, startMeasure, order) {
     }
 
     // 1回目に来たときの速さを覚えておく（この小節のテンポ変更などを当てたあと）
-    if (!firstVisit.has(i)) firstVisit.set(i, { tempo: tempo, rate: rate });
+    if (!firstVisit.has(i)) firstVisit.set(i, { tempo: tempo, sudden: sudden, rate: rate });
 
     // この小節を WARP_STEPS に分けて、分けた所ごとの倍率を決める（始める小節より前は、たどるだけ）
     if (s >= startMeasure) {
@@ -816,7 +851,8 @@ function makeTempoWarp(score, startMeasure, order) {
           const progress = (middle - gradual.startTick) / gradual.length;
           nowRate = gradual.fromRate + (gradual.toRate - gradual.fromRate) * progress;
         }
-        const factor = score.tempo / (tempo * nowRate);
+        // （テンポの言葉を増やした手直し b：急に変わった分 sudden もかける）
+        const factor = score.tempo / (tempo * sudden * nowRate);
         segments.push({ from: raw, warpedFrom: warped, factor: factor });
         raw = raw + step;
         warped = warped + step * factor;
