@@ -75,6 +75,8 @@
 //                            （1つの音符の中で始まって終わる松葉は、次の音符まで延ばす（ステップ15-6））
 //   休符には記号を付けない（このアプリの決まり。記号タブでも休符には付けられない）
 //   このアプリにない記号（トリルなど）は読まずに、種類ごとの数を知らせる
+// （テンポの言葉を増やした手直し a：言葉の表に新しく入れた「急に速く（faster）・急に遅く（slower）・曲の頭の速さに戻す（tempoPrimo）」も、
+//   いったん自由な文字（その小節だけ・点線なし）として読んで、文字を残すようにした（読み込みでの本格的な扱いは、手直し d で作る））
 // ==========================================================
 
 import { unzipSync } from "fflate";
@@ -1165,7 +1167,17 @@ function readTempoMarks(measureElements, score) {
             if (i === 0) return; // 1小節目の a tempo は意味がないので読まない
             closeOpen(i - 1);
             info.aTempo = true;
-          } else if (kind === "rit" || kind === "accel" || kind === "none" || (kind === null && hasDashes && !jumpWordKind(text))) {
+          } else if (
+            kind === "rit" ||
+            kind === "accel" ||
+            kind === "none" ||
+            // （テンポの言葉を増やした手直し a：急に速く・急に遅く・曲の頭の速さに戻す、も読む。
+            //   前は表で当たっても、ここに入らずに捨てられていた。再生での扱いは手直し b から効くようになる）
+            kind === "faster" ||
+            kind === "slower" ||
+            kind === "tempoPrimo" ||
+            (kind === null && hasDashes && !jumpWordKind(text))
+          ) {
             // テンポの印の言葉か、表にない言葉でも点線が付いているもの（D.C.・Fine などは除く）
             closeOpen(i - 1);
             info.gradual = kind ?? "none"; // 表にない言葉は「再生では変えない」
