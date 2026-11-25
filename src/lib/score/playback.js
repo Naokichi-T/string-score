@@ -644,20 +644,64 @@ export function graceLength(note, length) {
 //     （𝄌 がないときは、飛ばずにそのまま進む）
 //   ・戻る前の Fine・To Coda は、何もせずにそのまま進む
 //     例：1 2 3 [𝄋 4] 5 [6 To Coda] 7 [8 D.S. al Coda] [𝄌 9] 10 → 1 2 3 4 5 6 7 8 4 5 6 9 10
+// （区間リピートでも記号をたどる手直し：前は範囲の中をまっすぐ並べていたので、「全区間」でも :‖ で戻らなかった）
+//   区間リピートのとき（endMeasure を指定したとき）も、範囲の中では上と同じように記号をたどる
+//   ・:‖・D.C.・D.S.・To Coda の飛ぶ先が範囲の中 → 飛ぶ
+//   ・飛ぶ先が範囲の外 → 飛ばずにそのまま進む
+//   ・1番かっこの終わりの :‖ が範囲の外へ戻るときは、1番かっこを飛ばして2番かっこへ進む
+//     例：‖: 4 … 10 [1. 11 :‖] [2. 12] 13 で 5〜13小節目 → 5 … 10 12 13
+//     （ただし2番かっこが範囲の外なら、1番かっこを弾く。例：5〜11小節目 → 5 … 11）
+//   ・範囲の終わりの小節より先へ進んだら、そこで終わり（区間リピートの1回分の終わり）
+//     例：「全区間」なら、区間リピートを切って再生したときと同じ順番になる
 //   score        … 楽譜データ
 //   startMeasure … 何小節目から鳴らすか（そこから順番を作る。前の ‖: へ戻ることもある）
-//   endMeasure   … 何小節目まで鳴らすか（区間リピートのとき）。指定したときは、くり返しはたどらず、まっすぐ並べる
+//   endMeasure   … 何小節目まで鳴らすか（区間リピートのとき）。省略したら最後の小節まで
+//   rangeStart   … 区間リピートの範囲の頭の小節（省略したら startMeasure）
+//                  再生中に範囲の途中から鳴らし直すときも、範囲の頭までは :‖ で戻れるようにするため
 // 戻り値：小節の番号の配列
 // ----------------------------------------------------------
-export function playOrder(score, startMeasure, endMeasure = null) {
+export function playOrder(score, startMeasure, endMeasure = null, rangeStart = null) {
   const order = [];
-  // 区間リピート：範囲の中は、楽譜のくり返しをたどらずに、まっすぐ並べる
-  if (endMeasure !== null) {
-    for (let i = startMeasure; i <= endMeasure; i++) order.push(i);
-    return order;
-  }
-
   const measures = score.measures;
+  // 飛んでよい範囲（firstAllowed〜lastAllowed）。区間リピートでないときは曲全体
+  const lastAllowed = endMeasure ?? measures.length - 1;
+  const firstAllowed = endMeasure === null ? 0 : (rangeStart ?? startMeasure);
+
+  // ----------------------------------------------------------
+  // 関数：canJump（playOrder の中だけで使う）
+  // その小節へ飛んでよいか（飛んでよい範囲の中か）を返す
+  //   target … 飛ぶ先の小節の番号
+  // 戻り値：true なら飛んでよい
+  // ----------------------------------------------------------
+  const canJump = (target) => target >= firstAllowed && target <= lastAllowed;
+
+  // ----------------------------------------------------------
+  // 関数：repeatTarget（playOrder の中だけで使う）
+  // :‖ の小節から戻る先の小節を探す
+  // 前へさかのぼって ‖: を探す（別の :‖ に当たったら、そのすぐあと。どちらもなければ曲の頭）
+  //   at … :‖ のある小節の番号
+  // 戻り値：戻る先の小節の番号
+  // ----------------------------------------------------------
+  const repeatTarget = (at) => {
+    for (let k = at; k >= 0; k--) {
+      if (measures[k].repeatStart) return k;
+      if (k < at && measures[k].repeatEnd) return k + 1;
+    }
+    return 0;
+  };
+
+  // ----------------------------------------------------------
+  // 関数：endingLast（playOrder の中だけで使う）
+  // かっこの始まりの小節から、そのかっこの終わりの小節を探す
+  //   at … かっこの始まりの小節の番号
+  // 戻り値：かっこの終わりの小節の番号（終わりの印がなければ最後の小節）
+  // ----------------------------------------------------------
+  const endingLast = (at) => {
+    let end = at;
+    while (end < measures.length - 1 && !measures[end].endingEnd) end = end + 1;
+    return end;
+  };
+
   const repeated = new Set(); // もうくり返した :‖ の小節（2回目は戻らない）
   let pass = 1; // 今が何回目か（1番・2番かっこで使う）（ステップ11-7b）
   let jumpedTo = null; // :‖ で戻った先の小節（そこの ‖: では、回数を1に戻さない）
@@ -667,7 +711,8 @@ export function playOrder(score, startMeasure, endMeasure = null) {
   const segnoMeasure = measures.findIndex((info) => info.segno);
   const codaMeasure = measures.findIndex((info) => info.coda);
   let i = startMeasure;
-  while (i < measures.length) {
+  // 範囲の終わりの小節より先へ進んだら終わり（区間リピートでないときは、最後の小節まで）
+  while (i <= lastAllowed) {
     const info = measures[i];
 
     // 前から進んできて ‖: に来た：新しいくり返しなので、1回目にする（ステップ11-7b）
@@ -675,11 +720,24 @@ export function playOrder(score, startMeasure, endMeasure = null) {
     if (info.repeatStart && i !== jumpedTo && !jumped) pass = 1;
     jumpedTo = null;
 
+    // 区間リピートで、このかっこの終わりの :‖ が範囲の外へ戻るとき：
+    // 戻れないので、このかっこを飛ばして、次のかっこ（2番かっこ）を弾く
+    // （次のかっこが範囲の外なら飛ばさない。範囲で選んだ小節が鳴らなくなるため）
+    if (info.ending && info.ending === pass && !jumped) {
+      const last = endingLast(i); // このかっこの終わりの小節
+      const next = last + 1; // 次のかっこの始まり（あれば）
+      const hasNext = next <= lastAllowed && measures[next].ending;
+      if (measures[last].repeatEnd && !repeated.has(last) && !canJump(repeatTarget(last)) && hasNext) {
+        repeated.add(last); // この :‖ はくり返したことにする
+        pass = pass + 1; // 2回目として、2番かっこを弾く
+        i = next;
+        continue;
+      }
+    }
+
     // その回と番号の違うかっこ：かっこの終わりの小節まで飛ばす（ステップ11-7b）
     if (info.ending && info.ending !== pass) {
-      let end = i;
-      while (end < measures.length - 1 && !measures[end].endingEnd) end = end + 1;
-      i = end + 1;
+      i = endingLast(i) + 1;
       continue;
     }
 
@@ -688,40 +746,37 @@ export function playOrder(score, startMeasure, endMeasure = null) {
     if (info.repeatEnd && !repeated.has(i) && !jumped) {
       repeated.add(i);
       // 戻る先を探す：前へさかのぼって ‖: を探す（別の :‖ に当たったら、そのすぐあと）
-      let target = 0;
-      for (let k = i; k >= 0; k--) {
-        if (measures[k].repeatStart) {
-          target = k;
-          break;
-        }
-        if (k < i && measures[k].repeatEnd) {
-          target = k + 1;
-          break;
-        }
+      const target = repeatTarget(i);
+      // 戻る先が範囲の中のときだけ戻る（区間リピートで、範囲の外へは戻らない）
+      if (canJump(target)) {
+        pass = pass + 1; // 次は2回目（ステップ11-7b）
+        jumpedTo = target;
+        i = target;
+        continue;
       }
-      pass = pass + 1; // 次は2回目（ステップ11-7b）
-      jumpedTo = target;
-      i = target;
-      continue;
     }
 
     // D.C.・D.S. で戻ったあと：Fine なら終わり、To Coda なら 𝄌 へ飛ぶ（ステップ11-7c）
+    // （𝄌 が範囲の外なら飛ばずにそのまま進む）
     if (jumped && info.fine) break;
-    if (jumped && info.toCoda && !codaJumped && codaMeasure >= 0) {
+    if (jumped && info.toCoda && !codaJumped && codaMeasure >= 0 && canJump(codaMeasure)) {
       codaJumped = true;
       i = codaMeasure;
       continue;
     }
 
     // D.C.・D.S.：まだ戻っていなければ、曲の頭か 𝄋 へ戻る（ステップ11-7c）
+    // （戻る先が範囲の外なら、D.C.・D.S. は無いものとしてそのまま進む）
     if (info.jump && !jumped) {
-      jumped = true;
-      pass = 2; // 戻ったあとは、いつも2回目として数える（かっこは2番だけ）
       const isSegno = info.jump.startsWith("ds");
       const target = isSegno && segnoMeasure >= 0 ? segnoMeasure : 0;
-      jumpedTo = target;
-      i = target;
-      continue;
+      if (canJump(target)) {
+        jumped = true;
+        pass = 2; // 戻ったあとは、いつも2回目として数える（かっこは2番だけ）
+        jumpedTo = target;
+        i = target;
+        continue;
+      }
     }
 
     // 2番かっこ（1番より後ろの番号のかっこ）を弾き終わったら、1回目に戻す（ステップ11-7b）
@@ -975,7 +1030,8 @@ function clipHighlight(h, cutStart, cutEnd) {
 //                  フェルマータは、鳴らさないパートのものも数える（ほかのパートも、その間は待つ）
 //   endMeasure   … 何小節目まで鳴らすか（0 から数える。この小節も鳴らす。省略したら最後の小節まで）（ステップ12-5a）
 //                  区間リピートで、範囲の分だけ作るのに使う。範囲の外へのタイは、範囲の終わりで切る
-//                  （ステップ11-7a：省略したときは、楽譜のくり返しをたどる。指定したときは、範囲をまっすぐ並べる）
+//                  （ステップ11-7a：省略したときは、楽譜のくり返しをたどる）
+//                  （区間リピートでも記号をたどる手直し：指定したときも、範囲の中では楽譜のくり返しをたどる）
 // 戻り値：{ events: 鳴らす音の一覧（鳴り始める順）, totalTicks: 最後までの長さ（ティック）, highlights: 緑にする音符の一覧,
 //          measureStarts: 小節ごとの始まりの時刻 }
 //   highlights の1つ分：{ part, measure, note, startTick, endTick }（その音符が鳴っている間 = startTick 以上 endTick 未満）
@@ -994,10 +1050,14 @@ function clipHighlight(h, cutStart, cutEnd) {
 //                  この2つの外の音・緑・クリック・フェルマータは切り落とし、startOffset の所が 0 ティックになるようにずらす
 //                  ・開始点より前に始まって、開始点でもまだ鳴っている音（ほかのパートの長い音など）は、開始点から鳴らす
 //                  ・終了点をはみ出す音（タイなど）は、終了点で切る
+//                  （区間リピートでも記号をたどる手直し：最後に鳴らす小節が終わりの小節でないとき
+//                    （1番かっこで終わる範囲など）は、終了点で切らずに、最後の小節の終わりまで鳴らす）
+//   rangeStart   … 区間リピートの範囲の頭の小節（省略したら startMeasure）（区間リピートでも記号をたどる手直し）
+//                  範囲の途中から鳴らし直すときに、範囲の頭まで :‖ で戻れるようにするため
 // ----------------------------------------------------------
-export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null, startOffset = 0, endOffset = null) {
-  // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときは範囲をまっすぐ）
-  const order = playOrder(score, startMeasure, endMeasure);
+export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null, startOffset = 0, endOffset = null, rangeStart = null) {
+  // 鳴らす小節の順番（ステップ11-7a：くり返しをたどる。区間リピートのときも、範囲の中でくり返しをたどる）
+  const order = playOrder(score, startMeasure, endMeasure, rangeStart);
   // let：あとで、鳴らすパート・緑にするパートの分だけに入れ替えるため（ステップ12-4a2）
   let events = [];
   let highlights = []; // 緑にする音符の一覧（ステップ6-2）
@@ -1018,7 +1078,10 @@ export function buildEvents(score, startMeasure, mixer = {}, endMeasure = null, 
   //   cutEnd   … 最後の小節の頭から endOffset 進んだ所（endOffset が null なら、最後の小節の終わり）
   const cutStart = startOffset;
   const lastMeasure = order[order.length - 1];
-  const cutEnd = endOffset === null ? totalTicks : totalTicks - measureLength(score, lastMeasure) + endOffset;
+  // 終了点で切るのは、最後に鳴らす小節が終わりの小節のときだけ（区間リピートでも記号をたどる手直し）
+  // （例：:‖ で戻ったあと、終わりの小節が1番かっこで飛ばされたときは、別の小節の途中で切らない）
+  const useEndOffset = endOffset !== null && lastMeasure === endMeasure;
+  const cutEnd = useEndOffset ? totalTicks - measureLength(score, lastMeasure) + endOffset : totalTicks;
   // 切り落とす所があるか（ないときは、今までとまったく同じ動きにする）
   const clipping = cutStart > 0 || cutEnd < totalTicks;
 

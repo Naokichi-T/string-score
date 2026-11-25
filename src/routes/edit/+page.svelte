@@ -524,7 +524,8 @@
   function startRepeat(repeat, firstTicks, tickSeconds) {
     // 2回目からは、いつも範囲の頭から終わりまで（カウントインなし）
     // （区間リピートを音符から音符までにする：開始点〜終了点で切る）
-    const result = buildEvents(score, repeat.start, mixer, repeat.end, repeat.startOffset, repeat.endOffset);
+    // （区間リピートでも記号をたどる手直し：範囲の頭 repeat.start も渡す。範囲の中の :‖・D.S. などをたどる）
+    const result = buildEvents(score, repeat.start, mixer, repeat.end, repeat.startOffset, repeat.endOffset, repeat.start);
     repeatRange = repeat;
     repeatPlan = {
       firstTicks: firstTicks,
@@ -2250,7 +2251,8 @@
     const endOffset = repeat ? repeat.endOffset : null;
 
     // 楽譜を、鳴らす音の一覧に直す（「再生」タブの設定も渡す。くり返すときは範囲の終わりまで）
-    let result = buildEvents(score, startMeasure, mixer, repeat ? repeat.end : null, startOffset, endOffset);
+    // （区間リピートでも記号をたどる手直し：範囲の頭も渡す。範囲の途中から鳴らし直しても、範囲の頭までは :‖ で戻れる）
+    let result = buildEvents(score, startMeasure, mixer, repeat ? repeat.end : null, startOffset, endOffset, repeat ? repeat.start : null);
     // カウントインが入っていれば、前に1小節ぶん足す（ステップ12-4b）
     // （小節の途中から始めるときは、1小節数えてから始める所まで続けて数える）
     let countInClicks = [];
